@@ -4,17 +4,23 @@
 import { z } from "zod";
 
 /**
- * Starts with a letter or digit, then letters, digits, ".", "_" or "-"; at most 128 chars.
- * This excludes "/", "\", ":", "..", leading dots, spaces and control characters on every OS.
+ * Lowercase only: starts with a-z or 0-9, then a-z, 0-9, ".", "_" or "-"; at most 128 chars.
+ * This excludes "/", "\\", ":", "..", leading dots, spaces and control characters on every OS.
+ *
+ * Lowercase-only is the case policy: Windows and default macOS filesystems are
+ * case-insensitive, so "ch-Test" and "ch-test" would be the same file there. Rejecting
+ * uppercase means two distinct accepted IDs can never map to the same file, on any OS.
  */
-const PERSISTED_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+const PERSISTED_ID = /^[a-z0-9][a-z0-9._-]{0,127}$/;
 
 // Device names Windows refuses as file names, with or without an extension.
 const WINDOWS_RESERVED = /^(con|prn|aux|nul|com[0-9]|lpt[0-9])(\..*)?$/i;
 
 export function persistedIdProblem(value: string): string | undefined {
   if (!PERSISTED_ID.test(value)) {
-    return "must be 1–128 characters of letters, digits, '.', '_' or '-', starting with a letter or digit";
+    return /[A-Z]/.test(value)
+      ? "must be lowercase (file names are case-insensitive on Windows and macOS)"
+      : "must be 1–128 characters of lowercase letters, digits, '.', '_' or '-', starting with a letter or digit";
   }
   if (WINDOWS_RESERVED.test(value)) return "is a reserved device name on Windows";
   if (value.endsWith(".")) return "must not end with '.'";
