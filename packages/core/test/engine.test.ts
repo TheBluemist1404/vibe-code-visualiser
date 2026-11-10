@@ -30,8 +30,8 @@ const change = (ops: ProposedModelChange["operations"], over: Partial<ProposedMo
 test("the spec's seven-day timeout change applies at rev-1 and produces rev-2", () => {
   const e = engine();
   const r = e.propose(timeoutChange(), owner);
-  assert.equal(r.status, "applied", JSON.stringify(r.validationResults));
-  assert.equal(r.resultingRevision, "rev-2");
+  assert.equal(r.status, "applied", JSON.stringify(r.diagnostics));
+  assert.equal(r.record!.resultingRevision, "rev-2");
   const now = e.current();
   assert.equal(now.project.modelRevision, "rev-2");
   const tr = now.behaviors[0]!.transitions.find((t) => t.id === "tr-timeout")!;
@@ -44,11 +44,11 @@ test("AC13: a second change on the stale base revision is rejected, and a replay
   e.propose(timeoutChange(), owner);
   const stale = e.propose(change([{ type: "renameState", behaviorId: "beh-enrollment-approval", stateId: "st-pending", name: "Waiting" }]), owner);
   assert.equal(stale.status, "rejected");
-  assert.equal(stale.validationResults[0]!.code, "STALE_REVISION");
+  assert.equal(stale.diagnostics[0]!.code, "STALE_REVISION");
 
   const replay = e.propose(timeoutChange(), owner);
   assert.equal(replay.status, "rejected");
-  assert.equal(replay.validationResults[0]!.code, "DUPLICATE_CHANGE");
+  assert.equal(replay.diagnostics[0]!.code, "DUPLICATE_CHANGE");
   assert.equal(e.record("ch-timeout-01")!.status, "applied", "replay does not overwrite the original record");
   assert.equal(e.current().project.modelRevision, "rev-2");
 });
@@ -68,7 +68,7 @@ test("AC11: a change set applies atomically or not at all", () => {
     owner,
   );
   assert.equal(r.status, "rejected");
-  assert.ok(r.validationResults.some((d) => d.code === "UNKNOWN_REF"));
+  assert.ok(r.diagnostics.some((d) => d.code === "UNKNOWN_REF"));
   const now = e.current();
   assert.equal(now.project.modelRevision, "rev-1");
   assert.ok(!now.behaviors[0]!.states.some((s) => s.id === "st-withdrawn"), "the valid first op was not applied either");
@@ -78,21 +78,21 @@ test("AC12: an MCP agent can only propose; its change waits for a host-verified 
   const e = engine();
   const r = e.propose(timeoutChange(), mcpAgent);
   assert.equal(r.status, "pending");
-  assert.equal(r.proposerId, "agent:mcp-session-1");
+  assert.equal(r.record!.proposerId, "agent:mcp-session-1");
   assert.equal(e.current().project.modelRevision, "rev-1", "a pending proposal does not touch the approved snapshot");
 
   // The agent cannot approve its own change, even if it had approve rights.
   const self = e.approve("ch-timeout-01", { ...mcpAgent, permissions: ["model:propose", "model:approve"] });
   assert.equal(self.status, "denied");
-  assert.equal(self.validationResults[0]!.code, "SELF_APPROVAL");
+  assert.equal(self.diagnostics[0]!.code, "SELF_APPROVAL");
   const noRight = e.approve("ch-timeout-01", viewer);
   assert.equal(noRight.status, "denied");
   assert.equal(e.record("ch-timeout-01")!.status, "pending", "denied approval attempts leave the proposal pending");
 
   const ok = e.approve("ch-timeout-01", reviewer);
   assert.equal(ok.status, "applied");
-  assert.equal(ok.approverId, "user:reviewer");
-  assert.equal(ok.resultingRevision, "rev-2");
+  assert.equal(ok.record!.approverId, "user:reviewer");
+  assert.equal(ok.record!.resultingRevision, "rev-2");
 });
 
 test("AC12: callers cannot claim approval or identity inside the change payload", () => {
@@ -100,8 +100,8 @@ test("AC12: callers cannot claim approval or identity inside the change payload"
   const smuggled = { ...timeoutChange(), approverId: "user:hoang", status: "applied" };
   const r = e.propose(smuggled, mcpAgent);
   assert.equal(r.status, "rejected");
-  assert.ok(r.validationResults.every((d) => d.code === "SCHEMA"));
-  assert.equal(r.proposerId, "agent:mcp-session-1", "proposer always comes from the host context");
+  assert.ok(r.diagnostics.every((d) => d.code === "SCHEMA"));
+  assert.equal(r.record, undefined, "a malformed proposal creates no record");
 
   const denied = e.propose(timeoutChange(), viewer);
   assert.equal(denied.status, "denied");
@@ -113,7 +113,7 @@ test("AC13: approval revalidates against the current revision", () => {
   e.propose(change([{ type: "renameState", behaviorId: "beh-enrollment-approval", stateId: "st-pending", name: "Waiting" }]), owner); // now rev-2
   const r = e.approve("ch-timeout-01", reviewer);
   assert.equal(r.status, "rejected");
-  assert.equal(r.validationResults[0]!.code, "STALE_REVISION");
+  assert.equal(r.diagnostics[0]!.code, "STALE_REVISION");
   assert.equal(e.current().project.modelRevision, "rev-2");
 });
 
@@ -131,7 +131,7 @@ test("AC14: removing a referenced object is rejected unless the same change unli
   const e = engine();
   const blocked = e.propose(change([{ type: "removeObject", objectId: "st-rejected" }]), owner);
   assert.equal(blocked.status, "rejected");
-  assert.equal(blocked.validationResults[0]!.code, "REFERENCED");
+  assert.equal(blocked.diagnostics[0]!.code, "REFERENCED");
 
   const attr = e.propose(change([{ type: "removeObject", objectId: "attr-request-note" }]), owner);
   assert.equal(attr.status, "applied", "an unreferenced nested attribute can be removed");
@@ -146,12 +146,12 @@ test("AC14: removing a referenced object is rejected unless the same change unli
     ),
     owner,
   );
-  assert.equal(ok.status, "applied", JSON.stringify(ok.validationResults));
+  assert.equal(ok.status, "applied", JSON.stringify(ok.diagnostics));
   assert.ok(!e.current().behaviors[0]!.states.some((s) => s.id === "st-rejected"));
 
   const module = e.propose(change([{ type: "removeObject", objectId: "mod-notifications" }], { expectedRevision: "rev-3" }), owner);
   assert.equal(module.status, "rejected");
-  assert.equal(module.validationResults[0]!.code, "HAS_OWNED_OBJECTS", "no cascading deletion of owned objects");
+  assert.equal(module.diagnostics[0]!.code, "HAS_OWNED_OBJECTS", "no cascading deletion of owned objects");
 });
 
 test("AC10: a draft with unresolved references cannot be approved until they are fixed", () => {
@@ -162,7 +162,7 @@ test("AC10: a draft with unresolved references cannot be approved until they are
 
   const tooEarly = e.propose(change([{ type: "approveDraft" }]), owner);
   assert.equal(tooEarly.status, "rejected");
-  assert.equal(tooEarly.validationResults[0]!.code, "UNRESOLVED_IN_APPROVED");
+  assert.equal(tooEarly.diagnostics[0]!.code, "UNRESOLVED_IN_APPROVED");
 
   // Resolve the placeholder and approve in one atomic change. An agent may propose this...
   const fixAndApprove = [
@@ -174,7 +174,7 @@ test("AC10: a draft with unresolved references cannot be approved until they are
 
   // ...but only a principal with approve rights turns it into an approved snapshot.
   const done = e.approve("ch-approve-draft", reviewer);
-  assert.equal(done.status, "applied", JSON.stringify(done.validationResults));
+  assert.equal(done.status, "applied", JSON.stringify(done.diagnostics));
   assert.equal(e.current().project.status, "approved");
   assert.equal(checkModel(e.current()).diagnostics.length, 0);
 });

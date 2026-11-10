@@ -6,17 +6,17 @@ fixture from *IR v0 — Conceptual Specification* (Draft v0.2).
 
 ```
 packages/ir     IR types, shape schema (zod), reference index, validation, YAML load/dump, tree/graph projections
-packages/core   typed operations, ModelEngine (propose/approve), Memory/File stores, bindings, layout store
+packages/core   typed operations, ModelEngine (propose/approve), Memory/File stores with crash recovery, audit log, bindings, layout store
 apps/cli        thin CLI over the engine (no domain logic)
 examples/enrollment   model.rev-1.yaml (valid fixture), change.timeout.yaml (the spec's 7-day timeout change)
-docs/adr        decision records 0001–0003
+docs/adr        decision records 0001–0004
 ```
 
 Requires Node 22.18+ (runs TypeScript directly, no build step).
 
 ```sh
 npm install
-npm test            # 25 tests
+npm test            # 46 tests
 npm run typecheck
 npm run vcv -- validate examples/enrollment/model.rev-1.yaml
 npm run vcv -- init .vcv-store examples/enrollment/model.rev-1.yaml
@@ -47,6 +47,18 @@ npm run vcv -- show .vcv-store --tree
 | 16 | Layout edits never create revisions | core `AC16` |
 
 Not covered yet: detecting a divergent code change (needs the repository indexer, Slice 3).
+
+## Hardening (beyond §10)
+
+| Area | Tests |
+|------|-------|
+| Crash before each write/rename of each commit step, recovery, retry | `core/test/store.test.ts` |
+| Persisted-ID grammar, structured errors, nothing written outside the store | `core/test/ids.test.ts` |
+| Which attempts create records, attempt log, pending preserved on denied approvals | `core/test/audit.test.ts` |
+
+The file store assumes a **single writer**; see ADR 0003 for the commit protocol and its
+limits. CI (`.github/workflows/ci.yml`) runs `npm ci`, typecheck and tests on Node 22.18.0
+and the latest 22.x for pushes to `main` and every pull request.
 
 ## Decisions the spec left open (made here, review them)
 

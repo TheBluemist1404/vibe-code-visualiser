@@ -13,4 +13,6 @@ revalidated against the current revision. A proposer cannot approve their own ch
 default. `approveDraft` needs `approve` even for principals who can `apply`.
 
 Outcomes: `applied`, `pending`, `rejected` (invalid, stale, replayed) and `denied`
-(authorization). A multi-operation change is applied in full or not at all.
+(authorization). A multi-operation change is applied in full or not at all. Both calls
+return an `Outcome`; which attempts become durable ChangeRecords is set out in ADR 0004.
+Change and revision IDs follow the persisted-ID grammar in ADR 0003.
