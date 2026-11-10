@@ -8,6 +8,7 @@ import { parseArgs } from "node:util";
 import { loadModel, parseYaml, ownershipTree } from "../../../packages/ir/src/index.ts";
 import type { Diagnostic, TreeNode } from "../../../packages/ir/src/index.ts";
 import { FileStore, ModelEngine } from "../../../packages/core/src/index.ts";
+import { createQueryApi } from "../../../packages/query/src/index.ts";
 import type { HostContext, Outcome, Permission } from "../../../packages/core/src/index.ts";
 
 const USAGE = `vcv <command> [options]
@@ -17,15 +18,28 @@ const USAGE = `vcv <command> [options]
   show <store-dir> [--tree]             Print the current revision (or its ownership tree)
   propose <store-dir> <change.yaml>     Submit a change
   approve <store-dir> <changeId>        Approve a pending change
+  query <store-dir> overview            Read-only semantic queries; print JSON
+  query <store-dir> search <text...> [--kind k] [--limit n]
+  query <store-dir> context <id> [--depth n] [--direction in|out|both] [--limit n]
+  query <store-dir> impact <id...> [--depth n] [--limit n]
 
   --as <principal>      Who is acting (default: local-user)
   --perm <list>         Comma list of propose,apply,approve (default: all three)`;
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
-  options: { as: { type: "string", default: "local-user" }, perm: { type: "string", default: "propose,apply,approve" }, tree: { type: "boolean", default: false } },
+  options: {
+    as: { type: "string", default: "local-user" },
+    perm: { type: "string", default: "propose,apply,approve" },
+    tree: { type: "boolean", default: false },
+    kind: { type: "string", multiple: true },
+    limit: { type: "string" },
+    depth: { type: "string" },
+    direction: { type: "string" },
+  },
 });
-const [cmd, a, b] = positionals;
+const [cmd, a, b, ...rest] = positionals;
+const num = (v: string | undefined) => (v === undefined ? undefined : Number(v));
 const ctx: HostContext = {
   principalId: values.as!,
   permissions: values.perm!.split(",").filter(Boolean).map((p) => `model:${p.trim()}` as Permission),
@@ -75,6 +89,24 @@ function main(): number {
       return printOutcome(new ModelEngine(new FileStore(a!)).propose(parseYaml(readFileSync(b!, "utf8")), ctx));
     case "approve":
       return printOutcome(new ModelEngine(new FileStore(a!)).approve(b!, ctx));
+    case "query": {
+      // Opening the store runs recovery; queries themselves never write.
+      const q = createQueryApi(new FileStore(a!));
+      const dirs: Record<string, "incoming" | "outgoing" | "both"> = { in: "incoming", out: "outgoing", both: "both" };
+      const opt = <T extends object>(o: T) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+      const result =
+        b === "overview" ? q.getProjectOverview()
+        : b === "search" ? q.searchObjects(opt({ text: rest.join(" "), kinds: values.kind as never, limit: num(values.limit) }) as never)
+        : b === "context" ? q.getContext(opt({ id: rest[0]!, depth: num(values.depth), direction: values.direction ? dirs[values.direction] : undefined, maxNodes: num(values.limit) }) as never)
+        : b === "impact" ? q.analyzeImpact(opt({ ids: rest, maxDepth: num(values.depth), maxResults: num(values.limit) }) as never)
+        : undefined;
+      if (!result) {
+        console.log(USAGE);
+        return 1;
+      }
+      console.log(JSON.stringify(result, null, 2));
+      return result.ok ? 0 : 1;
+    }
     default:
       console.log(USAGE);
       return cmd ? 1 : 0;
