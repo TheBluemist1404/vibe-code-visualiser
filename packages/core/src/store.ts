@@ -18,11 +18,13 @@ import {
   appendFileSync,
   closeSync,
   existsSync,
+  fstatSync,
   fsyncSync,
   mkdirSync,
   openSync,
   readFileSync,
   readdirSync,
+  readSync,
   renameSync,
   rmSync,
   writeSync,
@@ -212,9 +214,18 @@ export class FileStore implements ModelStore {
   }
 
   appendAudit(event: AuditEvent): void {
-    const fd = openSync(join(this.dir, "audit.jsonl"), "a");
+    const fd = openSync(join(this.dir, "audit.jsonl"), "a+");
     try {
-      appendFileSync(fd, JSON.stringify(event) + "\n");
+      // If an earlier append was cut short, the file ends mid-line. Start a fresh line so the
+      // torn fragment stays on its own (skipped on read) and cannot swallow this event.
+      const { size } = fstatSync(fd);
+      let prefix = "";
+      if (size > 0) {
+        const last = Buffer.alloc(1);
+        readSync(fd, last, 0, 1, size - 1);
+        if (last[0] !== 0x0a) prefix = "\n";
+      }
+      appendFileSync(fd, prefix + JSON.stringify(event) + "\n");
       fsyncSync(fd);
     } finally {
       closeSync(fd);

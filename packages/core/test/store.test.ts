@@ -125,3 +125,29 @@ test("a torn final line in the audit log is skipped, earlier events survive", ()
   assert.equal(events[0]!.status, "applied");
   assert.ok(readFileSync(join(dir, "audit.jsonl"), "utf8").includes('{"at":"2026-'), "the log itself is never rewritten");
 });
+
+test("after a crash leaves a torn audit line, new events are appended intact and stay visible", () => {
+  const dir = freshDir();
+  FileStore.init(dir, baseModel());
+  new ModelEngine(new FileStore(dir)).propose(timeoutChange(), mcpAgent); // event 1: pending
+  appendFileSync(join(dir, "audit.jsonl"), '{"at":"2026-11-10T15:00:00Z","action":"appr'); // crash mid-append
+
+  // Recovery (reopen) followed by more activity.
+  const e = new ModelEngine(new FileStore(dir));
+  e.approve("ch-timeout-01", owner); // event 2: approved by someone other than the proposer
+  e.propose(timeoutChange(), owner); // event 3: replay rejected
+
+  const events = new FileStore(dir).audit();
+  assert.deepEqual(
+    events.map((a) => [a.action, a.status]),
+    [
+      ["propose", "pending"],
+      ["approve", "applied"],
+      ["propose", "rejected"],
+    ],
+    "no event after the torn line is lost",
+  );
+  const lines = readFileSync(join(dir, "audit.jsonl"), "utf8").split("\n");
+  assert.equal(lines[1], '{"at":"2026-11-10T15:00:00Z","action":"appr', "the torn fragment is kept on its own line as evidence");
+  assert.equal(lines.at(-1), "", "the log ends with a newline");
+});
