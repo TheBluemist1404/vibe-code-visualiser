@@ -1,0 +1,142 @@
+# Enrollment fixture for IR v0.2 (from the Notion spec §9, plus a small Notifications
+# module so cross-module contract rules have something to run against).
+# Invented for the IR design; not a description of the real LMS codebase.
+schemaVersion: "0.2"
+project:
+  id: prj-lms
+  name: LMS
+  modelRevision: rev-1
+  status: approved
+
+actors:
+  - id: actor-lecturer
+    owner: prj-lms
+    kind: actor
+    name: Lecturer
+  - id: actor-student
+    owner: prj-lms
+    kind: actor
+    name: Student
+
+modules:
+  - id: mod-enrollment
+    owner: prj-lms
+    kind: module
+    name: Enrollment
+    purpose: Manage enrollment reviews
+  - id: mod-notifications
+    owner: prj-lms
+    kind: module
+    name: Notifications
+    purpose: Tell people about things that happened to them
+    dependsOn: [mod-enrollment]
+    consumes: [ctr-enrollment-events]
+
+capabilities:
+  - id: cap-review-enrollment
+    owner: mod-enrollment
+    kind: capability
+    name: Review enrollment request
+    initiatorActorId: actor-lecturer
+  - id: cap-notify-rejection
+    owner: mod-notifications
+    kind: capability
+    name: Notify student of rejected enrollment
+
+data:
+  - id: data-enrollment-request
+    owner: mod-enrollment
+    kind: data
+    name: Enrollment Request
+    attributes:
+      - id: attr-request-created-at
+        name: Created at
+        type: timestamp
+      - id: attr-request-note
+        name: Note from student
+        type: string
+        nullable: true
+
+rules:
+  - id: rule-review-permission
+    owner: mod-enrollment
+    kind: rule
+    ruleKind: permission
+    actorId: actor-lecturer
+    capabilityId: cap-review-enrollment
+  - id: rule-no-reopen
+    owner: mod-enrollment
+    kind: rule
+    ruleKind: invariant
+    name: Rejected requests stay rejected
+    statement: A rejected request cannot become approved without an explicitly modeled operation.
+
+events:
+  - id: evt-approval-submitted
+    owner: mod-enrollment
+    kind: event
+    name: Approval submitted
+  - id: evt-rejection-submitted
+    owner: mod-enrollment
+    kind: event
+    name: Rejection submitted
+  - id: evt-enrollment-rejected
+    owner: mod-enrollment
+    kind: event
+    name: Enrollment rejected
+
+contracts:
+  - id: ctr-enrollment-review
+    owner: mod-enrollment
+    kind: contract
+    name: Review enrollment
+    accepts:
+      - evt-approval-submitted
+      - evt-rejection-submitted
+  - id: ctr-enrollment-events
+    owner: mod-enrollment
+    kind: contract
+    name: Enrollment events
+    publishes:
+      - evt-enrollment-rejected
+
+behaviors:
+  - id: beh-enrollment-approval
+    owner: mod-enrollment
+    kind: behavior
+    name: Enrollment approval
+    realizes: [cap-review-enrollment]
+    initialStateId: st-pending
+    states:
+      - { id: st-pending, name: Pending }
+      - { id: st-approved, name: Approved }
+      - { id: st-rejected, name: Rejected }
+    transitions:
+      - id: tr-approve
+        fromStateId: st-pending
+        toStateId: st-approved
+        trigger: { kind: event, eventId: evt-approval-submitted }
+        guards:
+          - { kind: permission, ruleId: rule-review-permission }
+      - id: tr-reject
+        fromStateId: st-pending
+        toStateId: st-rejected
+        trigger: { kind: event, eventId: evt-rejection-submitted }
+        guards:
+          - { kind: permission, ruleId: rule-review-permission }
+        effects:
+          - { kind: emitEvent, eventId: evt-enrollment-rejected }
+  - id: beh-rejection-notice
+    owner: mod-notifications
+    kind: behavior
+    name: Rejection notice
+    realizes: [cap-notify-rejection]
+    initialStateId: st-notice-waiting
+    states:
+      - { id: st-notice-waiting, name: Waiting }
+      - { id: st-notice-sent, name: Sent }
+    transitions:
+      - id: tr-send-notice
+        fromStateId: st-notice-waiting
+        toStateId: st-notice-sent
+        trigger: { kind: event, eventId: evt-enrollment-rejected }

@@ -1,0 +1,21 @@
+# The spec's §9 requested change: auto-reject after seven days without a lecturer decision.
+changeId: ch-timeout-01
+projectId: prj-lms
+expectedRevision: rev-1
+rationale: Automatically reject a request if the lecturer does not respond within seven days.
+operations:
+  - type: addTransition
+    behaviorId: beh-enrollment-approval
+    transition:
+      id: tr-timeout
+      fromStateId: st-pending
+      toStateId: st-rejected
+      trigger:
+        kind: elapsed
+        duration: P7D
+        anchor:
+          dataId: data-enrollment-request
+          attributeId: attr-request-created-at
+      effects:
+        - kind: emitEvent
+          eventId: evt-enrollment-rejected
