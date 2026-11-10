@@ -44,8 +44,13 @@ retried. After a crash after step 2 the change is applied and a retry reports
 ## Identifiers
 
 Change IDs and model revision IDs become file names. They must match
-`^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`, not end in `.`, and not be a Windows device name
-(`CON`, `NUL`, `COM1`…). The same rule is enforced by the change schema, the model schema
+`^[a-z0-9][a-z0-9._-]{0,127}$`, not end in `.`, and not be a Windows device name
+(`CON`, `NUL`, `COM1`…).
+
+**Case policy: lowercase only.** Windows and default macOS filesystems are
+case-insensitive, so `ch-Test` and `ch-test` would name the same file and one record could
+silently replace the other. IDs with uppercase letters are rejected (not folded), so two
+accepted IDs are always distinct files on every OS and an ID reads back exactly as written. The same rule is enforced by the change schema, the model schema
 (`project.modelRevision`), the engine's `approve()`, and the store itself, so bad input gives
 a structured `SCHEMA`/`INVALID_ID` result rather than an exception or a path outside the
 store. Canonical object IDs are not file names and stay opaque, as the spec requires.
@@ -58,4 +63,6 @@ store. Canonical object IDs are not file names and stay opaque, as the spec requ
 - Durability depends on the filesystem honouring fsync and atomic rename. Network mounts
   may not.
 - The audit log is appended after the commit; a crash between the two can drop one audit
-  line, never a committed revision.
+  line, never a committed revision. A crash mid-append can leave a torn final line; the next
+  append first starts a new line, so the fragment stays isolated (skipped on read, kept as
+  evidence) and later events are never merged into it.

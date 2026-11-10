@@ -16,7 +16,7 @@ Requires Node 22.18+ (runs TypeScript directly, no build step).
 
 ```sh
 npm install
-npm test            # 46 tests
+npm test            # 48 tests
 npm run typecheck
 npm run vcv -- validate examples/enrollment/model.rev-1.yaml
 npm run vcv -- init .vcv-store examples/enrollment/model.rev-1.yaml
@@ -53,7 +53,7 @@ Not covered yet: detecting a divergent code change (needs the repository indexer
 | Area | Tests |
 |------|-------|
 | Crash before each write/rename of each commit step, recovery, retry | `core/test/store.test.ts` |
-| Persisted-ID grammar, structured errors, nothing written outside the store | `core/test/ids.test.ts` |
+| Persisted-ID grammar (lowercase only), structured errors, nothing written outside the store | `core/test/ids.test.ts` |
 | Which attempts create records, attempt log, pending preserved on denied approvals | `core/test/audit.test.ts` |
 
 The file store assumes a **single writer**; see ADR 0003 for the commit protocol and its
