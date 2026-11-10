@@ -6,23 +6,27 @@ fixture from *IR v0 — Conceptual Specification* (Draft v0.2).
 
 ```
 packages/ir     IR types, shape schema (zod), reference index, validation, YAML load/dump, tree/graph projections
+packages/query  read-only Semantic Query API: overview, search, context, impact (ADR 0005)
 packages/core   typed operations, ModelEngine (propose/approve), Memory/File stores with crash recovery, audit log, bindings, layout store
 apps/cli        thin CLI over the engine (no domain logic)
 examples/enrollment   model.rev-1.yaml (valid fixture), change.timeout.yaml (the spec's 7-day timeout change)
-docs/adr        decision records 0001–0004
+docs/adr        decision records 0001–0005
+docs/samples    sample query results on the Enrollment fixture
 ```
 
 Requires Node 22.18+ (runs TypeScript directly, no build step).
 
 ```sh
 npm install
-npm test            # 48 tests
+npm test            # 64 tests
 npm run typecheck
 npm run vcv -- validate examples/enrollment/model.rev-1.yaml
 npm run vcv -- init .vcv-store examples/enrollment/model.rev-1.yaml
 npm run vcv -- propose .vcv-store examples/enrollment/change.timeout.yaml --as agent:mcp --perm propose
 npm run vcv -- approve .vcv-store ch-timeout-01 --as hoang
 npm run vcv -- show .vcv-store --tree
+npm run vcv -- query .vcv-store search enrollment notifications --kind module
+npm run vcv -- query .vcv-store impact evt-enrollment-rejected
 ```
 
 ## Spec acceptance cases (§10)
