@@ -40,6 +40,11 @@ vcv query <store> overview
           "ctr-enrollment-events",
           "ctr-enrollment-review"
         ],
+        "counts": {
+          "dependsOn": 0,
+          "consumes": 0,
+          "exposes": 2
+        },
         "owned": {
           "attribute": 2,
           "behavior": 1,
@@ -67,6 +72,11 @@ vcv query <store> overview
           "ctr-enrollment-events"
         ],
         "exposes": [],
+        "counts": {
+          "dependsOn": 1,
+          "consumes": 1,
+          "exposes": 0
+        },
         "owned": {
           "behavior": 1,
           "capability": 1,
@@ -75,6 +85,8 @@ vcv query <store> overview
         }
       }
     ],
+    "modulesTotal": 2,
+    "truncated": false,
     "inventory": {
       "actor": 2,
       "attribute": 2,
@@ -239,7 +251,7 @@ vcv query <store> search notify rejected enrollment --limit 5
     ],
     "total": 14,
     "truncated": true,
-    "nextCursor": "rev-1:5"
+    "nextCursor": "rev-1:9d6a28230db6268f:5"
   },
   "diagnostics": []
 }
@@ -399,10 +411,52 @@ vcv query <store> context evt-enrollment-rejected --depth 2
     "edges": [
       {
         "from": "beh-enrollment-approval",
+        "to": "st-pending",
+        "relation": "contains",
+        "category": "ownership",
+        "declaredAt": "behaviors[0].states[0]"
+      },
+      {
+        "from": "beh-enrollment-approval",
+        "to": "st-rejected",
+        "relation": "contains",
+        "category": "ownership",
+        "declaredAt": "behaviors[0].states[2]"
+      },
+      {
+        "from": "beh-enrollment-approval",
         "to": "tr-reject",
         "relation": "contains",
         "category": "ownership",
         "declaredAt": "behaviors[0].transitions[1]"
+      },
+      {
+        "from": "beh-enrollment-approval",
+        "to": "st-pending",
+        "relation": "initialState",
+        "category": "behavior",
+        "declaredAt": "behaviors[0].initialStateId"
+      },
+      {
+        "from": "beh-enrollment-approval",
+        "to": "mod-enrollment",
+        "relation": "owner",
+        "category": "ownership",
+        "declaredAt": "behaviors[0].owner"
+      },
+      {
+        "from": "beh-rejection-notice",
+        "to": "st-notice-sent",
+        "relation": "contains",
+        "category": "ownership",
+        "declaredAt": "behaviors[1].states[1]"
+      },
+      {
+        "from": "beh-rejection-notice",
+        "to": "st-notice-waiting",
+        "relation": "contains",
+        "category": "ownership",
+        "declaredAt": "behaviors[1].states[0]"
       },
       {
         "from": "beh-rejection-notice",
@@ -410,6 +464,20 @@ vcv query <store> context evt-enrollment-rejected --depth 2
         "relation": "contains",
         "category": "ownership",
         "declaredAt": "behaviors[1].transitions[0]"
+      },
+      {
+        "from": "beh-rejection-notice",
+        "to": "st-notice-waiting",
+        "relation": "initialState",
+        "category": "behavior",
+        "declaredAt": "behaviors[1].initialStateId"
+      },
+      {
+        "from": "beh-rejection-notice",
+        "to": "mod-notifications",
+        "relation": "owner",
+        "category": "ownership",
+        "declaredAt": "behaviors[1].owner"
       },
       {
         "from": "ctr-enrollment-events",
@@ -433,6 +501,13 @@ vcv query <store> context evt-enrollment-rejected --depth 2
         "declaredAt": "events[2].owner"
       },
       {
+        "from": "evt-rejection-submitted",
+        "to": "mod-enrollment",
+        "relation": "owner",
+        "category": "ownership",
+        "declaredAt": "events[1].owner"
+      },
+      {
         "from": "mod-notifications",
         "to": "ctr-enrollment-events",
         "relation": "consumes",
@@ -445,6 +520,13 @@ vcv query <store> context evt-enrollment-rejected --depth 2
         "relation": "dependsOn",
         "category": "dependency",
         "declaredAt": "modules[1].dependsOn[0]"
+      },
+      {
+        "from": "rule-review-permission",
+        "to": "mod-enrollment",
+        "relation": "owner",
+        "category": "ownership",
+        "declaredAt": "rules[0].owner"
       },
       {
         "from": "tr-reject",
@@ -503,10 +585,13 @@ vcv query <store> context evt-enrollment-rejected --depth 2
         "declaredAt": "behaviors[1].transitions[0].trigger.eventId"
       }
     ],
+    "edgesTotal": 25,
     "truncated": true,
     "budget": {
       "depth": 2,
       "maxNodes": 25,
+      "maxEdges": 100,
+      "maxNestedItems": 25,
       "direction": "both"
     }
   },

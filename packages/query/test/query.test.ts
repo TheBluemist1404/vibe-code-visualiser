@@ -242,3 +242,120 @@ function walk(d: string): string[] {
     .flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]))
     .sort();
 }
+
+test("a search cursor only continues the search that issued it", () => {
+  const q = api();
+  const first = data(q.searchObjects({ text: "enrollment", limit: 3 }));
+  const cursor = first.nextCursor!;
+
+  // Same terms in another order / case / spacing normalize to the same search.
+  const same = q.searchObjects({ text: "  ENROLLMENT ", limit: 3, cursor });
+  assert.ok(same.ok, "normalized-equal search accepts the cursor");
+
+  for (const other of [
+    { text: "rejection", cursor },
+    { text: "enrollment rejection", cursor },
+    { text: "enrollment", kinds: ["event" as const], cursor },
+  ]) {
+    const r = q.searchObjects(other);
+    assert.ok(!r.ok, `cursor reused by ${JSON.stringify(other)} must be refused`);
+    assert.equal(r.error.code, "INVALID_CURSOR");
+  }
+
+  // A tampered offset (past the end) is refused rather than returning an empty page.
+  const [rev, scope] = cursor.split(":");
+  for (const offset of ["9999", "-1", "01", "1.5"]) {
+    const r = q.searchObjects({ text: "enrollment", limit: 3, cursor: `${rev}:${scope}:${offset}` });
+    assert.ok(!r.ok && r.error.code === "INVALID_CURSOR", `offset ${offset} refused`);
+  }
+  // A search cursor is not an overview cursor either.
+  const o = q.getProjectOverview({ cursor });
+  assert.ok(!o.ok && o.error.code === "INVALID_CURSOR");
+});
+
+test("the complete edge set between returned nodes is included", () => {
+  const c = data(api().getContext({ id: "evt-enrollment-rejected", depth: 2 }));
+  const has = (from: string, relation: string, to: string) => c.edges.some((e) => e.from === from && e.relation === relation && e.to === to);
+  assert.ok(ids(c.nodes).includes("beh-rejection-notice") && ids(c.nodes).includes("mod-notifications"));
+  assert.ok(has("beh-rejection-notice", "owner", "mod-notifications"), "edge between two non-focus nodes is returned");
+  const inSet = new Set([c.focus.id, ...ids(c.nodes)]);
+  for (const e of c.edges) {
+    assert.ok(inSet.has(e.from), `edge source ${e.from} is a returned node`);
+    assert.ok(typeof e.to !== "string" || inSet.has(e.to), `edge target ${String(e.to)} is a returned node`);
+  }
+  assert.equal(c.edgesTotal, c.edges.length);
+
+  // Relation filters still apply to the complete set.
+  const f = data(api().getContext({ id: "evt-enrollment-rejected", depth: 2, relations: ["contractPublishes", "consumes"] }));
+  assert.ok(f.edges.every((e) => e.relation === "contractPublishes" || e.relation === "consumes"));
+});
+
+/** A model far larger than the fixture: many modules, a huge behavior and a wide data object. */
+function largeModel(): Model {
+  const m = structuredClone(model()) as Model & Record<string, any>;
+  for (let i = 0; i < 300; i++) {
+    const id = `mod-bulk-${String(i).padStart(3, "0")}`;
+    m.modules.push({ id, owner: "prj-lms", kind: "module", name: `Bulk ${i}`, purpose: "Generated", dependsOn: ["mod-enrollment"] } as any);
+  }
+  (m.data as any[]).push({
+    id: "data-wide", owner: "mod-enrollment", kind: "data", name: "Wide",
+    attributes: Array.from({ length: 1000 }, (_, i) => ({ id: `attr-wide-${i}`, name: `Field ${i}`, type: "string" })),
+  });
+  const states = Array.from({ length: 1200 }, (_, i) => ({ id: `st-big-${i}`, name: `S${i}` }));
+  (m.behaviors as any[]).push({
+    id: "beh-big", owner: "mod-enrollment", kind: "behavior", name: "Big", initialStateId: "st-big-0", states,
+    transitions: states.slice(1).map((s, i) => ({ id: `tr-big-${i}`, fromStateId: `st-big-${i}`, toStateId: s.id, trigger: { kind: "event", eventId: "evt-approval-submitted" } })),
+  });
+  return m;
+}
+
+test("responses stay bounded on a large model", () => {
+  const q = api(largeModel());
+  const size = (x: unknown) => JSON.stringify(x).length;
+
+  // Overview pages modules and caps per-module lists; walking the cursor visits every module once.
+  const o1 = data(q.getProjectOverview());
+  assert.equal(o1.modules.length, 50);
+  assert.equal(o1.modulesTotal, 302);
+  assert.equal(o1.truncated, true);
+  const seen = new Set(ids(o1.modules));
+  for (let cur = o1.nextCursor; cur; ) {
+    const p = data(q.getProjectOverview({ moduleLimit: 200, cursor: cur }));
+    assert.ok(p.modules.length <= 200);
+    ids(p.modules).forEach((id) => seen.add(id));
+    cur = p.nextCursor;
+  }
+  assert.equal(seen.size, 302);
+  const enr = o1.modules.find((x) => x.id === "mod-enrollment");
+  assert.ok(!enr || enr.dependsOn.length <= 25);
+  assert.ok(size(o1) < 64_000, `overview page is ${size(o1)} bytes`);
+  assert.ok(!q.getProjectOverview({ moduleLimit: 201 }).ok, "module page size is capped");
+
+  // The focus record is a bounded detail view with explicit truncation markers.
+  const beh = data(q.getContext({ id: "beh-big" }));
+  const rec = beh.focus.record as { states: unknown[]; transitions: unknown[] };
+  assert.equal(rec.states.length, 25);
+  assert.deepEqual(beh.focus.truncatedFields?.find((t) => t.field === "states"), { field: "states", returned: 25, total: 1200 });
+  assert.deepEqual(beh.focus.truncatedFields?.find((t) => t.field === "transitions"), { field: "transitions", returned: 25, total: 1199 });
+  assert.equal(beh.truncated, true);
+  assert.ok(beh.nodes.length <= 25 && beh.edges.length <= 100);
+  assert.ok(size(beh) < 64_000, `context is ${size(beh)} bytes`);
+
+  const wide = data(q.getContext({ id: "data-wide", maxNestedItems: 200 }));
+  assert.equal((wide.focus.record as { attributes: unknown[] }).attributes.length, 200);
+  assert.deepEqual(wide.focus.truncatedFields, [{ field: "attributes", returned: 200, total: 1000 }]);
+
+  // A module with 300 dependents: nodes and edges are capped and the totals are reported.
+  const hub = data(q.getContext({ id: "mod-enrollment", maxNodes: 200, maxEdges: 50 }));
+  assert.ok(hub.nodes.length <= 200);
+  assert.equal(hub.edges.length, 50);
+  assert.ok(hub.edgesTotal > 50);
+  assert.equal(hub.truncated, true);
+
+  // Search and impact stay within their limits too.
+  const s = data(q.searchObjects({ text: "bulk", limit: 100 }));
+  assert.equal(s.hits.length, 100);
+  assert.ok(s.total >= 300 && s.truncated);
+  const imp = data(q.analyzeImpact({ ids: ["mod-enrollment"] }));
+  assert.ok(imp.candidates.length <= 50 && imp.truncated);
+});

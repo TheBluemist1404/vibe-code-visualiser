@@ -66,12 +66,19 @@ const revision = { expectedRevision: z.string().min(1).optional() };
 const id = z.string().min(1).max(256);
 
 export const LIMITS = {
+  overview: { defaultModules: 50, maxModules: 200, listItems: 25 },
   search: { default: 20, max: 100 },
-  context: { defaultDepth: 1, maxDepth: 2, defaultNodes: 25, maxNodes: 200 },
+  context: { defaultDepth: 1, maxDepth: 2, defaultNodes: 25, maxNodes: 200, defaultEdges: 100, maxEdges: 1000, defaultNested: 25, maxNested: 200 },
   impact: { maxSeeds: 20, defaultDepth: 3, maxDepth: 5, defaultResults: 50, maxResults: 200 },
 } as const;
 
-export const overviewRequest = z.object({ ...revision }).strict();
+export const overviewRequest = z
+  .object({
+    ...revision,
+    moduleLimit: z.number().int().min(1).max(LIMITS.overview.maxModules).default(LIMITS.overview.defaultModules),
+    cursor: z.string().optional(),
+  })
+  .strict();
 
 export const searchRequest = z
   .object({
@@ -91,6 +98,9 @@ export const contextRequest = z
     direction: z.enum(["incoming", "outgoing", "both"]).default("both"),
     relations: z.array(z.enum(RELATIONS)).min(1).optional(),
     maxNodes: z.number().int().min(1).max(LIMITS.context.maxNodes).default(LIMITS.context.defaultNodes),
+    maxEdges: z.number().int().min(1).max(LIMITS.context.maxEdges).default(LIMITS.context.defaultEdges),
+    /** Cap on every array inside the focus record (states, transitions, attributes, refs). */
+    maxNestedItems: z.number().int().min(1).max(LIMITS.context.maxNested).default(LIMITS.context.defaultNested),
   })
   .strict();
 
@@ -116,13 +126,19 @@ export type ModuleSummary = ObjectSummary & {
   consumes: (Id | { unresolved: string })[];
   /** Contracts this module owns (its public boundary). */
   exposes: Id[];
+  /** Full lengths of dependsOn/consumes/exposes; each list is capped at LIMITS.overview.listItems. */
+  counts: { dependsOn: number; consumes: number; exposes: number };
   /** Number of owned objects by kind. */
   owned: Partial<Record<Kind, number>>;
 };
 
 export type ProjectOverview = {
   project: { id: Id; name: string; description?: string; schemaVersion: string };
+  /** One page of modules, ordered by ID. */
   modules: ModuleSummary[];
+  modulesTotal: number;
+  truncated: boolean;
+  nextCursor?: string;
   /** Number of objects by kind across the project. */
   inventory: Partial<Record<Kind, number>>;
   validation: { errors: number; warnings: number };
@@ -141,13 +157,19 @@ export type SearchResults = {
 export type ContextNode = ObjectSummary & { distance: number };
 
 export type ObjectContext = {
-  focus: ObjectSummary & { record: unknown };
+  /** The canonical record, with every array capped at maxNestedItems (see truncatedFields). */
+  focus: ObjectSummary & { record: unknown; truncatedFields?: { field: string; returned: number; total: number }[] };
   /** Neighbours reached within the depth and node budget, in breadth-first order. */
   nodes: ContextNode[];
-  /** Edges between included nodes (and unresolved outgoing references of included nodes). */
+  /**
+   * Every edge between the focus and returned nodes that matches the relation filter,
+   * regardless of traversal direction, plus unresolved outgoing references; capped at maxEdges.
+   */
   edges: Edge[];
+  edgesTotal: number;
+  /** True if nodes, edges or the focus record were cut by a budget or the depth limit. */
   truncated: boolean;
-  budget: { depth: number; maxNodes: number; direction: "incoming" | "outgoing" | "both" };
+  budget: { depth: number; maxNodes: number; maxEdges: number; maxNestedItems: number; direction: "incoming" | "outgoing" | "both" };
 };
 
 export type PathStep = { from: Id; relation: Relation; to: Id };

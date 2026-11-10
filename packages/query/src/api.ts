@@ -2,6 +2,8 @@
 // Each call reads exactly one snapshot from the source and never writes anything.
 import type { Diagnostic, Id, Kind } from "@vcv/ir";
 import { Snapshot, compareObjects, cmp, target } from "./snapshot.ts";
+import { decodeCursor, encodeCursor, scopeOf } from "./cursor.ts";
+import { LIMITS } from "./types.ts";
 import { contextRequest, impactRequest, overviewRequest, searchRequest } from "./types.ts";
 import type {
   ContextNode,
@@ -58,16 +60,35 @@ export function createQueryApi(source: SnapshotSource): QueryApi {
   }
 
   return {
-    getProjectOverview: (req) => run(overviewRequest, req, (_r, snap) => ok(snap, overview(snap), [])),
+    getProjectOverview: (req) => run(overviewRequest, req, overview),
     searchObjects: (req) => run(searchRequest, req, search),
     getContext: (req) => run(contextRequest, req, context),
     analyzeImpact: (req) => run(impactRequest, req, impact),
   };
 }
 
+/** Resolve a cursor for this query scope, or return the error to send back. */
+function pageStart(cursor: string | undefined, scope: string, snap: Snapshot, total: number, what: string): number | QueryError {
+  if (cursor === undefined) return 0;
+  const c = decodeCursor(cursor);
+  if (!c) return { code: "INVALID_CURSOR", message: `cursor is not one returned by ${what}` };
+  const revision = snap.model.project.modelRevision;
+  if (c.revision !== revision) {
+    return { code: "REVISION_MISMATCH", message: `cursor belongs to revision ${c.revision}, current is ${revision}; start again` };
+  }
+  if (c.scope !== scope) return { code: "INVALID_CURSOR", message: `cursor was issued for a different ${what} request (other text or filters)` };
+  if (c.offset >= total) return { code: "INVALID_CURSOR", message: `cursor offset ${c.offset} is past the end of ${total} results` };
+  return c.offset;
+}
+
+/** Cap an array, reporting what was dropped. */
+function capList<T>(list: readonly T[], max: number): { items: T[]; total: number } {
+  return { items: list.slice(0, max), total: list.length };
+}
+
 // ---- getProjectOverview ------------------------------------------------------------------
 
-function overview(snap: Snapshot): ProjectOverview {
+function overview(req: z.output<typeof overviewRequest>, snap: Snapshot): QueryResult<ProjectOverview> {
   const { model } = snap;
   const inventory: Partial<Record<Kind, number>> = {};
   for (const e of snap.index.values()) if (e.kind !== "project") inventory[e.kind] = (inventory[e.kind] ?? 0) + 1;
@@ -79,31 +100,45 @@ function overview(snap: Snapshot): ProjectOverview {
         if (e.kind !== "module" && snap.moduleOf(e.id) === m.id) owned[e.kind] = (owned[e.kind] ?? 0) + 1;
       }
       const refs = (list: typeof m.dependsOn) => (list ?? []).map((r) => (typeof r === "string" ? r : { unresolved: r.unresolved }));
+      const max = LIMITS.overview.listItems;
+      const dependsOn = capList(refs(m.dependsOn), max);
+      const consumes = capList(refs(m.consumes), max);
+      const exposes = capList(model.contracts.filter((c) => c.owner === m.id).map((c) => c.id).sort(cmp), max);
       return {
         ...snap.summary(m.id),
         ...(m.purpose ? { purpose: m.purpose } : {}),
-        dependsOn: refs(m.dependsOn),
-        consumes: refs(m.consumes),
-        exposes: model.contracts.filter((c) => c.owner === m.id).map((c) => c.id).sort(cmp),
+        dependsOn: dependsOn.items,
+        consumes: consumes.items,
+        exposes: exposes.items,
+        counts: { dependsOn: dependsOn.total, consumes: consumes.total, exposes: exposes.total },
         owned: sortKeys(owned),
       };
     })
     .sort((a, b) => cmp(a.id, b.id));
 
-  return {
+  const scope = scopeOf(["overview"]);
+  const start = pageStart(req.cursor, scope, snap, modules.length, "getProjectOverview");
+  if (typeof start !== "number") return fail(start, snap);
+  const page = modules.slice(start, start + req.moduleLimit);
+  const end = start + page.length;
+
+  return ok(snap, {
     project: {
       id: model.project.id,
       name: model.project.name,
       ...(model.project.description ? { description: model.project.description } : {}),
       schemaVersion: model.schemaVersion,
     },
-    modules,
+    modules: page,
+    modulesTotal: modules.length,
+    truncated: end < modules.length,
+    ...(end < modules.length ? { nextCursor: encodeCursor(model.project.modelRevision, scope, end) } : {}),
     inventory: sortKeys(inventory),
     validation: {
       errors: snap.diagnostics.filter((d) => d.severity === "error").length,
       warnings: snap.diagnostics.filter((d) => d.severity === "warning").length,
     },
-  };
+  }, []);
 }
 
 // ---- searchObjects -----------------------------------------------------------------------
@@ -113,16 +148,6 @@ type Field = keyof typeof FIELD_WEIGHT;
 
 function search(req: z.output<typeof searchRequest>, snap: Snapshot): QueryResult<SearchResults> {
   const revision = snap.model.project.modelRevision;
-  let offset = 0;
-  if (req.cursor !== undefined) {
-    const m = /^(.+):(\d+)$/.exec(req.cursor);
-    if (!m) return fail({ code: "INVALID_CURSOR", message: "cursor is not one returned by searchObjects" }, snap);
-    if (m[1] !== revision) {
-      return fail({ code: "REVISION_MISMATCH", message: `cursor belongs to revision ${m[1]}, current is ${revision}; search again` }, snap);
-    }
-    offset = Number(m[2]);
-  }
-
   const terms = [...new Set(req.text.toLowerCase().split(/[^a-z0-9]+/).filter((t) => t.length > 1))];
   if (terms.length === 0) {
     return fail({ code: "INVALID_REQUEST", message: "text needs at least one search term of two or more letters or digits" }, snap);
@@ -163,13 +188,17 @@ function search(req: z.output<typeof searchRequest>, snap: Snapshot): QueryResul
   }
   hits.sort((a, b) => b.score - a.score || compareObjects(a, b));
 
+  // The cursor is bound to the normalized terms and kind filter, not to the raw text or limit.
+  const scope = scopeOf(["search", [...terms].sort(), req.kinds ? [...new Set(req.kinds)].sort() : null]);
+  const offset = pageStart(req.cursor, scope, snap, hits.length, "searchObjects");
+  if (typeof offset !== "number") return fail(offset, snap);
   const page = hits.slice(offset, offset + req.limit);
   const end = offset + page.length;
   return ok(snap, {
     hits: page,
     total: hits.length,
     truncated: end < hits.length,
-    ...(end < hits.length ? { nextCursor: `${revision}:${end}` } : {}),
+    ...(end < hits.length ? { nextCursor: encodeCursor(revision, scope, end) } : {}),
   }, []);
 }
 
@@ -194,7 +223,6 @@ function context(req: z.output<typeof contextRequest>, snap: Snapshot): QueryRes
 
   const distance = new Map<Id, number>([[req.id, 0]]);
   const order: Id[] = [];
-  const edges = new Map<string, Edge>();
   let truncated = false;
   let frontier = [req.id];
 
@@ -206,10 +234,7 @@ function context(req: z.output<typeof contextRequest>, snap: Snapshot): QueryRes
         ...(inc ? (snap.incoming.get(id) ?? []).filter(allowed).map((e) => [e, e.from] as [Edge, Id]) : []),
       ].filter(([e]) => id === req.id || !listsChildren(e, id));
       for (const [edge, other] of candidates) {
-        if (other === undefined) {
-          edges.set(edgeKey(edge), edge); // unresolved outgoing reference: shown, never followed
-          continue;
-        }
+        if (other === undefined) continue; // unresolved outgoing reference: shown, never followed
         if (other === snap.model.project.id) continue; // the project root is in the overview
         if (!distance.has(other)) {
           if (order.length >= req.maxNodes) {
@@ -220,7 +245,6 @@ function context(req: z.output<typeof contextRequest>, snap: Snapshot): QueryRes
           order.push(other);
           next.push(other);
         }
-        edges.set(edgeKey(edge), edge);
       }
     }
     frontier = next;
@@ -239,17 +263,27 @@ function context(req: z.output<typeof contextRequest>, snap: Snapshot): QueryRes
 
   const included = new Set([req.id, ...order]);
   const nodes: ContextNode[] = order.map((id) => ({ ...snap.summary(id), distance: distance.get(id)! }));
-  const kept = [...edges.values()].filter((e) => included.has(e.from) && (typeof e.to !== "string" || included.has(e.to)));
-  kept.sort((a, b) => cmp(a.from, b.from) || cmp(a.relation, b.relation) || cmp(target(a), target(b)));
+  // Every qualifying edge between selected nodes, whichever way traversal reached them, plus
+  // unresolved outgoing references of selected nodes. Direction only steers traversal.
+  const qualifying: Edge[] = [];
+  for (const id of included) {
+    for (const e of snap.outgoing.get(id) ?? []) {
+      if (allowed(e) && (typeof e.to !== "string" || included.has(e.to))) qualifying.push(e);
+    }
+  }
+  qualifying.sort((a, b) => cmp(a.from, b.from) || cmp(a.relation, b.relation) || cmp(target(a), target(b)) || cmp(a.declaredAt, b.declaredAt));
+  const kept = qualifying.slice(0, req.maxEdges);
+  const focusRecord = boundRecord(snap.records.get(req.id), req.maxNestedItems);
 
   return ok(
     snap,
     {
-      focus: { ...snap.summary(req.id), record: structuredClone(snap.records.get(req.id)) },
+      focus: { ...snap.summary(req.id), record: focusRecord.record, ...(focusRecord.truncated.length ? { truncatedFields: focusRecord.truncated } : {}) },
       nodes,
       edges: kept,
-      truncated,
-      budget: { depth: req.depth, maxNodes: req.maxNodes, direction: req.direction },
+      edgesTotal: qualifying.length,
+      truncated: truncated || kept.length < qualifying.length || focusRecord.truncated.length > 0,
+      budget: { depth: req.depth, maxNodes: req.maxNodes, maxEdges: req.maxEdges, maxNestedItems: req.maxNestedItems, direction: req.direction },
     },
     snap.diagnosticsFor(included),
   );
@@ -263,7 +297,24 @@ function context(req: z.output<typeof contextRequest>, snap: Snapshot): QueryRes
 const listsChildren = (e: Edge, id: Id) =>
   (e.relation === "owner" && e.to === id) || (e.relation === "contains" && e.from === id);
 
-const edgeKey = (e: Edge) => `${e.from}|${e.relation}|${target(e)}|${e.declaredAt}`;
+/**
+ * Copy a canonical record with every array (at any depth) capped at `max` items, so one
+ * behavior with thousands of states cannot blow up the response. Reports each capped field.
+ */
+function boundRecord(record: unknown, max: number): { record: unknown; truncated: { field: string; returned: number; total: number }[] } {
+  const truncated: { field: string; returned: number; total: number }[] = [];
+  const walk = (v: unknown, path: string): unknown => {
+    if (Array.isArray(v)) {
+      if (v.length > max) truncated.push({ field: path, returned: max, total: v.length });
+      return v.slice(0, max).map((x, i) => walk(x, `${path}[${i}]`));
+    }
+    if (v && typeof v === "object") {
+      return Object.fromEntries(Object.entries(v).map(([k, x]) => [k, walk(x, path ? `${path}.${k}` : k)]));
+    }
+    return v;
+  };
+  return { record: walk(record, ""), truncated };
+}
 
 // ---- analyzeImpact -----------------------------------------------------------------------
 
