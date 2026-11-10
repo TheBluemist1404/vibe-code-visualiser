@@ -8,7 +8,7 @@ import { parseArgs } from "node:util";
 import { loadModel, parseYaml, ownershipTree } from "../../../packages/ir/src/index.ts";
 import type { Diagnostic, TreeNode } from "../../../packages/ir/src/index.ts";
 import { FileStore, ModelEngine } from "../../../packages/core/src/index.ts";
-import type { ChangeRecord, HostContext, Permission } from "../../../packages/core/src/index.ts";
+import type { HostContext, Outcome, Permission } from "../../../packages/core/src/index.ts";
 
 const USAGE = `vcv <command> [options]
 
@@ -34,11 +34,13 @@ const ctx: HostContext = {
 function printDiagnostics(ds: Diagnostic[]) {
   for (const d of ds) console.log(`  ${d.severity === "error" ? "✗" : "!"} ${d.code} at ${d.path || "(root)"}: ${d.message}`);
 }
-function printRecord(r: ChangeRecord) {
-  const rev = r.resultingRevision ? ` → ${r.resultingRevision}` : "";
-  console.log(`${r.changeId}: ${r.status}${rev} (proposed by ${r.proposerId}${r.approverId ? `, approved by ${r.approverId}` : ""})`);
-  printDiagnostics(r.validationResults);
-  return r.status === "applied" || r.status === "pending" ? 0 : 1;
+function printOutcome(o: Outcome) {
+  const r = o.record;
+  const rev = o.status === "applied" && r?.resultingRevision ? ` → ${r.resultingRevision}` : "";
+  const who = r ? ` (proposed by ${r.proposerId}${r.approverId ? `, approved by ${r.approverId}` : ""}; record is ${r.status})` : " (not recorded)";
+  console.log(`${o.changeId ?? "(no change id)"}: ${o.status}${rev}${who}`);
+  printDiagnostics(o.diagnostics);
+  return o.status === "applied" || o.status === "pending" ? 0 : 1;
 }
 function printTree(n: TreeNode, depth = 0) {
   console.log(`${"  ".repeat(depth)}${n.kind} ${n.id}${n.name !== n.id ? ` "${n.name}"` : ""}`);
@@ -70,9 +72,9 @@ function main(): number {
       return 0;
     }
     case "propose":
-      return printRecord(new ModelEngine(new FileStore(a!)).propose(parseYaml(readFileSync(b!, "utf8")), ctx));
+      return printOutcome(new ModelEngine(new FileStore(a!)).propose(parseYaml(readFileSync(b!, "utf8")), ctx));
     case "approve":
-      return printRecord(new ModelEngine(new FileStore(a!)).approve(b!, ctx));
+      return printOutcome(new ModelEngine(new FileStore(a!)).approve(b!, ctx));
     default:
       console.log(USAGE);
       return cmd ? 1 : 0;

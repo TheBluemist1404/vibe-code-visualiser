@@ -1,7 +1,7 @@
 // Typed semantic operations (IR v0.2 §7). Each operation is a discriminated-union member
 // with typed parameters; there is no generic JSON patch.
 import { z } from "zod";
-import { buildIndex, collectRefs, refId, schemas, COLLECTIONS } from "@vcv/ir";
+import { buildIndex, collectRefs, refId, schemas, COLLECTIONS, persistedIdSchema } from "@vcv/ir";
 import type { CollectionName, Diagnostic, Id, Model } from "@vcv/ir";
 
 const id = z.string().min(1);
@@ -25,9 +25,10 @@ export type ModelOperation = z.infer<typeof operationSchema>;
 
 export const proposedChangeSchema = z
   .object({
-    changeId: id,
+    // Change and revision IDs become file names in the store, so they use the persisted-ID grammar.
+    changeId: persistedIdSchema,
     projectId: id,
-    expectedRevision: id,
+    expectedRevision: persistedIdSchema,
     operations: z.array(operationSchema).min(1),
     rationale: z.string().optional(),
   })

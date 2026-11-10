@@ -1,6 +1,6 @@
 // The model engine (IR v0.2 §6–7). Every write surface (CLI, canvas, MCP) calls propose()
 // and approve(); none of them may change the model any other way.
-import { hasErrors, validateModel } from "@vcv/ir";
+import { hasErrors, persistedIdProblem, validateModel } from "@vcv/ir";
 import type { Diagnostic, Model } from "@vcv/ir";
 import { applyOperations, proposedChangeSchema } from "./operations.ts";
 import type { ProposedModelChange } from "./operations.ts";
@@ -22,7 +22,7 @@ export type Permission =
 
 export type ChangeStatus = "pending" | "applied" | "rejected" | "denied";
 
-/** External engine/audit record (§7). Not part of the canonical IR. */
+/** External engine/audit record (§7): the current state of one proposal. Not canonical IR. */
 export type ChangeRecord = {
   changeId: string;
   projectId: string;
@@ -35,11 +35,41 @@ export type ChangeRecord = {
   change: ProposedModelChange;
 };
 
+/** One line of the append-only attempt log. Written for every propose/approve call. */
+export type AuditEvent = {
+  at: string;
+  action: "propose" | "approve";
+  principalId: string;
+  changeId?: string;
+  status: ChangeStatus;
+  codes: string[];
+  resultingRevision?: string;
+};
+
+/** What a propose/approve call did. `record` is the persisted state, when one exists. */
+export type Outcome = {
+  status: ChangeStatus;
+  changeId?: string;
+  diagnostics: Diagnostic[];
+  record?: ChangeRecord;
+};
+
 export type EnginePolicy = {
   /** Whether a pending change may be approved by the principal who proposed it. Default false. */
   allowSelfApproval?: boolean;
+  /** Clock for audit timestamps (injectable for tests). */
+  now?: () => Date;
 };
 
+/**
+ * Audit policy (docs/adr/0004-audit.md):
+ * - A ChangeRecord is persisted only for a well-formed proposal from a principal allowed to
+ *   propose, with a change ID not used before. Its state is then applied, pending or rejected,
+ *   and later approvals update it.
+ * - Every call, including denied, malformed and replayed proposals and every approval
+ *   attempt, appends an AuditEvent. Those attempts never create or alter ChangeRecords, so an
+ *   unauthorized caller cannot claim a change ID or disturb a pending proposal.
+ */
 export class ModelEngine {
   private readonly store: ModelStore;
   private readonly policy: EnginePolicy;
@@ -54,68 +84,88 @@ export class ModelEngine {
   }
 
   record(changeId: string): ChangeRecord | undefined {
-    return this.store.getChange(changeId);
+    return persistedIdProblem(changeId) ? undefined : this.store.getChange(changeId);
+  }
+
+  audit(): AuditEvent[] {
+    return this.store.audit();
   }
 
   /**
    * Validate a proposed change against the current revision and either apply it as one
    * new revision, queue it for approval, reject it, or deny it. Never partially applies.
    */
-  propose(input: unknown, ctx: HostContext): ChangeRecord {
-    const current = this.store.current();
-    const parsed = proposedChangeSchema.safeParse(input);
-    const raw = (input ?? {}) as Partial<ProposedModelChange>;
-    const base = {
-      changeId: String(raw.changeId ?? ""),
-      projectId: String(raw.projectId ?? ""),
-      proposerId: ctx.principalId,
-      baseRevision: String(raw.expectedRevision ?? ""),
-    };
+  propose(input: unknown, ctx: HostContext): Outcome {
+    const raw = (typeof input === "object" && input !== null ? input : {}) as Record<string, unknown>;
+    const claimedId = typeof raw.changeId === "string" ? raw.changeId : undefined;
 
     if (!ctx.permissions.includes("model:propose")) {
-      return this.finish({ ...base, status: "denied", validationResults: [diag("NOT_AUTHORIZED", "", `${ctx.principalId} may not propose changes`)], change: raw as ProposedModelChange }, false);
+      return this.log("propose", ctx, { status: "denied", changeId: claimedId, diagnostics: [diag("NOT_AUTHORIZED", "", `${ctx.principalId} may not propose changes`)] });
     }
+    const parsed = proposedChangeSchema.safeParse(input);
     if (!parsed.success) {
-      const results = parsed.error.issues.map((i) => diag("SCHEMA", i.path.join("."), i.message));
-      return this.finish({ ...base, status: "rejected", validationResults: results, change: raw as ProposedModelChange }, false);
+      const diagnostics = parsed.error.issues.map((i) => diag("SCHEMA", i.path.join("."), i.message));
+      return this.log("propose", ctx, { status: "rejected", changeId: claimedId, diagnostics });
     }
     const change = parsed.data;
-    if (this.store.getChange(change.changeId)) {
+    const existing = this.store.getChange(change.changeId);
+    if (existing) {
       // Replays never overwrite the original record.
-      return { ...base, status: "rejected", validationResults: [diag("DUPLICATE_CHANGE", "changeId", `change "${change.changeId}" was already submitted`)], change };
+      return this.log("propose", ctx, {
+        status: "rejected",
+        changeId: change.changeId,
+        diagnostics: [diag("DUPLICATE_CHANGE", "changeId", `change "${change.changeId}" was already submitted`)],
+        record: existing,
+      });
     }
-    const record: ChangeRecord = { ...base, status: "pending", validationResults: [], change };
 
-    const check = this.dryRun(change, current);
-    if (check.errors.length) return this.finish({ ...record, status: "rejected", validationResults: check.errors });
+    const record: ChangeRecord = {
+      changeId: change.changeId,
+      projectId: change.projectId,
+      proposerId: ctx.principalId,
+      baseRevision: change.expectedRevision,
+      status: "pending",
+      validationResults: [],
+      change,
+    };
+    const check = this.dryRun(change, this.store.current());
+    if (check.errors.length) return this.log("propose", ctx, this.save({ ...record, status: "rejected", validationResults: check.errors }));
     record.validationResults = check.warnings;
 
     const needsApproval =
       !ctx.permissions.includes("model:apply") ||
       (change.operations.some((o) => o.type === "approveDraft") && !ctx.permissions.includes("model:approve"));
-    if (needsApproval) return this.finish(record);
-    return this.commit(record, check.model!);
+    if (needsApproval) return this.log("propose", ctx, this.save(record));
+    return this.log("propose", ctx, this.commit(record, check.model!));
   }
 
-  /** Approve a pending change. Revalidates against the current revision before committing. */
-  approve(changeId: string, ctx: HostContext): ChangeRecord {
+  /**
+   * Approve a pending change. Unauthorized or self-approval attempts are denied and leave the
+   * proposal pending. Authorized approvals revalidate against the current revision first.
+   */
+  approve(changeId: string, ctx: HostContext): Outcome {
+    const idProblem = persistedIdProblem(changeId);
+    if (idProblem) {
+      return this.log("approve", ctx, { status: "rejected", changeId, diagnostics: [diag("INVALID_ID", "changeId", `change id ${idProblem}`)] });
+    }
     const record = this.store.getChange(changeId);
-    if (!record) throw new Error(`unknown change "${changeId}"`);
+    if (!record) {
+      return this.log("approve", ctx, { status: "rejected", changeId, diagnostics: [diag("UNKNOWN_CHANGE", "changeId", `no change "${changeId}"`)] });
+    }
     if (record.status !== "pending") {
-      return { ...record, validationResults: [diag("NOT_PENDING", "", `change is ${record.status}`)] };
+      return this.log("approve", ctx, { status: "rejected", changeId, diagnostics: [diag("NOT_PENDING", "", `change is ${record.status}`)], record });
     }
     if (!ctx.permissions.includes("model:approve")) {
-      // An unauthorized approval attempt is denied but leaves the proposal pending for a real approver.
-      return { ...record, status: "denied", validationResults: [diag("NOT_AUTHORIZED", "", `${ctx.principalId} may not approve changes`)] };
+      return this.log("approve", ctx, { status: "denied", changeId, diagnostics: [diag("NOT_AUTHORIZED", "", `${ctx.principalId} may not approve changes`)], record });
     }
     if (ctx.principalId === record.proposerId && !this.policy.allowSelfApproval) {
-      return { ...record, status: "denied", validationResults: [diag("SELF_APPROVAL", "", "a proposer cannot approve their own change")] };
+      return this.log("approve", ctx, { status: "denied", changeId, diagnostics: [diag("SELF_APPROVAL", "", "a proposer cannot approve their own change")], record });
     }
     const check = this.dryRun(record.change, this.store.current());
     if (check.errors.length) {
-      return this.finish({ ...record, approverId: ctx.principalId, status: "rejected", validationResults: check.errors });
+      return this.log("approve", ctx, this.save({ ...record, approverId: ctx.principalId, status: "rejected", validationResults: check.errors }));
     }
-    return this.commit({ ...record, validationResults: check.warnings }, check.model!, ctx.principalId);
+    return this.log("approve", ctx, this.commit({ ...record, approverId: ctx.principalId, validationResults: check.warnings }, check.model!));
   }
 
   private dryRun(change: ProposedModelChange, current: Model): { model?: Model; errors: Diagnostic[]; warnings: Diagnostic[] } {
@@ -136,17 +186,30 @@ export class ModelEngine {
       : { model: applied.model, errors: [], warnings: results };
   }
 
-  private commit(record: ChangeRecord, model: Model, approverId?: string): ChangeRecord {
+  private commit(record: ChangeRecord, model: Model): Outcome {
     const next = nextRevision(model.project.modelRevision);
     model.project.modelRevision = next;
-    const done: ChangeRecord = { ...record, status: "applied", resultingRevision: next, ...(approverId ? { approverId } : {}) };
+    const done: ChangeRecord = { ...record, status: "applied", resultingRevision: next };
     this.store.commit(model, done);
-    return done;
+    return { status: "applied", changeId: done.changeId, diagnostics: done.validationResults, record: done };
   }
 
-  private finish(record: ChangeRecord, persist = true): ChangeRecord {
-    if (persist) this.store.putChange(record);
-    return record;
+  private save(record: ChangeRecord): Outcome {
+    this.store.putChange(record);
+    return { status: record.status, changeId: record.changeId, diagnostics: record.validationResults, record };
+  }
+
+  private log(action: AuditEvent["action"], ctx: HostContext, outcome: Outcome): Outcome {
+    this.store.appendAudit({
+      at: (this.policy.now?.() ?? new Date()).toISOString(),
+      action,
+      principalId: ctx.principalId,
+      ...(outcome.changeId !== undefined ? { changeId: outcome.changeId } : {}),
+      status: outcome.status,
+      codes: outcome.diagnostics.filter((d) => d.severity === "error").map((d) => d.code),
+      ...(outcome.status === "applied" && outcome.record?.resultingRevision ? { resultingRevision: outcome.record.resultingRevision } : {}),
+    });
+    return outcome;
   }
 }
 

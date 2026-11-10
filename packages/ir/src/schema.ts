@@ -1,6 +1,7 @@
 // Level 1 validation: shape and primitive types only. References are checked in validate.ts.
 import { z } from "zod";
 import { ATTRIBUTE_TYPES } from "./types.ts";
+import { persistedIdSchema } from "./ids.ts";
 
 const id = z.string().min(1);
 const unresolved = z.object({ unresolved: z.string().min(1), diagnostic: z.string().optional() }).strict();
@@ -68,7 +69,7 @@ export const modelSchema = z
       .object({
         id,
         name: z.string().min(1),
-        modelRevision: z.string().min(1),
+        modelRevision: persistedIdSchema,
         status: z.enum(["draft", "approved"]),
         description: z.string().optional(),
       })
