@@ -10,7 +10,12 @@ import type { Diagnostic, TreeNode } from "../../../packages/ir/src/index.ts";
 import { FileStore, ModelEngine, StoreError } from "../../../packages/core/src/index.ts";
 import { createQueryApi } from "../../../packages/query/src/index.ts";
 import {
+  ApprovalError,
   BindingError,
+  addTrustedReviewer,
+  checkIntegrity,
+  createReviewerKey,
+  reviewApprove,
   PROPOSAL_LIMITS,
   createEvidenceApi,
   listProposals,
@@ -28,7 +33,7 @@ import {
   verifyBinding,
   verifyBindings,
 } from "../../../packages/repo/src/index.ts";
-import type { BindingHost, HintedDiagnostic, ProjectStatus, ProposalPreview, ProposalResult, Verification } from "../../../packages/repo/src/index.ts";
+import type { BindingHost, HintedDiagnostic, IntegrityReport, TrustSource, ProjectStatus, ProposalPreview, ProposalResult, Verification } from "../../../packages/repo/src/index.ts";
 import type { BindingRelation, ClaimSource } from "../../../packages/core/src/index.ts";
 import type { HostContext, Outcome, Permission } from "../../../packages/core/src/index.ts";
 
@@ -56,6 +61,20 @@ const USAGE = `vcv <command> [options]
                                         operations, before/after delta, structural impact across modules and
                                         contracts, affected binding claims, diagnostics now, assumptions
   proposal list <path> [--states pending,stale,rejected,applied,invalid] [--json]
+
+  reviewer init <key-file> --id <principal> [--add <path>]
+                                        Create a reviewer Ed25519 key (private key to <key-file>, mode 0600;
+                                        keep it outside the repository and any agent sandbox). Prints the
+                                        public trust-list entry; --add appends it to <path>/.vcv/reviewers.json
+  review approve <path> <changeId> --digest <proposalDigest> --key <key-file>
+              [--trust-ref <ref> (default HEAD) | --trust <file> | --trust-working-tree]
+                                        The trusted reviewer step: identity and permission come from the key's
+                                        entry in the trust list, never from --as/--perm/VCV_HOST_* (refused here).
+                                        Approves exactly the reviewed content and writes a signed attestation.
+  integrity <path> [--base <ref>] [--trust-ref <ref> | --trust <file>] [--require-attestation] [--json]
+                                        Read-only check of the .vcv/ history: every revision derived by its
+                                        applied change's typed operations, records consistent, base history
+                                        unchanged, approvals attested by trusted keys. Exit 1 on any error.
 
   binding add <path> --object <id> --relation <r> --locator <loc> --source agent|human|tool
               [--id <bindingId>] [--rationale <text>] [--confidence <0..1>] [--revision <rev>] [--allow-unchecked]
@@ -119,6 +138,14 @@ const { positionals, values } = parseArgs({
     since: { type: "string" },
     request: { type: "string" },
     file: { type: "string" },
+    digest: { type: "string" },
+    key: { type: "string" },
+    trust: { type: "string" },
+    "trust-ref": { type: "string" },
+    "trust-working-tree": { type: "boolean", default: false },
+    base: { type: "string" },
+    "require-attestation": { type: "boolean", default: false },
+    add: { type: "string" },
   },
 });
 const [cmd, a, b, ...rest] = positionals;
@@ -233,8 +260,13 @@ function main(): number {
     }
     case "propose":
       return printOutcome(new ModelEngine(new FileStore(a!)).propose(parseYaml(readInput(b)), ctx));
-    case "approve":
-      return printOutcome(new ModelEngine(new FileStore(a!)).approve(b!, ctx));
+    case "approve": {
+      // Developer path: identity is asserted by flags/env, so it writes no attestation and the
+      // integrity check reports the result as unattested (docs/approvals.md).
+      const code = printOutcome(new ModelEngine(new FileStore(a!)).approve(b!, ctx));
+      console.log("  note: developer approval (identity asserted by --as/--perm or VCV_HOST_*); no attestation. Use `vcv review approve` for a trusted reviewer approval.");
+      return code;
+    }
     case "query": {
       // Opening the store runs recovery; queries themselves never write.
       const q = createQueryApi(new FileStore(a!));
@@ -278,6 +310,11 @@ function main(): number {
       return evidenceCommand();
     case "proposal":
       return proposalCommand();
+    case "reviewer":
+    case "review":
+      return reviewCommand();
+    case "integrity":
+      return integrityCommand();
     default:
       console.log(USAGE);
       return cmd ? 1 : 0;
@@ -468,6 +505,68 @@ function proposalCommand(): number {
   }
 }
 
+/** Review commands take no identity from flags or the environment: the key and trust list decide. */
+function refuseAssertedIdentity(what: string) {
+  if (values.as !== undefined || values.perm !== undefined || process.env.VCV_HOST_PRINCIPAL !== undefined || process.env.VCV_HOST_PERMISSIONS !== undefined) {
+    throw new InputError(`${what} takes no --as/--perm and refuses to run under VCV_HOST_PRINCIPAL/VCV_HOST_PERMISSIONS (an agent host); the reviewer's identity comes from --key and the trust list`);
+  }
+}
+
+function trustSource(defaultRef: string | null): TrustSource | undefined {
+  const given = [values.trust !== undefined, values["trust-ref"] !== undefined, values["trust-working-tree"]].filter(Boolean).length;
+  if (given > 1) throw new InputError("pass one of --trust <file>, --trust-ref <ref> or --trust-working-tree");
+  if (values.trust !== undefined) return { kind: "file", path: values.trust };
+  if (values["trust-ref"] !== undefined) return { kind: "git-ref", ref: values["trust-ref"] };
+  if (values["trust-working-tree"]) return { kind: "working-tree" };
+  return defaultRef ? { kind: "git-ref", ref: defaultRef } : undefined;
+}
+
+function reviewCommand(): number {
+  if (cmd === "reviewer") {
+    if (a !== "init") {
+      console.log(USAGE);
+      return 1;
+    }
+    refuseAssertedIdentity("vcv reviewer init");
+    const entry = createReviewerKey(need(values.id, "--id"), need(b, "<key-file>"));
+    console.log(`private key written to ${b} (mode 0600). Keep it outside the repository and any agent sandbox.`);
+    console.log("trust-list entry (add it to .vcv/reviewers.json through a reviewed PR to the protected branch):");
+    console.log(JSON.stringify(entry, null, 2));
+    if (values.add !== undefined) console.log(`added to ${addTrustedReviewer(values.add, entry)}; commit it`);
+    return 0;
+  }
+  if (a !== "approve") {
+    console.log(USAGE);
+    return 1;
+  }
+  refuseAssertedIdentity("vcv review approve");
+  const path = need(b, "<path>");
+  const r = reviewApprove(path, { changeId: need(rest[0], "<changeId>"), expectedDigest: need(values.digest, "--digest"), keyFile: need(values.key, "--key"), trust: trustSource("HEAD")! });
+  console.log(`reviewer: ${r.reviewer.id} (key ${r.reviewer.keyFingerprint}, trusted per ${r.reviewer.trustSource})`);
+  const code = printOutcome(r.outcome);
+  if (r.attestation) console.log(`  attestation: ${r.attestation.file} (commit it with the change record and the new revision)`);
+  return code;
+}
+
+function printIntegrity(r: IntegrityReport) {
+  console.log(`integrity: ${r.ok ? "ok" : "FAILED"}${r.projectId ? ` (${r.projectId} at ${r.revision})` : ""}`);
+  if (r.base) console.log(`  base:  ${r.base.ref} ${r.base.commit.slice(0, 12)} at ${r.base.revision ?? "(no .vcv/)"}`);
+  console.log(`  trust: ${r.trust ? `${r.trust.source}, ${r.trust.reviewers} reviewer(s)` : "none"}`);
+  for (const c of r.revisions) {
+    console.log(`  ${c.seq}. ${c.revision}${c.introduced ? " (new)" : ""}: ${c.derivation}${c.changeId ? ` by ${c.changeId}` : ""}; approval ${c.approval.state}${c.approval.detail ? ` (${c.approval.detail})` : ""}`);
+  }
+  for (const p of r.problems) console.log(`  ${p.severity === "error" ? "✗" : "!"} ${p.code}: ${p.message}`);
+  console.log("  not provable here:");
+  for (const l of r.limits) console.log(`    - ${l}`);
+}
+
+function integrityCommand(): number {
+  const r = checkIntegrity(need(a, "<path>"), { trust: trustSource(null), ...(values.base !== undefined ? { base: values.base } : {}), requireAttestation: values["require-attestation"] });
+  if (values.json) console.log(JSON.stringify(r, null, 2));
+  else printIntegrity(r);
+  return r.ok ? 0 : 1;
+}
+
 function evidenceCommand(): number {
   const api = createEvidenceApi(need(a, "<path>"));
   const list = (v: string | undefined) => (v === undefined ? undefined : v.split(",").map((x) => x.trim()).filter(Boolean));
@@ -509,7 +608,7 @@ try {
   // Store problems (e.g. CONFLICTED or DIVERGED after a Git merge) and unreadable inputs are
   // reported, not thrown at the user.
   if (err instanceof InputError) console.error(`✗ INPUT: ${err.message}`);
-  else if (err instanceof StoreError || err instanceof BindingError) console.error(`✗ ${err.code}: ${err.message}`);
+  else if (err instanceof StoreError || err instanceof BindingError || err instanceof ApprovalError) console.error(`✗ ${err.code}: ${err.message}`);
   else throw err;
   process.exitCode = 2;
 }

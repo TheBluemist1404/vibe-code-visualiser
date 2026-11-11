@@ -106,3 +106,48 @@ test("evidence: flags build the same request as --request, and the result is JSO
   assert.equal(json(missing).error.code, "UNKNOWN_ID");
   assert.equal(vcv("evidence", repo, "object", "--request", "{nope").stderr.trim(), "✗ INPUT: --request must be a JSON object");
 });
+
+test("review approve: refused under an agent host or with --as/--perm; a trusted key applies the reviewed digest; integrity exits 0, then 1 on a tampered store", async () => {
+  const { baseline, git } = await import("../../../packages/repo/test/course-desk.ts");
+  const repo = baseline();
+  const key = join(tmp(), "hoang.pem");
+  const init = vcv("reviewer", "init", key, "--id", "user:hoang", "--add", repo);
+  assert.equal(init.status, 0, init.stderr);
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "trust user:hoang");
+  git(repo, "checkout", "-q", "-b", "feature");
+  const file = join(tmp(), "change.json");
+  writeFileSync(file, JSON.stringify({ changeId: "chg-a", projectId: "prj-course-desk", expectedRevision: "rev-1", rationale: "x", operations: [{ type: "setDescription", objectId: "mod-web", description: "new" }] }));
+  const agentEnv = { ...process.env, VCV_HOST_PRINCIPAL: "agent:coder", VCV_HOST_PERMISSIONS: "model:propose" };
+  const run = (env: NodeJS.ProcessEnv, ...args: string[]) => spawnSync("node", ["--experimental-strip-types", "--no-warnings", MAIN, ...args], { encoding: "utf8", env });
+  assert.equal(run(agentEnv, "proposal", "submit", repo, file).status, 0);
+  const digest = JSON.parse(vcv("proposal", "preview", repo, "chg-a", "--json").stdout).data.proposal.proposalDigest as string;
+
+  const asAgent = run(agentEnv, "review", "approve", repo, "chg-a", "--digest", digest, "--key", key);
+  assert.equal(asAgent.status, 2);
+  assert.match(asAgent.stderr, /refuses to run under VCV_HOST_PRINCIPAL/);
+  assert.equal(vcv("review", "approve", repo, "chg-a", "--digest", digest, "--key", key, "--as", "user:hoang").status, 2);
+  const wrong = vcv("review", "approve", repo, "chg-a", "--digest", "0".repeat(64), "--key", key);
+  assert.equal(wrong.status, 1);
+  assert.match(wrong.stdout, /✗ DIGEST_MISMATCH/);
+
+  const ok = vcv("review", "approve", repo, "chg-a", "--digest", digest, "--key", key);
+  assert.equal(ok.status, 0, ok.stderr + ok.stdout);
+  assert.match(ok.stdout, /chg-a: applied → rev-2-[0-9a-f]{12} \(proposed by agent:coder, approved by user:hoang/);
+  assert.match(ok.stdout, /attestation: \.vcv\/approvals\/chg-a\.json/);
+
+  const check = vcv("integrity", repo, "--base", "main", "--trust-ref", "main", "--require-attestation");
+  assert.equal(check.status, 0, check.stdout);
+  assert.match(check.stdout, /^integrity: ok/);
+  assert.match(check.stdout, /approval attested \(signed by user:hoang/);
+  const json = JSON.parse(vcv("integrity", repo, "--base", "main", "--json").stdout);
+  assert.equal(json.ok, true);
+
+  const att = join(repo, ".vcv/approvals/chg-a.json");
+  writeFileSync(att, readFileSync(att, "utf8").replace('"user:hoang"', '"user:mallory"'));
+  const bad = vcv("integrity", repo, "--base", "main", "--trust-ref", "main", "--require-attestation");
+  assert.equal(bad.status, 1, bad.stdout);
+  assert.match(bad.stdout, /^integrity: FAILED/);
+  assert.match(bad.stdout, /✗ APPROVAL_INVALID/);
+  assert.equal(vcv("integrity", repo, "--base", "main").status, 1, "an attestation that does not verify fails even without --require-attestation");
+});

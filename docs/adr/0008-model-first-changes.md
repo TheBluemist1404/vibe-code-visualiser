@@ -72,6 +72,37 @@ what a proposal changes before deciding.
   a file over 1 MB before parsing. Oversized proposals are rejected without a record and, unlike
   engine refusals, without an audit line (they never reach the engine).
 
+## M3.2 decisions
+
+- **Identity is a key, not a claim.** Flags (`--as`, `--perm`), `VCV_HOST_*` and principal IDs in
+  change records are all writable by a shell agent in the same checkout. `vcv review approve`
+  refuses the first two outright and derives the approver from the trust-list entry whose
+  Ed25519 public key matches the reviewer's private key. `node:crypto` only; no new dependency.
+- **Trust comes from a ref, by default.** `.vcv/reviewers.json` is read from a Git ref
+  (`--trust-ref`, default `HEAD` locally, the base branch in CI) or a file outside the checkout.
+  The working tree is accepted only with `--trust-working-tree` and is reported as unprotected
+  (`TRUST_FROM_CHECKOUT`), because a PR can edit its own trust list.
+- **Approval binds to `proposalDigest`.** `ModelEngine.approve` takes `expectedDigest`; a
+  mismatch is a refusal (`DIGEST_MISMATCH`) that leaves the record pending and is audited, so a
+  proposal re-submitted or edited after preview cannot ride on an earlier review. The digest
+  stays derived, never stored (M3.1).
+- **Attestation beside the record, not inside it.** `.vcv/approvals/<changeId>.json` signs
+  `"vcv-approval-v1\0" + canonicalJson(body)` and repeats the record's fields so integrity can
+  compare them. Keeping it separate leaves the change-record format and revision IDs unchanged
+  and lets unattested history (legacy `vcv approve`, direct apply, all of M1/M2) stay readable,
+  reported as `missing` provenance.
+- **Integrity is a replay, read-only.** `vcv integrity` replays each applied record's typed
+  operations with `checkChange` on the parent revision and compares `revisionDigest`, so a
+  hand-written or edited revision fails regardless of signatures. With `--base`, the base's
+  history must be a prefix of the checkout's. An attestation that is present but does not
+  verify is always an error; a missing one is a warning unless `--require-attestation`. Reads
+  use the M2.4/M3.1 safe reader; nothing is written, not even an audit line.
+- **Honest limits in the output.** Every report lists what it cannot prove (who held a key, the
+  trust list's own correctness, the initial revision's origin, code vs model, the local audit
+  log), so a green check is not read as more than it is.
+- **No MCP approval tool**, no revocation list or key expiry (remove the entry on the protected
+  branch); both can come later without changing the attestation format (`format: 1`).
+
 ## Consequences
 
 - New: `readStoreFile` / `STORE_FILE_LIMITS` in core (now used by every store read), `packages/repo/src/proposals.ts` (`submitProposal`, `listProposals`, `previewProposal`,
@@ -79,3 +110,9 @@ what a proposal changes before deciding.
   `checkChange` / `proposalDigest` exported from the engine, CLI `vcv proposal submit|preview|list`,
   MCP `vcv_list_proposals` / `vcv_preview_proposal`.
 - Unchanged: `vcv propose` / `vcv approve`, the store format, change records, revision IDs.
+- M3.2 new: `packages/repo/src/approval.ts` (`createReviewerKey`, `addTrustedReviewer`,
+  `loadTrust`, `reviewApprove`, `readAttestation`), `packages/repo/src/integrity.ts`
+  (`checkIntegrity`), `ApproveOptions.expectedDigest` in the engine, `resolveCommit` /
+  `fileAtCommit` git helpers, CLI `vcv reviewer init`, `vcv review approve`, `vcv integrity`.
+  New store files: `.vcv/reviewers.json`, `.vcv/approvals/`. Unchanged: change records,
+  revision IDs, `vcv approve`.

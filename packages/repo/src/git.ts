@@ -105,3 +105,28 @@ function gitOperation(root: string): GitOperation | null {
   if (marker("REVERT_HEAD")) return "revert";
   return null;
 }
+
+/** The commit a ref (branch, tag, SHA, `origin/main`, `HEAD~1`) names, or null. Read-only; refs starting with "-" are refused. */
+export function resolveCommit(root: string, ref: string): string | null {
+  if (!ref || ref.startsWith("-") || /[\0\s]/.test(ref)) return null;
+  return git(root, ["rev-parse", "--verify", "-q", "--end-of-options", `${ref}^{commit}`])?.trim() || null;
+}
+
+/**
+ * The bytes of a repository-relative file at a commit, or null if it does not exist there or is
+ * larger than `max` bytes. Read-only (`git cat-file`); never touches the working tree.
+ */
+export function fileAtCommit(root: string, commit: string, rel: string, max: number): Buffer | null {
+  if (!/^[0-9a-f]{40,64}$/.test(commit) || rel.startsWith("-") || rel.includes("\0")) return null;
+  const size = git(root, ["cat-file", "-s", `${commit}:${rel}`]);
+  if (size === null || Number(size.trim()) > max) return null;
+  try {
+    return execFileSync("git", ["-C", root, "cat-file", "blob", `${commit}:${rel}`], {
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: max + 1,
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0", LC_ALL: "C" },
+    });
+  } catch {
+    return null;
+  }
+}

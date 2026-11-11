@@ -7,8 +7,8 @@ would change before deciding. This is the first step of the model-first path in
 1. the agent reads the model and the source evidence and **authors a typed proposal** (a YAML or
    JSON file of its own, outside `.vcv/`);
 2. **VCV validates** it and records it as pending: `vcv proposal submit`;
-3. **a separate reviewer** previews it (`vcv proposal preview`) and decides (approval and its
-   trust boundary are M3.2);
+3. **a separate reviewer** previews it (`vcv proposal preview`) and approves the exact digest
+   with a trusted key (`vcv review approve`, see [approvals.md](approvals.md));
 4. only an approved change becomes the next canonical `.vcv/` revision; implementation comes
    after that (M3.3).
 
@@ -66,7 +66,7 @@ saying what to do (`STALE_REVISION`: re-read and resubmit against the current re
 A proposal is identified by its change ID (used once; a replay never overwrites the original
 record) and by its **proposal digest**: sha256 over the canonical JSON of the change exactly as
 submitted. The digest is derived, never stored, and the same for a dry run and for the recorded
-proposal, so a reviewer can bind a decision to the content they saw (M3.2).
+proposal, so a reviewer can bind a decision to the content they saw (`vcv review approve --digest`, see [approvals.md](approvals.md)).
 
 ## Reviewing: preview
 
@@ -129,8 +129,8 @@ Four things are reported separately and none implies another:
   `applied-by-host` means it was applied without a separate approver (a host with
   `model:apply`, or a self-approval the policy allowed); `approved-by-separate-reviewer` means
   the record names an approver other than the proposer. Either way a record in a Git
-  repository is not proof that a particular person approved it; M3.2 defines the trust boundary
-  and the integrity check.
+  repository is not proof that a particular person approved it; a signed attestation checked by
+  `vcv integrity` is ([approvals.md](approvals.md)).
 - **snapshot status** (`snapshotStatus`, draft or approved): the model's own `approveDraft`
   flag. Approving a change does not approve a draft snapshot, and vice versa.
 - **binding resolution** (`vcv evidence`): whether a pointer into the code resolves. Not model
@@ -140,7 +140,7 @@ Four things are reported separately and none implies another:
 
 ## What this does not do
 
-No MCP write tools (submission is the host's CLI), no approval surface beyond the existing
-`vcv approve` (M3.2 replaces it with a trusted reviewer step), no implementation handoff
+No MCP write tools (submission is the host's CLI), no approval here (that is
+`vcv review approve`, [approvals.md](approvals.md)), no implementation handoff
 (M3.3), no reconciliation of code and model (M4). VCV never writes a proposal itself: the agent
 authors it, VCV validates and records it.

@@ -5,3 +5,5 @@ export * from "./resolver.ts";
 export * from "./bindings.ts";
 export * from "./evidence.ts";
 export * from "./proposals.ts";
+export * from "./approval.ts";
+export * from "./integrity.ts";

@@ -61,6 +61,11 @@ export type Outcome = {
   record?: ChangeRecord;
 };
 
+export type ApproveOptions = {
+  /** The proposalDigest the reviewer reviewed; approval is refused if the record's content differs. */
+  expectedDigest?: string;
+};
+
 export type EnginePolicy = {
   /** Whether a pending change may be approved by the principal who proposed it. Default false. */
   allowSelfApproval?: boolean;
@@ -159,7 +164,7 @@ export class ModelEngine {
    * Approve a pending change. Unauthorized or self-approval attempts are denied and leave the
    * proposal pending. Authorized approvals revalidate against the current revision first.
    */
-  approve(changeId: string, ctx: HostContext): Outcome {
+  approve(changeId: string, ctx: HostContext, opts: ApproveOptions = {}): Outcome {
     const idProblem = persistedIdProblem(changeId);
     if (idProblem) {
       return this.log("approve", ctx, { status: "rejected", changeId, diagnostics: [diag("INVALID_ID", "changeId", `change id ${idProblem}`)] });
@@ -177,6 +182,16 @@ export class ModelEngine {
     }
     if (ctx.principalId === record.proposerId && !this.policy.allowSelfApproval) {
       return this.log("approve", ctx, { status: "denied", changeId, diagnostics: [diag("SELF_APPROVAL", "", "a proposer cannot approve their own change")], record });
+    }
+    // M3.2: bind the decision to the content the reviewer saw. A record edited after the preview
+    // no longer matches; nothing is changed and the proposal stays pending.
+    if (opts.expectedDigest !== undefined && opts.expectedDigest !== proposalDigest(record.change)) {
+      return this.log("approve", ctx, {
+        status: "rejected",
+        changeId,
+        diagnostics: [diag("DIGEST_MISMATCH", "", `the proposal's content digest is ${proposalDigest(record.change)}, not the reviewed ${opts.expectedDigest}; preview it again`)],
+        record,
+      });
     }
     const check = this.dryRun(record.change, snap.model);
     if (check.errors.length) {
