@@ -407,6 +407,10 @@ export class FileStore implements ModelStore {
       }
       readRevisionFile(this.dir, rev, head.history); // parses and verifies branch-safe digests
     }
+    // Leftover classification relies on reading every applied record, so an unreadable record
+    // is a refusal too, raised before anything is moved.
+    const badRecord = unreadableChangeRecords(this.dir)[0];
+    if (badRecord) throw new StoreError("CORRUPT", badRecord);
     for (const u of unlisted) {
       renameSync(join(this.dir, "revisions", u.file), join(this.dir, "orphaned", `revision.${u.file}`));
       report.orphanedRevisions.push(u.id);
@@ -654,6 +658,27 @@ export function unlistedRevisions(dir: string, head: { revision: string; history
 }
 
 /** Revision ID → change ID, for every readable "applied" change record. Read-only. */
+/** One message per `changes/*.json` file that is not a readable record for its own change ID. */
+function unreadableChangeRecords(dir: string): string[] {
+  if (!existsSync(join(dir, "changes"))) return [];
+  const out: string[] = [];
+  for (const f of readdirSync(join(dir, "changes")).sort()) {
+    if (f.includes(".tmp-") || !f.endsWith(".json")) continue;
+    const id = f.replace(/\.json$/, "");
+    let rec: unknown;
+    try {
+      rec = JSON.parse(readFileSync(join(dir, "changes", f), "utf8"));
+    } catch {
+      out.push(`change record ${id} is unreadable (changes/${f} is not valid JSON)`);
+      continue;
+    }
+    if (typeof rec !== "object" || rec === null || (rec as Partial<ChangeRecord>).changeId !== id) {
+      out.push(`change record ${id} is unreadable (changes/${f} does not hold the record for ${id})`);
+    }
+  }
+  return out;
+}
+
 function appliedRevisions(dir: string): Map<string, string> {
   const out = new Map<string, string>();
   if (!existsSync(join(dir, "changes"))) return out;
@@ -663,7 +688,7 @@ function appliedRevisions(dir: string): Map<string, string> {
       const rec = JSON.parse(readFileSync(join(dir, "changes", f), "utf8")) as Partial<ChangeRecord>;
       if (rec.status === "applied" && typeof rec.resultingRevision === "string") out.set(rec.resultingRevision, rec.changeId ?? f.replace(/\.json$/, ""));
     } catch {
-      // unreadable records are reported by the regular checks
+      // reported by unreadableChangeRecords(), which inspection and recovery both check
     }
   }
   return out;
@@ -705,6 +730,10 @@ export function inspectStore(dir: string): StoreInspection {
   } catch (e) {
     return { state: "invalid", dir, message: e instanceof Error ? e.message : String(e) };
   }
+  // Same rule as the writer: a store with an unreadable change record is not healthy, so status,
+  // reader and writer agree on it.
+  const badRecord = unreadableChangeRecords(dir)[0];
+  if (badRecord) return { state: "invalid", dir, message: badRecord };
   const unlisted = unlistedRevisions(dir, head);
   const foreign = unlisted.filter((u) => u.kind === "foreign");
   const leftovers = unlisted.filter((u) => u.kind === "leftover");

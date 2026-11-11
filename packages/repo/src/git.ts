@@ -64,13 +64,14 @@ export function observeGit(root: string, storeRelPath = ".vcv"): GitObservation 
 }
 
 /** Paths from `git status --porcelain=v1 -z`; renames contribute both names. */
-function parsePorcelainZ(text: string): string[] {
+export function parsePorcelainZ(text: string): string[] {
   const parts = text.split("\0").filter(Boolean);
   const out: string[] = [];
   for (let i = 0; i < parts.length; i++) {
     const entry = parts[i]!;
     out.push(entry.slice(3));
-    if (entry[0] === "R" || entry[0] === "C") out.push(parts[++i]!); // the original path follows
+    // Renames and copies are followed by the original path, whether staged (X) or not (Y).
+    if ("RC".includes(entry[0]!) || "RC".includes(entry[1]!)) out.push(parts[++i]!);
   }
   return out;
 }

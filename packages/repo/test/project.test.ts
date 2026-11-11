@@ -10,7 +10,7 @@ import type { Model } from "@vcv/ir";
 import { FileStore, ModelEngine, StoreError } from "@vcv/core";
 import type { HostContext, ModelStore, ProposedModelChange } from "@vcv/core";
 import { createQueryApi } from "@vcv/query";
-import { RepositoryProject, ProjectError, VCV_DIR, compareLines, initProject, projectStatus } from "../src/index.ts";
+import { RepositoryProject, ProjectError, VCV_DIR, compareLines, initProject, parsePorcelainZ, projectStatus } from "../src/index.ts";
 
 const FIXTURES = join(import.meta.dirname, "../../../examples/enrollment");
 const baseModel = (): Model => loadModel(readFileSync(join(FIXTURES, "model.rev-1.yaml"), "utf8")).model!;
@@ -489,4 +489,31 @@ test("compareLines classifies history movement", () => {
   assert.equal(compareLines(["a", "b"], ["a", "c"]), "switched");
   assert.equal(compareLines(null, ["a"]), "appeared");
   assert.equal(compareLines(["a"], null), "disappeared");
+});
+
+test("project status reports an unreadable change record like the writer does (PR #8 review, round 8)", () => {
+  const repo = repoWithProject();
+  const agent: HostContext = { principalId: "agent:a", permissions: ["model:propose"] };
+  assert.equal(engineFor(repo).propose(rename("ch-p", "rev-1", "Waiting (pending)"), agent).status, "pending");
+  writeFileSync(join(repo, VCV_DIR, "changes", "ch-p.json"), '{"changeId": "ch-p", "status": "pend');
+  const s = projectStatus(repo);
+  assert.equal(s.state, "invalid");
+  assert.equal(s.diagnostics[0]!.code, "INVALID_STORE");
+  assert.match(s.diagnostics[0]!.message, /ch-p is unreadable/);
+  assert.throws(() => RepositoryProject.open(repo), ProjectError);
+  assert.throws(() => engineFor(repo), (e: unknown) => e instanceof StoreError && e.code === "CORRUPT");
+});
+
+test("Git observation keeps both paths of staged and unstaged renames (PR #8 review, round 8)", () => {
+  assert.deepEqual(parsePorcelainZ("R  .vcv/b\0.vcv/a\0 M x\0"), [".vcv/b", ".vcv/a", "x"], "staged (X = R)");
+  assert.deepEqual(parsePorcelainZ(" R .vcv/b\0.vcv/a\0 M x\0"), [".vcv/b", ".vcv/a", "x"], "unstaged (Y = R)");
+  assert.deepEqual(parsePorcelainZ("C  .vcv/c\0.vcv/a\0"), [".vcv/c", ".vcv/a"], "copy");
+
+  // The reviewer's repro: an intent-to-add rename shows up as " R" in the worktree column.
+  const repo = repoWithProject();
+  git(repo, "mv", `${VCV_DIR}/.gitignore`, `${VCV_DIR}/ignore-renamed`);
+  git(repo, "reset", "-q", "HEAD");
+  git(repo, "add", "-N", `${VCV_DIR}/ignore-renamed`);
+  assert.match(git(repo, "status", "--porcelain=v1", "-z"), /^R \.vcv\/ignore-renamed\0\.vcv\/\.gitignore\0/, "Git 2.18+ reports \" R\" (the helper trims the leading space)");
+  assert.deepEqual(projectStatus(repo).git!.storeChanges, [`${VCV_DIR}/.gitignore`, `${VCV_DIR}/ignore-renamed`]);
 });

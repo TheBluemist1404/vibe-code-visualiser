@@ -593,3 +593,27 @@ test("round 7: the store checks the record precondition of a commit even with a 
     assert.deepEqual(store.revisions(), ["rev-1", id]);
   }
 });
+
+// Review on PR #8, round 8 (P2): status, reader and writer agree on an unreadable change record.
+for (const [label, bytes] of [
+  ["malformed JSON", '{"changeId": "ch-p", "status": "pend'],
+  ["a record for another change", JSON.stringify({ changeId: "ch-other", status: "pending" })],
+] as const) {
+  test(`round 8: a change record holding ${label} makes inspection, the reader and the writer all refuse`, () => {
+    const dir = join(tmp(), "store");
+    FileStore.init(dir, baseModel());
+    const e = new ModelEngine(new FileStore(dir));
+    assert.equal(e.propose(timeoutChange(), owner).status, "applied");
+    assert.equal(e.propose(renamePending("ch-p", e.current().project.modelRevision), mcpAgent).status, "pending");
+    writeFileSync(join(dir, "changes", "ch-p.json"), bytes); // no conflict markers
+    const before = filesOf(dir);
+
+    const inspection = inspectStore(dir);
+    assert.equal(inspection.state, "invalid");
+    assert.match((inspection as { message: string }).message, /change record ch-p is unreadable/);
+    assert.throws(() => new FileStoreReader(dir).current(), storeErr("CORRUPT"), "the reader does not serve it");
+    assert.throws(() => new FileStore(dir), storeErr("CORRUPT"), "the writer refuses it");
+    assert.deepEqual(filesOf(dir), before, "nothing was moved or rewritten");
+    assert.ok(!existsSync(join(dir, "orphaned")) || readdirSync(join(dir, "orphaned")).length === 0);
+  });
+}

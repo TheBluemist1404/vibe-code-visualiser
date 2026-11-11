@@ -69,7 +69,7 @@ itself outside Git), inspects `<root>/.vcv` with `inspectStore()` and reports on
 | `uninitialized` | `.vcv/` without `HEAD` | no |
 | `conflicted` | Git conflict markers in `HEAD`, a revision or a change record | no |
 | `diverged` | revision files not in HEAD's history that are not an interrupted commit | no |
-| `invalid` | HEAD unreadable or inconsistent, a listed revision missing or unparsable | no |
+| `invalid` | HEAD unreadable or inconsistent, a listed revision missing or unparsable, or a `changes/*.json` file that is not a readable record for its own ID (status, reader and writer all refuse it; recovery checks it before moving anything) | no |
 
 Inspection and loading never write: no recovery, no directory creation. `RepositoryProject`
 wraps a `FileStoreReader` (ADR 0006), so the served model follows whatever the checkout's
