@@ -521,6 +521,13 @@ export class FileStoreReader {
     return [...readHeadFile(this.dir).history];
   }
 
+  /** A committed revision of the line HEAD names (verified like every revision read), or undefined. */
+  revision(rev: string): Model | undefined {
+    this.check();
+    const head = readHeadFile(this.dir);
+    return head.history.includes(rev) ? readRevisionFile(this.dir, rev, head.history) : undefined;
+  }
+
   /**
    * Re-run the read-only integrity checks (inspectStore) whenever any store file changed, so a
    * long-lived reader refuses a checkout that a fresh open would refuse: conflicted, diverged
@@ -659,6 +666,37 @@ export function unlistedRevisions(dir: string, head: { revision: string; history
 
 /** Revision ID → change ID, for every readable "applied" change record. Read-only. */
 /** One message per `changes/*.json` file that is not a readable record for its own change ID. */
+/** One file under changes/, read without writing anything (M3.1 proposal listings). */
+export type ChangeRecordEntry = { changeId: string; record?: ChangeRecord; problem?: string };
+
+/**
+ * Every change record file in a store directory, in ID order, read-only. A file that is not
+ * valid JSON, or that names another change ID, is listed with a problem instead of a record.
+ * The record content is not otherwise trusted: callers derive state from it, never authority.
+ */
+export function listChangeRecords(dir: string): ChangeRecordEntry[] {
+  if (!existsSync(join(dir, "changes"))) return [];
+  const out: ChangeRecordEntry[] = [];
+  for (const f of readdirSync(join(dir, "changes")).sort()) {
+    if (f.includes(".tmp-") || !f.endsWith(".json")) continue;
+    const changeId = f.replace(/\.json$/, "");
+    if (persistedIdProblem(changeId)) continue;
+    let rec: unknown;
+    try {
+      rec = JSON.parse(readFileSync(join(dir, "changes", f), "utf8"));
+    } catch {
+      out.push({ changeId, problem: `changes/${f} is not valid JSON` });
+      continue;
+    }
+    if (typeof rec !== "object" || rec === null || (rec as Partial<ChangeRecord>).changeId !== changeId) {
+      out.push({ changeId, problem: `changes/${f} does not hold the record for ${changeId}` });
+      continue;
+    }
+    out.push({ changeId, record: rec as ChangeRecord });
+  }
+  return out;
+}
+
 function unreadableChangeRecords(dir: string): string[] {
   if (!existsSync(join(dir, "changes"))) return [];
   const out: string[] = [];

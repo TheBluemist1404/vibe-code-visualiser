@@ -60,6 +60,19 @@ are described in [docs/evidence.md](../../docs/evidence.md). A claim is never pr
 verified meaning or approval: `context.meaning` is `"unverified"` and every claim has
 `approval.approved: false`.
 
+### Proposal tools (`--repo` only, M3.1)
+
+| MCP tool | Operation | CLI |
+|---|---|---|
+| `vcv_list_proposals` | `listProposals` | `vcv proposal list <path>` |
+| `vcv_preview_proposal` | `previewProposal` | `vcv proposal preview <path> <changeId>` (or `--file`) |
+
+Read-only: they list recorded model change proposals with their derived lifecycle and preview
+one (submitted, or a dry run of a change object) before anyone approves it. Submitting is not
+offered over MCP; agents use the host's proposal-only `vcv proposal submit`. Details in
+[docs/proposals.md](../../docs/proposals.md); extra error codes `UNKNOWN_CHANGE`,
+`INVALID_RECORD`.
+
 ## Run it
 
 Node 22.18+. From a VCV checkout:

@@ -67,14 +67,15 @@ const CASES: [Op, unknown][] = [
   ["refresh", { since: "zz" }],
 ];
 
-test("repository mode adds four evidence tools whose schemas are the shared request contracts; store mode is unchanged", async () => {
+test("repository mode adds four evidence tools (and the read-only proposal tools) whose schemas are the shared request contracts; store mode is unchanged", async () => {
   const repo = baseline();
   const s = await connect(repo);
   try {
     const { tools } = await s.client.listTools();
     assert.deepEqual(tools.map((t) => t.name).sort(), [
       "vcv_analyze_impact", "vcv_get_binding_evidence", "vcv_get_context", "vcv_get_evidence_overview",
-      "vcv_get_object_evidence", "vcv_get_project_overview", "vcv_refresh_evidence", "vcv_search_objects",
+      "vcv_get_object_evidence", "vcv_get_project_overview", "vcv_list_proposals", "vcv_preview_proposal",
+      "vcv_refresh_evidence", "vcv_search_objects",
     ]);
     const schema = (n: string) => tools.find((t) => t.name === n)!.inputSchema;
     const strip = (x: z.ZodType) => {

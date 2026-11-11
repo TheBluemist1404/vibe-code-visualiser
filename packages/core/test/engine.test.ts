@@ -249,3 +249,27 @@ test("rule and description edits: createRule, setRuleStatement and setDescriptio
   assert.equal(bad({ type: "createRule", rule: { ...(now.rules[0] as object), id: "rule-new" } as never }).diagnostics[0]!.code, "ID_IN_USE");
   assert.equal(bad({ type: "setRuleStatement", ruleId: rule.id, statement: "" } as never).diagnostics[0]!.code, "SCHEMA");
 });
+
+test("createCapability (M3.1) is typed and validated like the other create operations; checkChange and proposalDigest match the engine", async () => {
+  const { checkChange, proposalDigest } = await import("../src/index.ts");
+  const e = engine();
+  const m = e.current();
+  const mod = m.modules[0]!.id;
+  const cap = { id: "cap-new", kind: "capability" as const, owner: mod, name: "New capability", initiatorActorId: m.actors[0]!.id };
+  const c = change([{ type: "createCapability", capability: cap }]);
+  // The pure check is what propose decides on.
+  const check = checkChange(c, m);
+  assert.deepEqual(check.errors, []);
+  assert.ok(check.model!.capabilities.some((x) => x.id === "cap-new"));
+  assert.equal(proposalDigest(c), proposalDigest(structuredClone(c)), "digest is content-derived");
+  assert.notEqual(proposalDigest(c), proposalDigest({ ...c, rationale: "changed" }));
+  const pending = e.propose(c, mcpAgent);
+  assert.equal(pending.status, "pending");
+  assert.equal(e.current().capabilities.some((x) => x.id === "cap-new"), false, "pending changes nothing");
+
+  const bad = (capability: object) => e.propose(change([{ type: "createCapability", capability } as never]), owner).diagnostics[0]!.code;
+  assert.equal(bad({ ...cap, id: m.capabilities[0]!.id }), "ID_IN_USE");
+  assert.equal(bad({ ...cap, id: "cap-x", owner: "mod-nope" }), "UNKNOWN_REF");
+  assert.equal(bad({ ...cap, id: "cap-y", extra: 1 }), "SCHEMA");
+  assert.equal(checkChange({ ...c, expectedRevision: "rev-9" }, m).errors[0]!.code, "STALE_REVISION");
+});
