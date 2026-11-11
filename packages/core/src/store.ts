@@ -27,6 +27,7 @@ import {
   readSync,
   renameSync,
   rmSync,
+  statSync,
   writeSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
@@ -49,7 +50,9 @@ export type StoreErrorCode =
   /** The store holds revisions that are not in HEAD's history and are not an interrupted commit. */
   | "DIVERGED"
   /** HEAD on disk moved under an open writer (Git checkout/pull, another process); nothing was written. */
-  | "HEAD_CHANGED";
+  | "HEAD_CHANGED"
+  /** Other store files changed under an open writer after validation (e.g. a merge or a same-ID swap); nothing was written. */
+  | "STORE_CHANGED";
 
 export class StoreError extends Error {
   readonly code: StoreErrorCode;
@@ -164,6 +167,8 @@ export class FileStore implements ModelStore {
   private readonly dir: string;
   private readonly opts: FileStoreOptions;
   private head: Head;
+  /** storeFingerprint() at the last successful validation (open, sync) or own write. */
+  private validated = "";
   /** What recovery found and fixed when this store was opened. */
   readonly recovery: RecoveryReport;
 
@@ -173,6 +178,7 @@ export class FileStore implements ModelStore {
     if (!existsSync(join(dir, "HEAD"))) throw new StoreError("NOT_INITIALIZED", `${dir} is not an initialized model store (run init first)`);
     this.head = this.readHead();
     this.recovery = this.recover();
+    this.validated = storeFingerprint(dir);
   }
 
   static init(dir: string, initial: Model, opts: FileStoreOptions = {}): FileStore {
@@ -210,11 +216,19 @@ export class FileStore implements ModelStore {
     // Write guard: the change was validated against this.head. If HEAD on disk moved since then
     // (checkout, pull, another process), writing would replace that line's HEAD. Refuse before
     // touching any file.
+    // The fingerprint also covers the other store files, so a merge that only added revisions or
+    // a same-ID revision swap after validation is refused too.
     const disk = readHeadFile(this.dir);
     if (!sameLine(disk, this.head)) {
       throw new StoreError(
         "HEAD_CHANGED",
         `HEAD moved from ${this.head.revision} to ${disk.revision} on disk since this change was validated (Git checkout, pull or another writer); nothing was written. Re-read the model and retry.`,
+      );
+    }
+    if (storeFingerprint(this.dir) !== this.validated) {
+      throw new StoreError(
+        "STORE_CHANGED",
+        "model store files changed on disk since this change was validated (for example a Git merge or checkout); nothing was written. Re-read the model and retry.",
       );
     }
     assertCommittable(model, record, this.head.history);
@@ -225,6 +239,7 @@ export class FileStore implements ModelStore {
     this.write("head", join(this.dir, "HEAD"), JSON.stringify(next, null, 2) + "\n");
     this.head = next; // committed: from here on the revision exists
     this.write("change", this.changePath(record.changeId), JSON.stringify(record, null, 2) + "\n");
+    this.validated = storeFingerprint(this.dir); // our own writes are known-good
   }
 
   getChange(id: string): ChangeRecord | undefined {
@@ -239,7 +254,10 @@ export class FileStore implements ModelStore {
 
   putChange(record: ChangeRecord): void {
     if (record.status === "applied") throw new StoreError("BAD_COMMIT", "applied records are written only by commit()");
+    const before = storeFingerprint(this.dir);
     durableWrite(this.changePath(record.changeId), JSON.stringify(record, null, 2) + "\n");
+    // Only bless our own write if nothing else had changed; otherwise the next read re-checks.
+    if (before === this.validated) this.validated = storeFingerprint(this.dir);
   }
 
   appendAudit(event: AuditEvent): void {
@@ -355,11 +373,16 @@ export class FileStore implements ModelStore {
   // The new HEAD is adopted only after its checks pass. If they fail, the store keeps the last
   // validated line, so every later read compares against it again and fails again, and commit()
   // refuses with HEAD_CHANGED: a rejected checkout is never served or written over.
+  //
+  // "Moved" means any store file changed, not just HEAD's line: a merge resolved to this
+  // writer's own HEAD adds foreign revisions without touching HEAD (round 4 of the PR #8 review).
   private sync(): void {
+    const fp = storeFingerprint(this.dir);
+    if (fp === this.validated) return;
     const disk = readHeadFile(this.dir);
-    if (sameLine(disk, this.head)) return;
     this.recoverFor(disk);
     this.head = disk;
+    this.validated = storeFingerprint(this.dir); // recovery may have moved a leftover
   }
 
   private changePath(id: string): string {
@@ -385,6 +408,8 @@ export class FileStore implements ModelStore {
 export class FileStoreReader {
   private readonly dir: string;
   private cached?: { key: string; model: Model };
+  /** storeFingerprint() at the last integrity check that passed. */
+  private checked = "";
 
   constructor(dir: string) {
     this.dir = dir;
@@ -394,6 +419,7 @@ export class FileStoreReader {
 
   /** The committed revision HEAD names right now. */
   current(): Model {
+    this.check();
     const head = readHeadFile(this.dir);
     // Cache by what is on disk, not by ID alone: the initial revision and legacy IDs (rev-1) are
     // not content-addressed, so two branches can hold different models under the same ID. The
@@ -407,7 +433,32 @@ export class FileStoreReader {
   }
 
   revisions(): string[] {
+    this.check();
     return [...readHeadFile(this.dir).history];
+  }
+
+  /**
+   * Re-run the read-only integrity checks (inspectStore) whenever any store file changed, so a
+   * long-lived reader refuses a checkout that a fresh open would refuse: conflicted, diverged
+   * (even with HEAD unchanged) or corrupt. Never writes.
+   */
+  private check(): void {
+    const fp = storeFingerprint(this.dir);
+    if (fp === this.checked) return;
+    const r = inspectStore(this.dir);
+    switch (r.state) {
+      case "ok":
+        this.checked = fp;
+        return;
+      case "conflicted":
+        throw conflictError(r.files);
+      case "diverged":
+        throw divergedError(r.foreign);
+      case "invalid":
+        throw new StoreError("CORRUPT", r.message);
+      default:
+        throw new StoreError("NOT_INITIALIZED", `${this.dir} is not an initialized model store`);
+    }
   }
 }
 
@@ -589,6 +640,54 @@ export function revisionFileDigest(dir: string, rev: string): string | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * The model HEAD names, read and verified like any committed revision, without the store-wide
+ * integrity checks. For status reporting of a store that may be diverged; never for serving.
+ */
+export function readHeadRevision(dir: string): Model {
+  const head = readHeadFile(dir);
+  return readRevisionFile(dir, head.revision, head.history);
+}
+
+/**
+ * Cheap identity of the store's shared files: HEAD's bytes, the current revision file's bytes,
+ * and name, size and mtime of every file in revisions/ and changes/. Any Git checkout, merge or
+ * edit that could change what the checks decide changes this value. Read-only.
+ */
+export function storeFingerprint(dir: string): string {
+  const h = createHash("sha256");
+  let headText = "";
+  try {
+    headText = readFileSync(join(dir, "HEAD"), "utf8");
+  } catch {
+    headText = "\0no-head";
+  }
+  h.update(headText).update("\0");
+  try {
+    const rev = (JSON.parse(headText) as { revision?: unknown }).revision;
+    if (typeof rev === "string" && !persistedIdProblem(rev)) h.update(readFileSync(join(dir, "revisions", `${rev}.yaml`)));
+  } catch {
+    h.update("\0unreadable");
+  }
+  for (const sub of ["revisions", "changes"]) {
+    let names: string[] = [];
+    try {
+      names = readdirSync(join(dir, sub)).sort();
+    } catch {
+      names = [];
+    }
+    for (const n of names) {
+      try {
+        const st = statSync(join(dir, sub, n));
+        h.update(`\0${sub}/${n}:${st.size}:${st.mtimeMs}`);
+      } catch {
+        h.update(`\0${sub}/${n}:gone`);
+      }
+    }
+  }
+  return h.digest("hex");
 }
 
 function revisionCacheKey(dir: string, head: Head): string {

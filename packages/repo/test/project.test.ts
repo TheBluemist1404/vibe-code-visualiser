@@ -316,6 +316,46 @@ test("a writer that rejected a diverged checkout keeps rejecting it on later cal
   assert.equal(git(repo, "status", "--porcelain"), "", "HEAD, revisions and records untouched");
 });
 
+test("an open writer and reader survive a merge resolved to their own unchanged HEAD: DIVERGED until resolved (PR #8 review, round 4)", () => {
+  const repo = repoWithProject();
+  git(repo, "checkout", "-q", "-b", "feature-a");
+  const revA = engineFor(repo).propose(rename("ch-a", "rev-1", "Waiting (A)"), owner).record!.resultingRevision!;
+  commitAll(repo, "model: A");
+  git(repo, "checkout", "-q", "main");
+  git(repo, "checkout", "-q", "-b", "feature-b");
+  const revB = engineFor(repo).propose(rename("ch-b", "rev-1", "Waiting (B)"), owner).record!.resultingRevision!;
+  commitAll(repo, "model: B");
+
+  const e = new ModelEngine(new FileStore(join(repo, VCV_DIR))); // long-lived writer at revB
+  const p = RepositoryProject.open(repo); // long-lived reader at revB
+  const q = createQueryApi(p.reader);
+  assert.equal(e.current().project.modelRevision, revB);
+  assert.ok(q.getProjectOverview().ok);
+  const headBytes = readFileSync(join(repo, VCV_DIR, "HEAD"), "utf8");
+
+  assert.equal(tryGit(repo, "merge", "-q", "feature-a"), false);
+  git(repo, "checkout", "--ours", "--", `${VCV_DIR}/HEAD`);
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "merge feature-a, keep our model HEAD");
+  assert.equal(readFileSync(join(repo, VCV_DIR, "HEAD"), "utf8"), headBytes, "HEAD bytes are exactly revB's");
+  assert.equal(projectStatus(repo).state, "diverged");
+
+  const diverged = (err: unknown) => err instanceof StoreError && err.code === "DIVERGED";
+  for (let i = 0; i < 2; i++) {
+    assert.throws(() => e.current(), diverged, `writer read ${i + 1}`);
+    assert.throws(() => p.reader.current(), diverged, `reader read ${i + 1}`);
+  }
+  assert.throws(() => e.propose(rename("ch-c", revB, "Waiting (C)"), owner), diverged);
+  assert.equal(git(repo, "status", "--porcelain"), "", "HEAD untouched, no file relocated, no record written");
+  assert.ok(readdirSync(join(repo, VCV_DIR, "revisions")).includes(`${revA}.yaml`));
+
+  // Manual resolution: drop the other line's revision and record. Both handles recover.
+  git(repo, "rm", "-q", `${VCV_DIR}/revisions/${revA}.yaml`, `${VCV_DIR}/changes/ch-a.json`);
+  git(repo, "commit", "-q", "-m", "keep B's model line");
+  assert.equal(p.reader.current().project.modelRevision, revB);
+  assert.equal(e.propose(rename("ch-c", revB, "Waiting (C)"), owner).status, "applied");
+});
+
 test("model history survives restart and an ordinary checkout round trip", () => {
   const repo = repoWithProject();
   const e = engineFor(repo);

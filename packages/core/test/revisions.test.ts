@@ -124,8 +124,9 @@ test("a merge resolved to one side's HEAD leaves foreign revisions: DIVERGED, an
     assert.equal(inspected.revision, revA);
     assert.deepEqual(inspected.foreign.map((f) => f.id), [revB]);
   }
-  // The read-only reader still serves HEAD's own line (it never reads unlisted files).
-  assert.equal(new FileStoreReader(a).current().project.modelRevision, revA);
+  // A read-only reader refuses it as well, as a fresh RepositoryProject.open() would.
+  assert.ok(revA);
+  assert.throws(() => new FileStoreReader(a), storeErr("DIVERGED"));
 });
 
 test("an interrupted commit is still recognised as a leftover and moved aside", () => {
@@ -310,4 +311,45 @@ test("P2: FileStoreReader notices a different model under the same revision ID",
   other.project.name = "Another LMS";
   writeFileSync(join(dir, "revisions", "rev-1.yaml"), dumpModel(other)); // what a checkout of another branch's rev-1 does
   assert.equal(reader.current().project.name, "Another LMS");
+});
+
+// Review on PR #8, round 4: divergence that leaves HEAD's bytes unchanged.
+test("open writer and reader re-check integrity when revisions appear but HEAD is unchanged", () => {
+  const { a, b, revA, revB } = divergedPair();
+  const store = new FileStore(a);
+  const e = new ModelEngine(store);
+  const reader = new FileStoreReader(a);
+  assert.equal(e.current().project.modelRevision, revA);
+  assert.equal(reader.current().project.modelRevision, revA);
+  // A merge resolved to this side's HEAD: B's revision and applied record arrive, HEAD stays.
+  const head = readFileSync(join(a, "HEAD"), "utf8");
+  cpSync(join(b, "revisions", `${revB}.yaml`), join(a, "revisions", `${revB}.yaml`));
+  cpSync(join(b, "changes"), join(a, "changes"), { recursive: true });
+
+  for (let i = 0; i < 2; i++) {
+    assert.throws(() => e.current(), storeErr("DIVERGED"));
+    assert.throws(() => reader.current(), storeErr("DIVERGED"));
+  }
+  assert.throws(() => e.propose(renamePending("ch-c", revA), owner), storeErr("DIVERGED"));
+  assert.equal(readFileSync(join(a, "HEAD"), "utf8"), head);
+  assert.ok(existsSync(join(a, "revisions", `${revB}.yaml`)));
+  assert.ok(!existsSync(join(a, "changes", "ch-c.json")));
+});
+
+test("commit refuses with STORE_CHANGED if a same-ID revision file is swapped after validation", () => {
+  const dir = join(tmp(), "store");
+  FileStore.init(dir, baseModel());
+  const store = new FileStore(dir);
+  const model = store.current(); // validated: rev-1 is the fixture model
+  model.project.name = "LMS next";
+  const id = branchSafeRevisionId(model, "rev-1", 2);
+  model.project.modelRevision = id;
+  const other = baseModel();
+  other.project.name = "Another branch's rev-1";
+  writeFileSync(join(dir, "revisions", "rev-1.yaml"), dumpModel(other)); // HEAD line unchanged
+  const head = readFileSync(join(dir, "HEAD"), "utf8");
+  const record = { changeId: "ch-swap", projectId: "prj-lms", proposerId: "user:hoang", status: "applied" as const, baseRevision: "rev-1", resultingRevision: id, validationResults: [], change: renamePending("ch-swap") };
+  assert.throws(() => store.commit(model, record), storeErr("STORE_CHANGED"));
+  assert.equal(readFileSync(join(dir, "HEAD"), "utf8"), head);
+  assert.ok(!existsSync(join(dir, "revisions", `${id}.yaml`)));
 });

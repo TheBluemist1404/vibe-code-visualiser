@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Model } from "@vcv/ir";
-import { FileStore, FileStoreReader, StoreError, inspectStore, revisionFileDigest } from "@vcv/core";
+import { FileStore, FileStoreReader, StoreError, inspectStore, readHeadRevision, revisionFileDigest } from "@vcv/core";
 import type { StoreInspection } from "@vcv/core";
 import { findWorkTreeRoot, observeGit } from "./git.ts";
 import type { GitObservation } from "./git.ts";
@@ -116,7 +116,7 @@ export function projectStatus(path: string): ProjectStatus {
     case "diverged":
     case "ok": {
       state = inspection.state === "ok" ? "ready" : "diverged";
-      const m = new FileStoreReader(storeDir).current();
+      const m = readHeadRevision(storeDir); // the reader would (rightly) refuse a diverged store
       model = {
         projectId: m.project.id,
         revision: inspection.revision,
