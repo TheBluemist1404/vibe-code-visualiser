@@ -81,8 +81,13 @@ export type LocatorState =
   /** The file type or selector cannot be checked by the resolver; only the claim is reported. */
   | "unchecked";
 
-/** Overall derived state (ADR 0007 §5). Never stored. */
-export type BindingState = LocatorState | "stale";
+/**
+ * Overall derived state (ADR 0007 §5). Never stored. `resolved` requires complete evidence: a
+ * unique locator and both the source and the model axis known unchanged. `indeterminate`: the
+ * locator resolves but some evidence is unknown (project not ready, the claim's revision is not
+ * in this checkout's history, a fingerprint scheme this VCV does not know), so it is not a pass.
+ */
+export type BindingState = LocatorState | "stale" | "indeterminate";
 
 /**
  * @deprecated M1 placeholder. It treats any commit change as staleness, which ADR 0007 §5

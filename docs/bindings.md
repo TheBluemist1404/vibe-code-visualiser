@@ -82,12 +82,13 @@ over IPC, so it is not used here.
 
 | State | Meaning |
 |---|---|
-| `resolved` | the selector matches exactly one artifact, its code matches the recorded fingerprint, and the bound model object did not change since the claim's revision |
+| `resolved` | the selector matches exactly one artifact, its code is known to match the recorded fingerprint, and the bound model object is known not to have changed since the claim's revision. All evidence must be known; this is the only state `vcv binding verify` exits 0 for |
 | `stale` | it still resolves, but the selected code changed (`source: changed`), or the model object changed or was removed (`model: changed`/`removed`). Someone should look again; it is not a contradiction |
 | `missing` | the path or selector does not resolve (renamed, moved, deleted), or the path is no longer safe |
 | `ambiguous` | the selector matches more than one artifact; none is picked |
+| `indeterminate` | the selector resolves, nothing is known to have changed, but some evidence is unknown: the project is not `ready`, the claim's revision is not in this checkout's history, or the claim's fingerprint scheme is not one this VCV knows. Not a pass |
 | `unchecked` | the file type or the construct is outside the subset above, so only the claim is reported |
-| `invalid` | the claim file itself is unreadable (conflict markers, bad JSON, wrong shape, or a file name that does not match its `bindingId`) |
+| `invalid` | the claim entry is not a readable claim: conflict markers, bad JSON, wrong shape, a file name that does not match its `bindingId`, or an entry that is not read at all (a symlink, directory, special file, or a file over 64 KiB) |
 
 Each result has a separate `source` and `model` freshness, each with a cause:
 
@@ -119,8 +120,17 @@ digest (from `vcv binding list`) for `reassert`, `remove` and `dispute`. The ope
    exactly one artifact (`LOCATOR_MISSING`, `LOCATOR_AMBIGUOUS`, `LOCATOR_UNCHECKED`);
 4. immediately before writing, re-checks the store fingerprint, the Git commit, the claim file and
    the source file's bytes. If any changed, it refuses with `STATE_CHANGED` and writes nothing;
-5. writes through a temporary file and rename. It refuses to write through a symlinked
-   `.vcv/bindings/`.
+5. writes through a temporary file and rename.
+
+**Reads stay inside the checkout too.** `.vcv/` and `.vcv/bindings/` must be plain directories:
+if either is a symlink, every binding read and write refuses with `UNSAFE_PATH` before reading
+anything (the model itself is still served). Each claim entry is read only if it is a regular,
+non-symlink file of at most 64 KiB, opened with `O_NOFOLLOW` where the OS has it and checked
+again on the open file. Anything else is listed as `invalid` with a reason and a stable
+`unsafe:<kind>` digest: a symlinked entry can be removed or replaced as a link (its target is
+never touched), while a directory or special file under a claim's name is left for a person.
+Source files for selectors are size-checked before they are read (at most 1 MB is parsed);
+whole-file fingerprints are streamed in 1 MiB chunks.
 
 As with model commits, this is check-then-rename, not a lock: a checkout landing inside the
 rename itself is not prevented.

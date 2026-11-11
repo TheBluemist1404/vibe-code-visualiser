@@ -7,7 +7,7 @@
 // Parser: the TypeScript 6 compiler API, pinned in @vcv/repo's package.json. TypeScript 7 (the
 // repository's type checker) is a native binary whose JS API is "unstable" and runs over IPC, so
 // it is not used for this. Only syntax is read (createSourceFile); no program, no config.
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, constants as fsConstants, fstatSync, openSync, readSync } from "node:fs";
 import { createHash } from "node:crypto";
 import ts from "typescript";
 import type { HttpMethod, LocatorState, Selector, SourceLocator, SymbolDeclaration } from "@vcv/core";
@@ -43,6 +43,59 @@ export function fileFingerprint(bytes: Buffer): string {
   return sha256(bytes.toString("latin1").replace(/\r\n/g, "\n"), "latin1");
 }
 
+const CHUNK = 1 << 20;
+
+function openRegular(abs: string): number | null {
+  try {
+    const fd = openSync(abs, fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0));
+    if (fstatSync(fd).isFile()) return fd;
+    closeSync(fd);
+  } catch {
+    // reported as unreadable by the caller
+  }
+  return null;
+}
+
+/**
+ * fileFingerprint of a file, streamed in 1 MiB chunks so a large file never has to fit in memory.
+ * Same result as fileFingerprint(readFileSync(abs)); a CR at a chunk end is held for the next one.
+ * Null if the file cannot be opened as a regular file.
+ */
+export function fileFingerprintAt(abs: string): string | null {
+  const fd = openRegular(abs);
+  if (fd === null) return null;
+  try {
+    const h = createHash("sha256");
+    const buf = Buffer.alloc(CHUNK);
+    let carry = "";
+    for (let n; (n = readSync(fd, buf, 0, CHUNK, null)) > 0; ) {
+      let text = carry + buf.toString("latin1", 0, n);
+      carry = text.endsWith("\r") ? "\r" : "";
+      if (carry) text = text.slice(0, -1);
+      h.update(Buffer.from(text.replace(/\r\n/g, "\n"), "latin1"));
+    }
+    h.update(Buffer.from(carry, "latin1"));
+    return h.digest("hex");
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** At most `max` bytes of a regular file, or "too-large" without reading further, or null if unreadable. */
+function readBounded(abs: string, max: number): Buffer | "too-large" | null {
+  const fd = openRegular(abs);
+  if (fd === null) return null;
+  try {
+    if (fstatSync(fd).size > max) return "too-large";
+    const buf = Buffer.alloc(max + 1);
+    let n = 0;
+    for (let r; n < buf.length && (r = readSync(fd, buf, n, buf.length - n, null)) > 0; ) n += r;
+    return n > max ? "too-large" : buf.subarray(0, n);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 const sha256 = (text: string, enc: BufferEncoding = "utf8") => createHash("sha256").update(Buffer.from(text, enc)).digest("hex");
 
 /** Resolve a locator inside `root`. Read-only and deterministic for the same bytes. */
@@ -51,15 +104,22 @@ export function resolveLocator(root: string, locator: SourceLocator): Resolution
   if (problem) return { state: "unchecked", detail: `malformed selector: ${problem}`, fileFingerprint: null, matches: [] };
   const where = resolveInside(root, locator.path);
   if (!where.ok) return { state: "missing", detail: where.message, pathIssue: where.reason, fileFingerprint: null, matches: [] };
-  const bytes = readFileSync(where.abs);
-  const fileFp = fileFingerprint(bytes);
   const sel = locator.selector;
-  if (sel.kind === "file") return { state: "resolved", detail: `${locator.path} exists`, fileFingerprint: fileFp, matches: [] };
-
-  const unchecked = (detail: string): Resolution => ({ state: "unchecked", detail, fileFingerprint: fileFp, matches: [] });
-  if (!TS_FILE.test(locator.path)) return unchecked(`${sel.kind} selectors are only checked in .ts/.tsx/.mts/.cts files`);
-  if (statSync(where.abs).size > MAX_SOURCE_BYTES) return unchecked(`${locator.path} is larger than ${MAX_SOURCE_BYTES} bytes; selectors are not checked in it`);
-  if (sel.kind === "test" && !TEST_FILE.test(locator.path)) return unchecked("test selectors are only checked in *.test.* and *.spec.* files");
+  const unreadable = (): Resolution => ({ state: "missing", detail: `${locator.path} cannot be read as a regular file`, fileFingerprint: null, matches: [] });
+  // Whole files and files the resolver will not parse are fingerprinted by streaming, in bounded memory.
+  const streamed = (): string | null => fileFingerprintAt(where.abs);
+  if (sel.kind === "file") {
+    const fp = streamed();
+    return fp ? { state: "resolved", detail: `${locator.path} exists`, fileFingerprint: fp, matches: [] } : unreadable();
+  }
+  const unchecked = (detail: string, fp: string | null): Resolution => (fp ? { state: "unchecked", detail, fileFingerprint: fp, matches: [] } : unreadable());
+  if (!TS_FILE.test(locator.path)) return unchecked(`${sel.kind} selectors are only checked in .ts/.tsx/.mts/.cts files`, streamed());
+  if (sel.kind === "test" && !TEST_FILE.test(locator.path)) return unchecked("test selectors are only checked in *.test.* and *.spec.* files", streamed());
+  // The size limit is checked before the file is read into memory, and again while reading.
+  const bytes = readBounded(where.abs, MAX_SOURCE_BYTES);
+  if (bytes === null) return unreadable();
+  if (bytes === "too-large") return unchecked(`${locator.path} is larger than ${MAX_SOURCE_BYTES} bytes; selectors are not checked in it`, streamed());
+  const fileFp = fileFingerprint(bytes);
 
   const sf = ts.createSourceFile(locator.path, bytes.toString("utf8"), ts.ScriptTarget.Latest, true, scriptKind(locator.path));
   const found = sel.kind === "symbol" ? findSymbols(sf, sel) : sel.kind === "route" ? findRoutes(sf, sel) : findTests(sf, sel);
@@ -76,7 +136,7 @@ export function resolveLocator(root: string, locator: SourceLocator): Resolution
       matches: found.matches,
     };
   }
-  if (found.unsupported.length) return unchecked(`${label} not found, but ${locator.path} has constructs the resolver cannot read: ${found.unsupported.slice(0, 3).join("; ")}`);
+  if (found.unsupported.length) return unchecked(`${label} not found, but ${locator.path} has constructs the resolver cannot read: ${found.unsupported.slice(0, 3).join("; ")}`, fileFp);
   return { state: "missing", detail: `${label} not found in ${locator.path}`, fileFingerprint: fileFp, matches: [] };
 }
 

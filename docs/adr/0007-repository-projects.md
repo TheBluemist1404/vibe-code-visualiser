@@ -339,6 +339,15 @@ Settled in the M2.4 PR, where they differ from or refine the proposal above:
   An edit elsewhere in the bound file is reported (`fileChanged: true`) but leaves the claim
   `resolved`. Model change is decided by comparing the bound object's canonical JSON at the
   claim's revision and at the current one; `assessBinding`/`Binding` are deprecated.
+- **Complete evidence for `resolved`** (review of PR #14). `resolved` requires a unique locator
+  and both freshness axes known `unchanged`. Known change wins (`stale`); otherwise any unknown
+  axis (project not ready, claim revision outside this checkout's history, unknown fingerprint
+  scheme) gives `indeterminate`, which `vcv binding verify` does not count as a pass.
+- **Read boundary** (review of PR #14). Claim reads follow the same filesystem boundary as
+  writes: `.vcv/` and `bindings/` must be plain directories, and an entry is read only if it is a
+  regular, non-symlink file of at most 64 KiB (`O_NOFOLLOW`, re-checked with `fstat`). Other
+  entries are `invalid` with an `unsafe:<kind>` digest, never dereferenced. Source files are
+  size-checked before parsing, and whole-file fingerprints are streamed.
 - **Parser.** The TypeScript 6 compiler API, pinned exactly in `@vcv/repo`, syntax only. The
   repository's TypeScript 7 has no stable in-process JS API.
 - **Not yet.** No resolver cache, no audit entries for claim writes (Git is the record), no rename

@@ -12,7 +12,7 @@
 // it immediately before the write. The caller also names the claim it expects to replace (by
 // digest, or null for "there is none"), so a claim read on one branch can never overwrite a
 // different same-ID claim after `git checkout`.
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { closeSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { z } from "zod";
@@ -21,8 +21,8 @@ import type { Id, Model } from "@vcv/ir";
 import { BINDING_RELATIONS, HTTP_METHODS, SYMBOL_DECLARATIONS, canonicalJson, durableWrite, readHeadRevision, storeFingerprint } from "@vcv/core";
 import type { BindingClaim, BindingRelation, BindingState, ClaimSource, Permission, SourceLocator } from "@vcv/core";
 import { fileWorkingState, headCommit } from "./git.ts";
-import { pathProblem, selectorProblem } from "./locator.ts";
-import { fileFingerprint, resolveLocator } from "./resolver.ts";
+import { pathProblem, resolveInside, selectorProblem } from "./locator.ts";
+import { fileFingerprintAt, resolveLocator } from "./resolver.ts";
 import type { Resolution } from "./resolver.ts";
 import { VCV_DIR, projectStatus, resolveProjectRoot } from "./project.ts";
 
@@ -172,42 +172,124 @@ const bindingsDir = (root: string) => join(root, VCV_DIR, BINDINGS_DIR);
 const claimPath = (root: string, id: string) => join(bindingsDir(root), `${id}.json`);
 const claimRel = (id: string) => `${VCV_DIR}/${BINDINGS_DIR}/${id}.json`;
 
-function readClaimBytes(root: string, id: string): Buffer | null {
+/** Largest claim file VCV reads. Real claims are well under 2 KB. */
+export const MAX_CLAIM_BYTES = 64 * 1024;
+
+/** A claim file as found on disk, without following anything out of the checkout. */
+type ClaimFile =
+  | { kind: "absent" }
+  | { kind: "file"; bytes: Buffer; digest: string }
+  /** Not read: a symlink, directory, special file, oversized or unreadable entry. `digest` is a stable token for --expect. */
+  | { kind: "unsafe"; what: "symlink" | "directory" | "special" | "oversize" | "unreadable"; problem: string; digest: string };
+
+function lstatOrNull(p: string) {
   try {
-    return readFileSync(claimPath(root, id));
+    return lstatSync(p);
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw e;
   }
 }
 
-/** The claim with this ID in the checkout containing `path`, or null if there is none. Read-only. */
+/**
+ * The bindings directory must be a plain directory inside the checkout, and so must `.vcv/`:
+ * claims are never read or written through a symlink. Returns false when bindings/ is absent.
+ */
+function checkBindingsDir(root: string): boolean {
+  for (const [p, label] of [[join(root, VCV_DIR), `${VCV_DIR}/`], [bindingsDir(root), `${VCV_DIR}/${BINDINGS_DIR}/`]] as const) {
+    const st = lstatOrNull(p);
+    if (!st) return false;
+    if (st.isSymbolicLink() || !st.isDirectory()) {
+      throw new BindingError("UNSAFE_PATH", `${label} is ${st.isSymbolicLink() ? "a symlink" : "not a directory"}; binding claims are only read from and written to a plain directory inside the checkout`);
+    }
+  }
+  return true;
+}
+
+const unsafeFile = (id: string, what: Extract<ClaimFile, { kind: "unsafe" }>["what"], detail: string): ClaimFile => ({
+  kind: "unsafe",
+  what,
+  problem: `${claimRel(id)} ${detail}; it was not read`,
+  digest: `unsafe:${what}`,
+});
+
+/**
+ * Read one claim file: only a regular, non-symlink file of at most MAX_CLAIM_BYTES, opened with
+ * O_NOFOLLOW (where the OS has it) and checked again on the open descriptor, so a swap after
+ * the lstat cannot redirect the read.
+ */
+function readClaimFile(root: string, id: string): ClaimFile {
+  if (!checkBindingsDir(root)) return { kind: "absent" };
+  const p = claimPath(root, id);
+  const st = lstatOrNull(p);
+  if (!st) return { kind: "absent" };
+  if (st.isSymbolicLink()) return unsafeFile(id, "symlink", "is a symlink, which is never followed");
+  if (st.isDirectory()) return unsafeFile(id, "directory", "is a directory, not a claim file");
+  if (!st.isFile()) return unsafeFile(id, "special", "is not a regular file");
+  if (st.size > MAX_CLAIM_BYTES) return unsafeFile(id, "oversize", `is larger than ${MAX_CLAIM_BYTES} bytes`);
+  let fd: number;
+  try {
+    fd = openSync(p, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0));
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return { kind: "absent" };
+    if (code === "ELOOP") return unsafeFile(id, "symlink", "is a symlink, which is never followed");
+    return unsafeFile(id, "unreadable", `cannot be opened (${code})`);
+  }
+  try {
+    const fst = fstatSync(fd);
+    if (!fst.isFile()) return unsafeFile(id, "special", "is not a regular file");
+    const buf = Buffer.alloc(MAX_CLAIM_BYTES + 1);
+    let n = 0;
+    for (let r; n < buf.length && (r = readSync(fd, buf, n, buf.length - n, n)) > 0; ) n += r;
+    if (n > MAX_CLAIM_BYTES) return unsafeFile(id, "oversize", `is larger than ${MAX_CLAIM_BYTES} bytes`);
+    const bytes = buf.subarray(0, n);
+    return { kind: "file", bytes, digest: digestOf(bytes) };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function entryFor(id: string, f: Exclude<ClaimFile, { kind: "absent" }>): ClaimEntry {
+  const base = { bindingId: id, file: claimRel(id), digest: f.digest };
+  return f.kind === "file" ? { ...base, ...parseClaimFile(id, f.bytes) } : { ...base, claim: null, problem: f.problem };
+}
+
+/**
+ * The claim with this ID in the checkout containing `path`, or null if there is none. Read-only.
+ * Throws UNSAFE_PATH if `.vcv/` or `.vcv/bindings/` is a symlink or not a directory.
+ */
 export function readBinding(path: string, bindingId: string): ClaimEntry | null {
   const idp = persistedIdProblem(bindingId);
   if (idp) throw new BindingError("INVALID_CLAIM", `bindingId "${bindingId}" ${idp}`);
   const { root } = resolveProjectRoot(path);
-  const bytes = readClaimBytes(root, bindingId);
-  return bytes ? { bindingId, file: claimRel(bindingId), digest: digestOf(bytes), ...parseClaimFile(bindingId, bytes) } : null;
+  const f = readClaimFile(root, bindingId);
+  return f.kind === "absent" ? null : entryFor(bindingId, f);
 }
 
-/** Every claim file, sorted by ID. Unreadable files are listed with a problem, never skipped. Read-only. */
+/**
+ * Every `*.json` entry in `.vcv/bindings/`, sorted by ID. Entries that are not readable claims
+ * (including symlinks, directories and oversized files, which are not followed or read) are
+ * listed with a problem, never skipped. Read-only. Throws UNSAFE_PATH for a symlinked directory.
+ */
 export function listBindings(path: string): ClaimEntry[] {
   const { root } = resolveProjectRoot(path);
-  const dir = bindingsDir(root);
-  if (!existsSync(dir)) return [];
-  return readdirSync(dir)
+  if (!checkBindingsDir(root)) return [];
+  return readdirSync(bindingsDir(root))
     .filter((f) => f.endsWith(".json") && !f.includes(".tmp-"))
     .sort()
     .map((f) => {
       const id = f.slice(0, -".json".length);
-      const bytes = readFileSync(join(dir, f));
-      return { bindingId: id, file: claimRel(id), digest: digestOf(bytes), ...parseClaimFile(id, bytes) };
-    });
+      if (persistedIdProblem(id)) return { bindingId: id, file: claimRel(id), digest: "unsafe:name", claim: null, problem: `file name ${f} is not a valid binding ID` };
+      const c = readClaimFile(root, id);
+      return c.kind === "absent" ? null : entryFor(id, c);
+    })
+    .filter((e): e is ClaimEntry => e !== null);
 }
 
 // --- the guarded write ----------------------------------------------------------------
 
-type Snapshot = { root: string; storeDir: string; model: Model; history: string[]; storeToken: string; commit: string | null; claimDigest: string | null };
+type Snapshot = { root: string; storeDir: string; model: Model; history: string[]; storeToken: string; commit: string | null; claim: ClaimFile; claimDigest: string | null };
 
 /** One coherent view of the project for one operation, or a refusal. */
 function takeSnapshot(path: string, bindingId: string): Snapshot {
@@ -223,8 +305,8 @@ function takeSnapshot(path: string, bindingId: string): Snapshot {
   if (storeFingerprint(storeDir) !== storeToken || model.project.modelRevision !== status.model.revision) {
     throw new BindingError("STATE_CHANGED", "the model store changed while it was being read; nothing was written. Retry.");
   }
-  const bytes = readClaimBytes(status.root, bindingId);
-  return { root: status.root, storeDir, model, history, storeToken, commit: status.git?.commit ?? null, claimDigest: bytes ? digestOf(bytes) : null };
+  const claim = readClaimFile(status.root, bindingId); // refuses a symlinked .vcv/ or bindings/ before anything is read
+  return { root: status.root, storeDir, model, history, storeToken, commit: status.git?.commit ?? null, claim, claimDigest: claim.kind === "absent" ? null : claim.digest };
 }
 
 /** The claim on disk must be exactly the one the caller decided on: `null` means "none". */
@@ -256,45 +338,35 @@ export type WriteHooks = {
  */
 function commitWrite(snap: Snapshot, bindingId: string, content: string | null, source?: { rel: string; fingerprint: string }, hooks?: WriteHooks): void {
   hooks?.beforeWrite?.();
-  const now = readClaimBytes(snap.root, bindingId);
+  const now = readClaimFile(snap.root, bindingId);
   const moved =
     storeFingerprint(snap.storeDir) !== snap.storeToken
       ? "the model store"
       : headCommit(snap.root) !== snap.commit
         ? "the Git commit"
-        : (now ? digestOf(now) : null) !== snap.claimDigest
+        : (now.kind === "absent" ? null : now.digest) !== snap.claimDigest
           ? `binding ${bindingId}`
           : source && currentFileFingerprint(snap.root, source.rel) !== source.fingerprint
             ? `source file ${source.rel}`
             : null;
   if (moved) throw new BindingError("STATE_CHANGED", `${moved} changed during this operation (Git checkout, pull or another writer); nothing was written. Re-read and retry.`);
-  // Never write through a symlinked bindings/ directory (it could point out of the checkout).
-  const dir = bindingsDir(snap.root);
-  if (existsSync(dir) || isSymlink(dir)) {
-    const st = lstatSync(dir);
-    if (st.isSymbolicLink() || !st.isDirectory()) throw new BindingError("UNSAFE_PATH", `${VCV_DIR}/${BINDINGS_DIR} is not a plain directory; nothing was written`);
+  // readClaimFile above re-checked that .vcv/ and bindings/ are plain directories. A symlinked
+  // claim entry is replaced or removed as a link (never followed); a directory or special file
+  // under a claim's name is left for a person.
+  if (now.kind === "unsafe" && (now.what === "directory" || now.what === "special")) {
+    throw new BindingError("UNSAFE_PATH", `${now.problem}; remove it by hand. Nothing was written`);
   }
   if (content === null) rmSync(claimPath(snap.root, bindingId));
   else {
     mkdirSync(bindingsDir(snap.root), { recursive: true });
+    checkBindingsDir(snap.root); // in case a symlink appeared where the directory was just created
     durableWrite(claimPath(snap.root, bindingId), content);
   }
 }
 
-function isSymlink(p: string): boolean {
-  try {
-    return lstatSync(p).isSymbolicLink();
-  } catch {
-    return false;
-  }
-}
-
 function currentFileFingerprint(root: string, rel: string): string | null {
-  try {
-    return fileFingerprint(readFileSync(join(root, rel)));
-  } catch {
-    return null;
-  }
+  const where = resolveInside(root, rel);
+  return where.ok ? fileFingerprintAt(where.abs) : null;
 }
 
 function requirePermission(host: BindingHost, p: Permission, what: string) {
@@ -416,7 +488,8 @@ export function disputeBinding(path: string, bindingId: string, reason: string, 
   if (idp) throw new BindingError("INVALID_CLAIM", `bindingId "${bindingId}" ${idp}`);
   const snap = takeSnapshot(path, bindingId);
   checkExpected(snap, bindingId, expected, false);
-  const current = parseClaimFile(bindingId, readClaimBytes(snap.root, bindingId)!);
+  if (snap.claim.kind !== "file") throw new BindingError("INVALID_CLAIM", `binding ${bindingId} cannot be disputed: ${snap.claim.kind === "unsafe" ? snap.claim.problem : "it does not exist"}`);
+  const current = parseClaimFile(bindingId, snap.claim.bytes);
   if (!current.claim) throw new BindingError("INVALID_CLAIM", `binding ${bindingId} cannot be disputed: ${current.problem}`);
   const claim: BindingClaim = { ...current.claim, disputed: { by: host.principalId, reason } };
   const content = serializeClaim(claim);
@@ -469,8 +542,16 @@ export function verifyBinding(path: string, entry: ClaimEntry): Verification {
   const resolution = resolveLocator(status.root, c.locator);
   const source = sourceFreshness(c, resolution);
   const model = status.state === "ready" && status.model ? modelFreshness(status.storeDir, status.model.history, c) : { state: "unknown" as const, cause: `project is ${status.state}` };
+  // resolved needs complete evidence: a unique locator AND both axes known unchanged. Known
+  // change wins (stale); anything still unknown is indeterminate, never a pass.
   const state: BindingState =
-    resolution.state !== "resolved" ? resolution.state : source.state === "changed" || model.state === "changed" || model.state === "removed" ? "stale" : "resolved";
+    resolution.state !== "resolved"
+      ? resolution.state
+      : source.state === "changed" || model.state === "changed" || model.state === "removed"
+        ? "stale"
+        : source.state === "unchanged" && model.state === "unchanged"
+          ? "resolved"
+          : "indeterminate";
   const workingTree = resolution.fileFingerprint ? fileWorkingState(status.root, c.locator.path) : null;
   return {
     ...base,

@@ -466,3 +466,111 @@ test("the scripted Course Desk demonstration runs through the public CLI and lea
   assert.match(out, /\.vcv\/HEAD unchanged by every binding operation/);
   assert.doesNotMatch(out, /\/tmp\/|\/home\//, "no machine paths in the recorded sample");
 });
+
+test("verify passes only on complete evidence: unknown model or source evidence is indeterminate, and the CLI exits non-zero", () => {
+  const repo = courseDesk();
+  const { entry } = recordBinding(repo, enrollInput(), agent, null);
+  const file = join(repo, entry.file);
+  const original = read(file);
+  const cli = () => execFileSync("node", ["--experimental-strip-types", "--no-warnings", join(ROOT, "apps/cli/src/main.ts"), "binding", "verify", repo], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] });
+  const verifyExit = () => {
+    try {
+      cli();
+      return 0;
+    } catch (e) {
+      return (e as { status: number }).status;
+    }
+  };
+  assert.equal(verifyBinding(repo, readBinding(repo, entry.bindingId)!).state, "resolved");
+  assert.equal(verifyExit(), 0);
+
+  // 1. The project is not ready (HEAD unreadable): the model axis is unknown.
+  const headPath = join(repo, VCV_DIR, "HEAD");
+  const head = read(headPath);
+  writeFileSync(headPath, "{ not json");
+  let v = verifyBinding(repo, readBinding(repo, entry.bindingId)!);
+  assert.equal(v.locator!.state, "resolved");
+  assert.equal(v.model!.state, "unknown");
+  assert.equal(v.state, "indeterminate");
+  assert.equal(verifyExit(), 1);
+  writeFileSync(headPath, head);
+
+  // 2. The claim's revision is not in this checkout's history (e.g. made on another branch).
+  writeFileSync(file, original.replace('"modelRevision": "rev-1"', '"modelRevision": "rev-2-0123456789ab"'));
+  v = verifyBinding(repo, readBinding(repo, entry.bindingId)!);
+  assert.equal(v.model!.state, "unknown");
+  assert.equal(v.source!.state, "unchanged");
+  assert.equal(v.state, "indeterminate");
+  assert.equal(verifyExit(), 1);
+
+  // 3. A fingerprint scheme this VCV does not know: the source axis is unknown.
+  writeFileSync(file, original.replace('"algorithm": "vcv-fp-1"', '"algorithm": "vcv-fp-99"'));
+  v = verifyBinding(repo, readBinding(repo, entry.bindingId)!);
+  assert.equal(v.source!.state, "unknown");
+  assert.equal(v.model!.state, "unchanged");
+  assert.equal(v.state, "indeterminate");
+  assert.equal(verifyExit(), 1);
+
+  // Known change still wins over unknown evidence.
+  edit(repo, SERVICE, "taken.length >= course.capacity", "taken.length > course.capacity");
+  writeFileSync(file, original.replace('"modelRevision": "rev-1"', '"modelRevision": "rev-2-0123456789ab"'));
+  assert.equal(verifyBinding(repo, readBinding(repo, entry.bindingId)!).state, "stale");
+});
+
+test("claim reads respect the checkout boundary: symlinked directories and entries are not followed, odd entries are invalid, not crashes", () => {
+  const repo = courseDesk();
+  const { entry } = recordBinding(repo, enrollInput(), agent, null);
+  const dir = join(repo, VCV_DIR, "bindings");
+  const outside = tmp();
+  const secret = join(outside, "secret.json");
+  writeFileSync(secret, read(join(repo, entry.file)).replace(entry.bindingId, "stolen"));
+
+  // A claim entry that is a symlink out of the checkout: listed as invalid, never read.
+  symlinkSync(secret, join(dir, "stolen.json"));
+  // A directory and a FIFO under claim names, and an oversized file.
+  mkdirSync(join(dir, "folder.json"));
+  execFileSync("mkfifo", [join(dir, "pipe.json")]);
+  writeFileSync(join(dir, "huge.json"), " ".repeat(64 * 1024 + 1));
+  const entries = Object.fromEntries(listBindings(repo).map((e) => [e.bindingId, e]));
+  assert.deepEqual(Object.keys(entries).sort(), [entry.bindingId, "folder", "huge", "pipe", "stolen"].sort());
+  assert.ok(entries[entry.bindingId]!.claim);
+  assert.match(entries.stolen!.problem!, /is a symlink, which is never followed; it was not read/);
+  assert.equal(entries.stolen!.digest, "unsafe:symlink");
+  assert.match(entries.folder!.problem!, /is a directory/);
+  assert.match(entries.pipe!.problem!, /is not a regular file/);
+  assert.match(entries.huge!.problem!, /larger than 65536 bytes/);
+  for (const id of ["stolen", "folder", "pipe", "huge"]) assert.equal(verifyBinding(repo, entries[id]!).state, "invalid");
+  assert.equal(readBinding(repo, "stolen")!.claim, null);
+
+  // Writes: a symlinked entry is replaced or removed as a link; the target is untouched.
+  refuses(() => recordBinding(repo, enrollInput({ bindingId: "folder" }), agent, "unsafe:directory"), "UNSAFE_PATH");
+  refuses(() => removeBinding(repo, "pipe", agent, "unsafe:special"), "UNSAFE_PATH");
+  removeBinding(repo, "stolen", agent, "unsafe:symlink");
+  assert.ok(existsSync(secret), "removing the link does not remove its target");
+  assert.equal(readBinding(repo, "stolen"), null);
+
+  // A symlinked bindings/ directory: every read and write refuses before reading anything.
+  const real = join(tmp(), "bindings");
+  renameSync(dir, real);
+  symlinkSync(outside, dir);
+  refuses(() => listBindings(repo), "UNSAFE_PATH");
+  refuses(() => readBinding(repo, "secret"), "UNSAFE_PATH");
+  refuses(() => verifyBindings(repo), "UNSAFE_PATH");
+  refuses(() => recordBinding(repo, enrollInput({ bindingId: "secret" }), agent, null), "UNSAFE_PATH");
+  assert.deepEqual(readdirSync(outside), ["secret.json"]);
+  assert.equal(RepositoryProject.open(repo).status().state, "ready", "the model is still served");
+});
+
+test("large files: selectors are unchecked without parsing, and whole-file fingerprints stream with CRLF split across chunks", () => {
+  const dir = tmp();
+  const big = "export const a = 1;\n" + "// padding\r\n".repeat(100_000);
+  writeFileSync(join(dir, "big.ts"), big);
+  const r = resolveLocator(dir, parseLocator("big.ts#symbol:a"));
+  assert.equal(r.state, "unchecked");
+  assert.match(r.detail, /larger than 1000000 bytes/);
+  assert.equal(r.fileFingerprint, fileFingerprint(Buffer.from(big)));
+  // A CR as the last byte of the first 1 MiB chunk, its LF as the first byte of the next.
+  const split = Buffer.concat([Buffer.alloc((1 << 20) - 1, 0x61), Buffer.from("\r\n\r"), Buffer.alloc(10, 0x62), Buffer.from("\r")]);
+  writeFileSync(join(dir, "split.bin"), split);
+  assert.equal(resolveLocator(dir, { path: "split.bin", selector: { kind: "file" } }).fileFingerprint, fileFingerprint(split));
+});
