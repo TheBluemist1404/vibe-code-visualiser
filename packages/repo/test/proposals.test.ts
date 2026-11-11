@@ -2,10 +2,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileStore, ModelEngine } from "../../core/src/index.ts";
 import type { HostContext, ProposedModelChange } from "../../core/src/index.ts";
+import { STORE_FILE_LIMITS } from "../../core/src/index.ts";
 import { PROPOSAL_LIMITS, listProposals, previewProposal, projectStatus, submitProposal } from "../src/index.ts";
 import type { ProposalList, ProposalPreview, ProposalResult, SubmitResult } from "../src/index.ts";
 import { baseline, git } from "./course-desk.ts";
@@ -151,13 +154,13 @@ test("preview shows operations, the before/after delta, cross-module impact, aff
   assert.match(rule.fields[0]!.after!, /cancellation/);
   assert.equal(byId.get("dat-notification")!.moduleId, "mod-notifications");
 
-  assert.equal(p.impact!.crossModule, true);
+  assert.equal(p.impact!.crossModule, "yes");
   assert.deepEqual(p.impact!.modules.filter((m) => m.via === "changed").map((m) => m.id), ["mod-enrollment", "mod-notifications"]);
   assert.equal(p.impact!.impactClass, "structural-candidate");
   // Claims on cap-enroll (changed) are listed for revisiting, not verified.
   assert.deepEqual(p.bindings.items.map((b) => `${b.bindingId}:${b.why}`).sort(), ["expose.cap-enroll:changed", "impl.cap-enroll:changed"]);
 
-  assert.deepEqual(p.states, { snapshotStatus: "draft", change: "pending", approval: "not-approved", implementation: "not-recorded" });
+  assert.deepEqual(p.states, { snapshotStatus: "draft", change: "pending", approval: "none", implementation: "not-recorded" });
   assert.ok(p.assumptions.some((a) => /structural/.test(a)));
   assert.ok(p.assumptions.some((a) => /more than one module/.test(a)));
   assert.ok(p.assumptions.some((a) => /agent:coder/.test(a)), "the proposer identity is called a host assertion");
@@ -219,6 +222,7 @@ test("lifecycle: pending → applied by a separate reviewer; a second proposal o
   assert.equal(byId.get(a.changeId)!.resultingRevision, next);
   assert.equal(byId.get(a.changeId)!.resultInThisCheckout, true);
   assert.equal(byId.get(a.changeId)!.recordedApproverId, "user:reviewer");
+  assert.equal(byId.get(a.changeId)!.approval, "approved-by-separate-reviewer");
   assert.equal(byId.get(a.changeId)!.implementation.state, "not-recorded");
   assert.equal(byId.get("chg-other")!.lifecycle, "stale");
   assert.equal(byId.get("chg-other")!.stale!.reason, "superseded");
@@ -233,7 +237,7 @@ test("lifecycle: pending → applied by a separate reviewer; a second proposal o
   assert.equal(engine.approve("chg-other", reviewer).status, "rejected", "approval rechecks against the current revision");
 
   const done = data(previewProposal(repo, { changeId: a.changeId }));
-  assert.equal(done.states.approval, "recorded-as-approved");
+  assert.equal(done.states.approval, "approved-by-separate-reviewer");
   assert.equal(done.states.implementation, "not-recorded");
   assert.equal(done.states.snapshotStatus, "draft", "change approval is not snapshot approval");
 });
@@ -271,4 +275,138 @@ test("an unready project is PROJECT_NOT_READY for submit, list and preview", () 
     assert.equal(r.ok, false);
     assert.equal((r as { error: { code: string } }).error.code, "PROJECT_NOT_READY");
   }
+});
+
+test("a direct apply by a host holding model:apply is reported as applied-by-host, not as a separate reviewer's approval", () => {
+  const repo = baseline();
+  const out = new ModelEngine(new FileStore(join(repo, ".vcv"))).propose(cancellation(repo), { principalId: "user:owner", permissions: ["model:propose", "model:apply"] });
+  assert.equal(out.status, "applied");
+  const s = data(listProposals(repo)).proposals[0]!;
+  assert.equal(s.lifecycle, "applied");
+  assert.equal(s.approval, "applied-by-host");
+  assert.equal(s.recordedApproverId, undefined);
+  assert.equal(data(previewProposal(repo, { changeId: s.changeId })).states.approval, "applied-by-host");
+});
+
+test("crossModule is not-determined, not \"no\", when the impact list was cut before all candidates were seen", () => {
+  const repo = baseline();
+  const rename = { changeId: "chg-rename", projectId: "prj-course-desk", expectedRevision: "rev-1", operations: [{ type: "renameObject", objectId: "act-student", name: "Learner" }] };
+  const cut = data(previewProposal(repo, { change: rename, limit: 1 }));
+  assert.equal(cut.impact!.truncated, true);
+  assert.equal(cut.impact!.crossModule, "not-determined");
+  assert.ok(cut.assumptions.some((a) => /not determined/.test(a)));
+  assert.notEqual(data(previewProposal(repo, { change: rename })).impact!.crossModule, "not-determined");
+});
+
+// ---- unsafe change-record entries (review of PR #18) ------------------------------------
+
+/** A file outside the checkout that a malicious entry could point at. */
+function outsideRecord(id: string): string {
+  const dir = mkdtempSync(join(tmpdir(), "vcv-outside-"));
+  const p = join(dir, "record.json");
+  writeFileSync(p, JSON.stringify({ changeId: id, status: "pending", proposerId: "x", baseRevision: "rev-1", validationResults: [], change: { changeId: id, projectId: "prj-course-desk", expectedRevision: "rev-1", operations: [{ type: "approveDraft" }] } }));
+  return p;
+}
+
+function assertRefused(repo: string, pattern: RegExp) {
+  const st = projectStatus(repo);
+  assert.equal(st.state, "invalid", JSON.stringify(st.diagnostics));
+  assert.match(st.diagnostics.map((d) => d.message).join("; "), pattern);
+  for (const r of [listProposals(repo), previewProposal(repo, { changeId: "chg-evil" })]) {
+    assert.equal(r.ok, false);
+    assert.equal((r as { error: { code: string } }).error.code, "PROJECT_NOT_READY");
+    assert.match((r as { error: { message: string } }).error.message, pattern);
+  }
+  // The writer agrees: it refuses to open rather than follow or block.
+  assert.throws(() => new FileStore(join(repo, ".vcv")), (e: Error & { code?: string }) => e.code === "CORRUPT" && pattern.test(e.message));
+}
+
+test("unsafe change-record entries are never followed or read: a symlink out of the checkout, a FIFO, an oversized file, a symlinked changes/ directory", () => {
+  // Symlink to a valid-looking record outside the checkout.
+  let repo = baseline();
+  symlinkSync(outsideRecord("chg-evil"), join(repo, ".vcv/changes/chg-evil.json"));
+  assertRefused(repo, /changes\/chg-evil\.json is a symlink, which is never followed/);
+
+  // A FIFO would block a plain read forever; the test finishing is part of the assertion.
+  repo = baseline();
+  execFileSync("mkfifo", [join(repo, ".vcv/changes/chg-evil.json")]);
+  assertRefused(repo, /changes\/chg-evil\.json is not a regular file/);
+
+  // A directory named like a record.
+  repo = baseline();
+  mkdirSync(join(repo, ".vcv/changes/chg-evil.json"));
+  assertRefused(repo, /changes\/chg-evil\.json is not a regular file/);
+
+  // Oversized: refused by size before it is read into memory.
+  repo = baseline();
+  writeFileSync(join(repo, ".vcv/changes/chg-evil.json"), " ".repeat(STORE_FILE_LIMITS.change + 1));
+  assertRefused(repo, /larger than/);
+
+  // The whole changes/ directory replaced by a symlink to a directory outside the checkout.
+  repo = baseline();
+  const outside = mkdtempSync(join(tmpdir(), "vcv-outside-dir-"));
+  writeFileSync(join(outside, "chg-evil.json"), readFileSync(outsideRecord("chg-evil")));
+  renameSync(join(repo, ".vcv/changes"), join(repo, "changes-moved"));
+  symlinkSync(outside, join(repo, ".vcv/changes"));
+  assertRefused(repo, /changes\/ is a symlink/);
+
+  // A symlinked revision file is refused the same way.
+  repo = baseline();
+  const rev = join(repo, ".vcv/revisions/rev-1.yaml");
+  const copy = join(mkdtempSync(join(tmpdir(), "vcv-outside-rev-")), "rev-1.yaml");
+  writeFileSync(copy, readFileSync(rev));
+  renameSync(rev, join(repo, "rev-1.moved"));
+  symlinkSync(copy, rev);
+  assert.equal(projectStatus(repo).state, "invalid");
+  assert.match(projectStatus(repo).diagnostics.map((d) => d.message).join(";"), /revisions\/rev-1\.yaml is a symlink/);
+});
+
+test("a healthy project with records is ready and listing it is read-only; a readable record whose change is not typed is listed as invalid without disabling the project", () => {
+  const repo = baseline();
+  data(submitProposal(repo, cancellation(repo), agent));
+  writeFileSync(join(repo, ".vcv/changes/chg-odd.json"), JSON.stringify({ changeId: "chg-odd", status: "pending", change: { patch: "/modules" } }));
+  assert.equal(projectStatus(repo).state, "ready");
+  const before = storeHash(repo);
+  const list = data(listProposals(repo));
+  assert.deepEqual(list.counts, { pending: 1, stale: 0, rejected: 0, applied: 0, invalid: 1 });
+  assert.equal(storeHash(repo), before);
+});
+
+// ---- one observation per call (review of PR #18) ----------------------------------------
+
+test("preview and list refuse with STATE_CHANGED when a branch checkout or a record rewrite happens mid-read, and never mix generations", () => {
+  const repo = baseline();
+  data(submitProposal(repo, cancellation(repo), agent));
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "pending proposal");
+  // A feature branch whose model has moved on.
+  git(repo, "checkout", "-q", "-b", "feature");
+  assert.equal(new ModelEngine(new FileStore(join(repo, ".vcv"))).approve("chg-cancel-enrollment", reviewer).status, "applied");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "approved");
+  git(repo, "checkout", "-q", "main");
+
+  const checkout = { afterRead: () => git(repo, "checkout", "-q", "feature") };
+  for (const call of [() => previewProposal(repo, { changeId: "chg-cancel-enrollment" }, checkout), () => listProposals(repo, {}, checkout)]) {
+    git(repo, "checkout", "-q", "main");
+    const r = call();
+    assert.equal(r.ok, false, JSON.stringify(r).slice(0, 300));
+    assert.equal((r as { error: { code: string } }).error.code, "STATE_CHANGED");
+  }
+
+  // A record rewritten mid-read (same branch, no commit).
+  git(repo, "checkout", "-q", "main");
+  const rewrite = (r: string) => ({ afterRead: () => writeFileSync(join(repo, ".vcv/changes", `${r}.json`), readFileSync(join(repo, ".vcv/changes/chg-cancel-enrollment.json"), "utf8").replace("agent:coder", "agent:someone")) });
+  assert.equal((previewProposal(repo, { changeId: "chg-cancel-enrollment" }, rewrite("chg-cancel-enrollment")) as { error: { code: string } }).error.code, "STATE_CHANGED");
+  git(repo, "checkout", "-q", "--", ".vcv");
+  const added = { afterRead: () => writeFileSync(join(repo, ".vcv/changes/chg-new.json"), JSON.stringify({ changeId: "chg-new", status: "pending", change: {} })) };
+  assert.equal((listProposals(repo, {}, added) as { error: { code: string } }).error.code, "STATE_CHANGED");
+  assert.equal((previewProposal(repo, { changeId: "chg-nope" }, added) as { error: { code: string } }).error.code, "STATE_CHANGED", "even an UNKNOWN_CHANGE answer is only given for a stable observation");
+
+  // With nothing moving, the same calls answer from one generation: context and data agree.
+  execFileSync("rm", ["-f", join(repo, ".vcv/changes/chg-new.json")]);
+  const ok = data(previewProposal(repo, { changeId: "chg-cancel-enrollment" }, { afterRead: () => {} }));
+  assert.equal(ok.proposal.lifecycle, "pending");
+  const r = previewProposal(repo, { changeId: "chg-cancel-enrollment" }) as { context: { modelRevision: string } };
+  assert.equal(r.context.modelRevision, "rev-1");
 });

@@ -12,13 +12,13 @@
 // it immediately before the write. The caller also names the claim it expects to replace (by
 // digest, or null for "there is none"), so a claim read on one branch can never overwrite a
 // different same-ID claim after `git checkout`.
-import { closeSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, rmSync } from "node:fs";
+import { closeSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, openSync, readSync, readdirSync, rmSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { z } from "zod";
 import { buildIndex, loadModel, persistedIdProblem } from "@vcv/ir";
 import type { Id, Model } from "@vcv/ir";
-import { BINDING_RELATIONS, HTTP_METHODS, SYMBOL_DECLARATIONS, canonicalJson, durableWrite, readHeadRevision, storeFingerprint } from "@vcv/core";
+import { BINDING_RELATIONS, HTTP_METHODS, SYMBOL_DECLARATIONS, canonicalJson, durableWrite, STORE_FILE_LIMITS, readHeadRevision, readStoreFile, storeFingerprint } from "@vcv/core";
 import type { BindingClaim, BindingRelation, BindingState, ClaimSource, Permission, SourceLocator } from "@vcv/core";
 import { fileWorkingState, headCommit } from "./git.ts";
 import { pathProblem, resolveInside, selectorProblem } from "./locator.ts";
@@ -609,8 +609,11 @@ function modelFreshness(storeDir: string, history: readonly string[], c: Binding
 /** A revision listed in HEAD's history (already verified by the project's inspection). */
 function readRevision(storeDir: string, rev: string): Model | undefined {
   if (persistedIdProblem(rev)) return undefined;
+  // Same safe reader as the store: no symlinks, no special files, bounded.
+  const f = readStoreFile(storeDir, `revisions/${rev}.yaml`, STORE_FILE_LIMITS.revision);
+  if (f.kind !== "file") return undefined;
   try {
-    return loadModel(readFileSync(join(storeDir, "revisions", `${rev}.yaml`), "utf8")).model;
+    return loadModel(f.text).model;
   } catch {
     return undefined;
   }

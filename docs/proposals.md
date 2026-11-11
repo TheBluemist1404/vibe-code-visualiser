@@ -84,12 +84,27 @@ Read-only: nothing is written, not even store recovery. The result has
 | `proposal` | change ID, digest, origin (`record` or `unsubmitted`), lifecycle, proposer, base revision, rationale, one line per operation |
 | `validation` | the engine's own `checkChange` against this checkout's revision **now** (`appliesToCurrent`, errors and warnings with hints), and the diagnostics stored at submission |
 | `delta` | the object-level before/after change: added, removed and modified objects with the changed fields (values capped at 300 characters). Against the current revision when the change applies; against its base revision when it is stale; `null` when it applies to neither |
-| `impact` | modules owning a changed object (`changed`) or a structural impact candidate (`impacted`), `crossModule`, contracts, and `@vcv/query` impact candidates with one dependency path each |
+| `impact` | modules owning a changed object (`changed`) or a structural impact candidate (`impacted`), `crossModule` (`yes`, `no`, or `not-determined` when only one module was seen but the candidate list was cut), contracts, and `@vcv/query` impact candidates with one dependency path each |
 | `bindings` | binding claims on changed, removed or impacted objects: code that probably has to change too. Listed, not verified; use `vcv evidence` for their state |
-| `states` | `change` (lifecycle), `approval`, `snapshotStatus` and `implementation`, kept apart |
+| `states` | `change` (lifecycle), `approval` (`none`, `applied-by-host`, `approved-by-separate-reviewer`), `snapshotStatus` and `implementation`, kept apart |
 | `assumptions` | what nobody has checked: structural impact is not semantic proof, the code was not compared, the proposer identity is a host assertion, and case-specific ones (no rationale, stale, cross-module, truncated, no claims) |
 
 Every list is capped by `limit` (default 50, max 200) with `total` and `truncated`.
+
+**One observation per call.** A preview (and a listing) reads the project status, the model and
+its history, the change records and, for a preview, the binding claims once, and reports only
+what it read then; `context` describes that same revision. Before answering it checks the store
+fingerprint, the Git commit, the change records and the claim files again. If anything moved (a
+`git checkout`, an edit of `.vcv/`), the call fails with `STATE_CHANGED` and nothing is mixed:
+retry. There are no locks, watchers or writes.
+
+**Untrusted files are not followed.** HEAD, revision files and change records are read only as
+regular files (never through a symlink, never a FIFO or device), up to a size bound (4 MB HEAD,
+8 MB revision, 1 MB change record), and `revisions/` and `changes/` must be plain directories.
+An entry that breaks this, or a change record that is not valid JSON for its own ID, makes the
+project `invalid` everywhere (status, CLI, MCP, the writer), naming the file: recovery relies on
+reading every applied record, so it cannot be skipped. A readable record whose `change` is not a
+typed change only shows as lifecycle `invalid`; the project stays usable.
 
 ## Lifecycle and the states that must not be confused
 
@@ -110,9 +125,12 @@ every time; it is never stored:
 
 Four things are reported separately and none implies another:
 
-- **change approval** (`states.approval`, `recordedApproverId`): what the change record says.
-  A record in a Git repository is not proof that a particular person approved it; M3.2 defines
-  the trust boundary and the integrity check.
+- **change approval** (`approval`, `recordedApproverId`): what the change record says.
+  `applied-by-host` means it was applied without a separate approver (a host with
+  `model:apply`, or a self-approval the policy allowed); `approved-by-separate-reviewer` means
+  the record names an approver other than the proposer. Either way a record in a Git
+  repository is not proof that a particular person approved it; M3.2 defines the trust boundary
+  and the integrity check.
 - **snapshot status** (`snapshotStatus`, draft or approved): the model's own `approveDraft`
   flag. Approving a change does not approve a draft snapshot, and vice versa.
 - **binding resolution** (`vcv evidence`): whether a pointer into the code resolves. Not model

@@ -71,7 +71,7 @@ Read-only: they list recorded model change proposals with their derived lifecycl
 one (submitted, or a dry run of a change object) before anyone approves it. Submitting is not
 offered over MCP; agents use the host's proposal-only `vcv proposal submit`. Details in
 [docs/proposals.md](../../docs/proposals.md); extra error codes `UNKNOWN_CHANGE`,
-`INVALID_RECORD`.
+`INVALID_RECORD`, `STATE_CHANGED` (the checkout moved during the call; retry).
 
 ## Run it
 

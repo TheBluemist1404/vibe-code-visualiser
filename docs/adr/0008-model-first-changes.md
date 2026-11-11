@@ -50,6 +50,22 @@ what a proposal changes before deciding.
 - **MCP stays read-only.** `vcv_list_proposals` and `vcv_preview_proposal` join the `--repo`
   tools; submission is the host's CLI. An MCP write tool needs a host-fixed principal at launch
   and the M3.2 threat model first.
+- **One observation per call** (review of PR #18). Preview and list read status, model, history,
+  change records (and claims) once, build `context` from that same model, then recheck the store
+  fingerprint, Git commit, change-record contents and claim digests; any difference is
+  `STATE_CHANGED` (retry), as for source evidence in M2.5. No locks or watchers.
+- **Safe store reads** (review of PR #18). One reader, `readStoreFile`, for HEAD, revisions and
+  change records everywhere (inspection, recovery, writer, listings, binding freshness): lstat,
+  regular files only, `O_NOFOLLOW | O_NONBLOCK`, re-checked on the descriptor, size-bounded
+  (HEAD 4 MB, revision 8 MB, record 1 MB); `revisions/` and `changes/` must be plain
+  directories; the fingerprint lstat()s instead of following. Consistency rule kept from ADR
+  0007: an *unreadable* record (unsafe, not JSON, wrong ID) makes the store invalid for every
+  surface, because recovery must read every applied record; a readable record with an untyped
+  `change` is only lifecycle `invalid`.
+- **Approval wording**: `none` / `applied-by-host` (no separate approver: direct apply or an
+  allowed self-approval) / `approved-by-separate-reviewer` (record names a different approver).
+  Never an authenticated identity; that is M3.2. `crossModule` is `yes` / `no` /
+  `not-determined` (one module seen, candidate list cut).
 - **Diagnostics carry hints** for the common codes, so an agent can correct a proposal without
   reading the engine.
 - **Limits on the agent surface**: 100 operations and 256 KB per proposal; the CLI also refuses
@@ -58,7 +74,7 @@ what a proposal changes before deciding.
 
 ## Consequences
 
-- New: `packages/repo/src/proposals.ts` (`submitProposal`, `listProposals`, `previewProposal`,
+- New: `readStoreFile` / `STORE_FILE_LIMITS` in core (now used by every store read), `packages/repo/src/proposals.ts` (`submitProposal`, `listProposals`, `previewProposal`,
   `createProposalReadApi`), `listChangeRecords` and `FileStoreReader.revision` in core,
   `checkChange` / `proposalDigest` exported from the engine, CLI `vcv proposal submit|preview|list`,
   MCP `vcv_list_proposals` / `vcv_preview_proposal`.

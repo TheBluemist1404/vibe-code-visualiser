@@ -58,7 +58,7 @@ test("vcv proposal submit under a host-fixed agent identity records a pending ch
   const text = vcv(host, "proposal", "preview", repo, "chg-cancel-enrollment");
   assert.equal(text.status, 0, text.stderr);
   assert.match(text.stdout, /proposal chg-cancel-enrollment \(pending, proposed by agent:coder\)/);
-  assert.match(text.stdout, /approval not-approved; snapshot draft; implementation not-recorded/);
+  assert.match(text.stdout, /approval none; snapshot draft; implementation not-recorded/);
   assert.match(text.stdout, /\+ capability cap-cancel-enrollment \[mod-enrollment\]/);
   assert.match(text.stdout, /CROSS-MODULE/);
   assert.match(text.stdout, /not verified by anyone yet:/);
