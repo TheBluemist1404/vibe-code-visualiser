@@ -386,6 +386,26 @@ test("a git checkout landing between the engine's dry-run and its commit is refu
   assert.equal(git(repo, "status", "--porcelain"), "", "feature-b's HEAD, revisions and records untouched");
 });
 
+/** A FileStore on `repo` that checks out `branch` once, right after `method` returns its result. */
+function racingAfter(repo: string, method: "snapshot" | "getChange", branch: string): ModelStore {
+  const inner = new FileStore(join(repo, VCV_DIR));
+  let fired = false;
+  return new Proxy(inner, {
+    get(target, prop, receiver) {
+      const v = Reflect.get(target, prop, receiver);
+      if (prop !== method || typeof v !== "function") return typeof v === "function" ? v.bind(target) : v;
+      return (...args: unknown[]) => {
+        const result = v.apply(target, args);
+        if (!fired) {
+          fired = true;
+          git(repo, "checkout", "-q", branch);
+        }
+        return result;
+      };
+    },
+  });
+}
+
 test("a proposal record is never written into another branch after a checkout (PR #8 review, round 6)", () => {
   const repo = repoWithProject();
   git(repo, "checkout", "-q", "-b", "feature-b");
@@ -394,22 +414,7 @@ test("a proposal record is never written into another branch after a checkout (P
   commitAll(repo, "pending proposal ch-x on B");
   git(repo, "checkout", "-q", "main");
 
-  const inner = new FileStore(join(repo, VCV_DIR));
-  let fired = false;
-  const racing: ModelStore = new Proxy(inner, {
-    get(target, prop, receiver) {
-      const v = Reflect.get(target, prop, receiver);
-      if (prop !== "snapshot" || typeof v !== "function") return typeof v === "function" ? v.bind(target) : v;
-      return () => {
-        const snap = v.call(target);
-        if (!fired) {
-          fired = true;
-          git(repo, "checkout", "-q", "feature-b");
-        }
-        return snap;
-      };
-    },
-  });
+  const racing = racingAfter(repo, "getChange", "feature-b");
   // An invalid change with the colliding ID, validated on main, would be saved as "rejected".
   const r = new ModelEngine(racing).propose(
     { changeId: "ch-x", projectId: "prj-lms", expectedRevision: "rev-1", operations: [{ type: "removeObject", objectId: "st-rejected" }] },
@@ -418,6 +423,35 @@ test("a proposal record is never written into another branch after a checkout (P
   assert.equal(r.status, "rejected");
   assert.equal(r.diagnostics[0]!.code, "STORE_CHANGED");
   assert.equal(git(repo, "status", "--porcelain"), "", "B's HEAD and its pending ch-x record are byte-identical");
+});
+
+test("an auto-applied proposal never overwrites another branch's same-ID pending record (PR #8 review, round 7)", () => {
+  const repo = repoWithProject();
+  git(repo, "checkout", "-q", "-b", "feature-b");
+  const agent: HostContext = { principalId: "agent:b", permissions: ["model:propose"] };
+  assert.equal(engineFor(repo).propose(rename("ch-x", "rev-1", "Waiting (B, pending)"), agent).status, "pending");
+  commitAll(repo, "pending proposal ch-x on B");
+  git(repo, "checkout", "-q", "main"); // main: no ch-x
+
+  const r = new ModelEngine(racingAfter(repo, "getChange", "feature-b")).propose(rename("ch-x", "rev-1", "Waiting (main)"), owner);
+  assert.equal(r.status, "rejected");
+  assert.equal(r.diagnostics[0]!.code, "STORE_CHANGED");
+  assert.equal(git(repo, "status", "--porcelain"), "", "B's HEAD, revisions and pending ch-x are byte-identical");
+  assert.equal(new FileStore(join(repo, VCV_DIR)).getChange("ch-x")!.status, "pending");
+});
+
+test("approving a pending record that is gone after a checkout writes nothing (PR #8 review, round 7)", () => {
+  const repo = repoWithProject();
+  git(repo, "branch", "feature-b"); // B: no ch-y
+  const agent: HostContext = { principalId: "agent:a", permissions: ["model:propose"] };
+  assert.equal(engineFor(repo).propose(rename("ch-y", "rev-1", "Waiting (A, pending)"), agent).status, "pending");
+  commitAll(repo, "pending proposal ch-y on main");
+
+  const reviewer: HostContext = { principalId: "user:reviewer", permissions: ["model:approve", "model:apply"] };
+  const r = new ModelEngine(racingAfter(repo, "getChange", "feature-b")).approve("ch-y", reviewer);
+  assert.equal(r.status, "rejected");
+  assert.equal(r.diagnostics[0]!.code, "STORE_CHANGED");
+  assert.equal(git(repo, "status", "--porcelain"), "", "no phantom ch-y record and no new revision on B");
 });
 
 test("model history survives restart and an ordinary checkout round trip", () => {

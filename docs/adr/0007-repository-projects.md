@@ -107,7 +107,8 @@ concurrently, and MCP stays read-only. A single writer is not enough in a checko
   content-addressed, so two branches can hold different models named `rev-1`. `projectStatus`
   exposes the same file digest, and `refresh()` reports such a swap as `switched`.
 - **One snapshot per change.** The engine takes a single `snapshot()` (model, history,
-  fingerprint token), validates the change against it, derives the new revision ID from it and
+  fingerprint token) before it reads anything else, then makes every decision on it: whether
+  the change ID already exists (replay or approval lookup), validation, derives the new revision ID from it and
   commits with its token. It never re-reads the store in between, so a checkout landing after
   validation cannot retarget an already validated model. Independently of the engine, the store
   refuses a commit whose `record.baseRevision` is not its current HEAD (`HEAD_CHANGED`) or whose
@@ -119,6 +120,14 @@ concurrently, and MCP stays read-only. A single writer is not enough in a checko
   `STORE_CHANGED`, writing nothing, if the store moved or the record on disk differs, so a
   checkout after validation can never overwrite another branch's proposal with the same ID. The
   outcome is `rejected` without a record; the attempt is still audited locally.
+- **Applied commits pin the record too.** `commit()` takes the same guard: the snapshot token
+  plus the record the decision was made on, `null` for a new auto-applied proposal and the
+  exact pending record read for an approval. The store checks it next to the token, before
+  writing the revision or HEAD, and refuses with `STORE_CHANGED`. So a checkout after the
+  existence check can neither overwrite another branch's same-ID pending proposal with an
+  applied one, nor approve a pending record that is gone (or is a different record) on the new
+  branch. The precondition is checked by content, so it holds even where the fingerprint cannot
+  see a same-size, same-mtime record swap.
 - **Write guard.** `commit()` re-checks immediately before its first write: `HEAD_CHANGED` if
   HEAD's line moved, `STORE_CHANGED` if any fingerprinted file differs from the snapshot token
   (including a same-ID revision swap that the store has since adopted). Nothing is written in either case. The writer's own

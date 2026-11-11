@@ -110,6 +110,9 @@ export class ModelEngine {
       return this.log("propose", ctx, { status: "rejected", changeId: claimedId, diagnostics });
     }
     const change = parsed.data;
+    // Take the snapshot first and decide everything (replay check, validation, the write) on it,
+    // so no decision is made on a checkout that is gone by the time of the write.
+    const snap = this.store.snapshot();
     const existing = this.store.getChange(change.changeId);
     if (existing) {
       // Replays never overwrite the original record.
@@ -130,10 +133,9 @@ export class ModelEngine {
       validationResults: [],
       change,
     };
-    // Validate and commit against one snapshot: the store refuses the commit if anything moved
+    // Validate and commit against that snapshot: the store refuses the write if anything moved
     // in between (a Git checkout, a merge, another writer), so a validated model is never
     // retargeted onto a different line.
-    const snap = this.store.snapshot();
     const check = this.dryRun(change, snap.model);
     // Every record write is guarded by the same snapshot: a new record may only be created where
     // none exists, in the store state it was validated against.
@@ -145,7 +147,7 @@ export class ModelEngine {
       !ctx.permissions.includes("model:apply") ||
       (change.operations.some((o) => o.type === "approveDraft") && !ctx.permissions.includes("model:approve"));
     if (needsApproval) return this.log("propose", ctx, this.save(record, fresh));
-    return this.log("propose", ctx, this.commit(record, check.model!, snap));
+    return this.log("propose", ctx, this.commit(record, check.model!, snap, null));
   }
 
   /**
@@ -157,6 +159,7 @@ export class ModelEngine {
     if (idProblem) {
       return this.log("approve", ctx, { status: "rejected", changeId, diagnostics: [diag("INVALID_ID", "changeId", `change id ${idProblem}`)] });
     }
+    const snap = this.store.snapshot();
     const record = this.store.getChange(changeId);
     if (!record) {
       return this.log("approve", ctx, { status: "rejected", changeId, diagnostics: [diag("UNKNOWN_CHANGE", "changeId", `no change "${changeId}"`)] });
@@ -170,12 +173,11 @@ export class ModelEngine {
     if (ctx.principalId === record.proposerId && !this.policy.allowSelfApproval) {
       return this.log("approve", ctx, { status: "denied", changeId, diagnostics: [diag("SELF_APPROVAL", "", "a proposer cannot approve their own change")], record });
     }
-    const snap = this.store.snapshot();
     const check = this.dryRun(record.change, snap.model);
     if (check.errors.length) {
       return this.log("approve", ctx, this.save({ ...record, approverId: ctx.principalId, status: "rejected", validationResults: check.errors }, { token: snap.token, previous: record }));
     }
-    return this.log("approve", ctx, this.commit({ ...record, approverId: ctx.principalId, validationResults: check.warnings }, check.model!, snap));
+    return this.log("approve", ctx, this.commit({ ...record, approverId: ctx.principalId, validationResults: check.warnings }, check.model!, snap, record));
   }
 
   private dryRun(change: ProposedModelChange, current: Model): { model?: Model; errors: Diagnostic[]; warnings: Diagnostic[] } {
@@ -196,7 +198,7 @@ export class ModelEngine {
       : { model: applied.model, errors: [], warnings: results };
   }
 
-  private commit(record: ChangeRecord, model: Model, snap: StoreSnapshot): Outcome {
+  private commit(record: ChangeRecord, model: Model, snap: StoreSnapshot, previous: ChangeRecord | null): Outcome {
     // Branch-safe identity (ADR 0007): the parent is the revision the change was validated
     // against, and the digest covers the new content, so two Git branches never mint the same ID
     // for different models.
@@ -205,7 +207,7 @@ export class ModelEngine {
     model.project.modelRevision = next;
     const done: ChangeRecord = { ...record, status: "applied", resultingRevision: next };
     try {
-      this.store.commit(model, done, snap.token);
+      this.store.commit(model, done, { token: snap.token, previous });
     } catch (e) {
       // The store moved after validation. Nothing was written and no record is created or
       // changed (a pending proposal stays pending); the caller re-reads and retries.

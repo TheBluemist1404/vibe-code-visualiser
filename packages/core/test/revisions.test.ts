@@ -1,13 +1,14 @@
 // Branch-safe revision identity and divergence detection (ADR 0007, Issue #6 M2.1 gate).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { dumpModel, loadModel } from "@vcv/ir";
 import {
   FileStore,
   FileStoreReader,
+  MemoryStore,
   ModelEngine,
   StoreError,
   branchSafeRevisionId,
@@ -355,28 +356,34 @@ test("commit refuses with STORE_CHANGED if a same-ID revision file is swapped af
 });
 
 // Review on PR #8, round 5: the store moves between the engine's dry-run and the commit.
-import type { ChangeGuard, ChangeRecord, ModelStore, StoreSnapshot } from "../src/index.ts";
+import type { ChangeGuard, ChangeRecord, HostContext, ModelStore, StoreSnapshot } from "../src/index.ts";
 
-/** A FileStore whose snapshot() runs a hook right after it is taken (deterministic race). */
+/**
+ * A FileStore that runs a hook once, right after `on` (snapshot or getChange) returns its result
+ * (a deterministic race: the decision was made, then the checkout lands).
+ */
 class RacingStore implements ModelStore {
   readonly inner: FileStore;
   private hook?: () => void;
-  constructor(inner: FileStore, hook: () => void) {
+  private readonly on: "snapshot" | "getChange";
+  constructor(inner: FileStore, hook: () => void, on: "snapshot" | "getChange" = "snapshot") {
     this.inner = inner;
     this.hook = hook;
+    this.on = on;
   }
-  snapshot(): StoreSnapshot {
-    const s = this.inner.snapshot();
+  private after<T>(point: "snapshot" | "getChange", value: T): T {
+    if (point !== this.on) return value;
     const h = this.hook;
     this.hook = undefined;
     h?.();
-    return s;
+    return value;
   }
+  snapshot(): StoreSnapshot { return this.after("snapshot", this.inner.snapshot()); }
   current() { return this.inner.current(); }
   revision(rev: string) { return this.inner.revision(rev); }
   revisions() { return this.inner.revisions(); }
-  commit(m: Parameters<FileStore["commit"]>[0], r: ChangeRecord, t?: string) { this.inner.commit(m, r, t); }
-  getChange(id: string) { return this.inner.getChange(id); }
+  commit(m: Parameters<FileStore["commit"]>[0], r: ChangeRecord, g?: string | ChangeGuard) { this.inner.commit(m, r, g); }
+  getChange(id: string) { return this.after("getChange", this.inner.getChange(id)); }
   putChange(r: ChangeRecord, g?: ChangeGuard) { this.inner.putChange(r, g); }
   appendAudit(e: Parameters<FileStore["appendAudit"]>[0]) { this.inner.appendAudit(e); }
   audit() { return this.inner.audit(); }
@@ -384,6 +391,8 @@ class RacingStore implements ModelStore {
 
 /** Replace `dir`'s store files with `other`'s, as a `git checkout` of another branch would. */
 function checkoutLine(dir: string, other: string) {
+  rmSync(join(dir, "revisions"), { recursive: true, force: true });
+  rmSync(join(dir, "changes"), { recursive: true, force: true });
   cpSync(join(other, "revisions"), join(dir, "revisions"), { recursive: true });
   cpSync(join(other, "changes"), join(dir, "changes"), { recursive: true });
   cpSync(join(other, "HEAD"), join(dir, "HEAD"));
@@ -462,7 +471,8 @@ for (const kind of ["invalid (rejected)", "valid but needs approval (pending)"] 
 
     const a = join(root, "a"); // branch A: no ch-x
     cpSync(base, a, { recursive: true });
-    const e = new ModelEngine(new RacingStore(new FileStore(a), () => checkoutLine(a, b)));
+    // The checkout lands right after the engine looked for an existing ch-x (and found none).
+    const e = new ModelEngine(new RacingStore(new FileStore(a), () => checkoutLine(a, b), "getChange"));
     const change =
       kind === "invalid (rejected)"
         ? { ...renamePending("ch-x"), operations: [{ type: "removeObject" as const, objectId: "st-rejected" }] }
@@ -492,4 +502,94 @@ test("round 6: a rejected approval does not overwrite a record that changed on d
   assert.equal(r.status, "rejected");
   assert.equal(r.diagnostics[0]!.code, "STORE_CHANGED");
   assert.equal(readFileSync(join(dir, "changes", "ch-y.json"), "utf8"), replaced);
+});
+
+// Review on PR #8, round 7: an applied commit pins the change record it was decided on.
+function pendingOn(root: string, name: string, base: string, changeId: string): string {
+  const dir = join(root, name);
+  cpSync(base, dir, { recursive: true });
+  assert.equal(new ModelEngine(new FileStore(dir)).propose(renamePending(changeId), mcpAgent).status, "pending");
+  return dir;
+}
+const filesOf = (dir: string) => ({
+  head: readFileSync(join(dir, "HEAD"), "utf8"),
+  revisions: readdirSync(join(dir, "revisions")).sort(),
+  changes: Object.fromEntries(readdirSync(join(dir, "changes")).sort().map((f) => [f, readFileSync(join(dir, "changes", f), "utf8")])),
+});
+
+test("round 7: an auto-applied proposal never overwrites another branch's pending record with the same ID", () => {
+  const root = tmp();
+  const base = join(root, "base");
+  FileStore.init(base, baseModel());
+  const b = pendingOn(root, "b", base, "ch-x"); // B: pending ch-x, HEAD still rev-1
+  const before = filesOf(b);
+  const a = join(root, "a"); // A: no ch-x
+  cpSync(base, a, { recursive: true });
+  const e = new ModelEngine(new RacingStore(new FileStore(a), () => checkoutLine(a, b), "getChange"));
+  const r = e.propose(renamePending("ch-x"), owner); // owner: would auto-apply
+  assert.equal(r.status, "rejected");
+  assert.equal(r.diagnostics[0]!.code, "STORE_CHANGED");
+  assert.equal(r.record, undefined);
+  assert.deepEqual(filesOf(a), before, "B's HEAD, revisions and pending ch-x are byte-identical");
+});
+
+test("round 7: approving a pending record that vanished in a checkout is refused; nothing is written", () => {
+  const root = tmp();
+  const base = join(root, "base");
+  FileStore.init(base, baseModel());
+  const a = pendingOn(root, "a", base, "ch-y"); // A: pending ch-y
+  const b = join(root, "b"); // B: no ch-y
+  cpSync(base, b, { recursive: true });
+  const before = filesOf(b);
+  const e = new ModelEngine(new RacingStore(new FileStore(a), () => checkoutLine(a, b), "getChange"));
+  const r = e.approve("ch-y", reviewer);
+  assert.equal(r.status, "rejected");
+  assert.equal(r.diagnostics[0]!.code, "STORE_CHANGED");
+  assert.deepEqual(filesOf(a), before, "no phantom ch-y and no revision on B");
+});
+
+test("round 7: approving a pending record replaced by another branch's same-ID record is refused", () => {
+  const root = tmp();
+  const base = join(root, "base");
+  FileStore.init(base, baseModel());
+  const a = pendingOn(root, "a", base, "ch-y");
+  const b = join(root, "b");
+  cpSync(base, b, { recursive: true });
+  const other: HostContext = { principalId: "agent:other-branch", permissions: ["model:propose"] };
+  assert.equal(new ModelEngine(new FileStore(b)).propose({ ...renamePending("ch-y"), operations: [{ type: "renameObject", objectId: "mod-notifications", name: "Notify" }] }, other).status, "pending");
+  const before = filesOf(b);
+  const e = new ModelEngine(new RacingStore(new FileStore(a), () => checkoutLine(a, b), "getChange"));
+  const r = e.approve("ch-y", reviewer);
+  assert.equal(r.status, "rejected");
+  assert.equal(r.diagnostics[0]!.code, "STORE_CHANGED");
+  assert.deepEqual(filesOf(a), before, "B's own pending ch-y is not approved with A's content");
+});
+
+test("round 7: the store checks the record precondition of a commit even with a current token", () => {
+  for (const make of [
+    () => {
+      const dir = join(tmp(), "store");
+      FileStore.init(dir, baseModel());
+      return new FileStore(dir) as ModelStore;
+    },
+    () => new MemoryStore(baseModel()) as ModelStore,
+  ]) {
+    const store = make();
+    const e = new ModelEngine(store);
+    assert.equal(e.propose(renamePending("ch-p"), mcpAgent).status, "pending");
+    const pending = store.getChange("ch-p")!;
+    const snap = store.snapshot();
+    const model = structuredClone(snap.model);
+    model.project.name = "LMS next";
+    const id = branchSafeRevisionId(model, "rev-1", 2);
+    model.project.modelRevision = id;
+    const done = { ...pending, status: "applied" as const, resultingRevision: id };
+    // A "new proposal" commit over an existing record, and an approval of a record that is not there.
+    assert.throws(() => store.commit(model, done, { token: snap.token, previous: null }), storeErr("STORE_CHANGED"));
+    assert.throws(() => store.commit(model, { ...done, changeId: "ch-none" }, { token: snap.token, previous: { ...pending, changeId: "ch-none" } }), storeErr("STORE_CHANGED"));
+    assert.deepEqual(store.revisions(), ["rev-1"]);
+    assert.equal(store.getChange("ch-p")!.status, "pending");
+    store.commit(model, done, { token: snap.token, previous: pending }); // the exact record: accepted
+    assert.deepEqual(store.revisions(), ["rev-1", id]);
+  }
 });

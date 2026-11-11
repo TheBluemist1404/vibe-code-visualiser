@@ -80,10 +80,12 @@ export interface ModelStore {
   /** Committed revisions, oldest first. */
   revisions(): string[];
   /**
-   * Atomically make `model` the current revision, recording the applied change. With `token`
-   * (from snapshot()), refuse unless the store is still in exactly that state.
+   * Atomically make `model` the current revision, recording the applied change. With a token
+   * (from snapshot()), refuse unless the store is still in exactly that state; with a full
+   * ChangeGuard, also refuse unless the change's record on disk is exactly `previous` (none for a
+   * new proposal, the pending record for an approval). Nothing is written when refused.
    */
-  commit(model: Model, record: ChangeRecord, token?: string): void;
+  commit(model: Model, record: ChangeRecord, guard?: string | ChangeGuard): void;
   getChange(changeId: string): ChangeRecord | undefined;
   /**
    * Persist a non-committing record state (pending, rejected). With a guard, refuse
@@ -145,9 +147,13 @@ export class MemoryStore implements ModelStore {
   snapshot(): StoreSnapshot {
     return { model: this.current(), history: this.revisions(), token: this.order.join("\0") };
   }
-  commit(model: Model, record: ChangeRecord, token?: string): void {
-    if (token !== undefined && token !== this.order.join("\0")) {
+  commit(model: Model, record: ChangeRecord, guard?: string | ChangeGuard): void {
+    const g = typeof guard === "string" ? { token: guard } : guard;
+    if (g && g.token !== this.order.join("\0")) {
       throw new StoreError("HEAD_CHANGED", "the store moved since the snapshot this change was validated against; nothing was written");
+    }
+    if (g && "previous" in g && !sameRecord(this.changes.get(record.changeId) ?? null, g.previous)) {
+      throw new StoreError("STORE_CHANGED", `change ${record.changeId} is not in the state it was validated in; nothing was written`);
     }
     assertCommittable(model, record, this.order);
     this.revs.set(model.project.modelRevision, structuredClone(model));
@@ -256,7 +262,9 @@ export class FileStore implements ModelStore {
     return { model: readRevisionFile(this.dir, this.head.revision, this.head.history), history: [...this.head.history], token: this.validated };
   }
 
-  commit(model: Model, record: ChangeRecord, token?: string): void {
+  commit(model: Model, record: ChangeRecord, guard?: string | ChangeGuard): void {
+    const g = typeof guard === "string" ? { token: guard } : guard;
+    const token = g?.token;
     // Write guard: the change was validated against this.head. If HEAD on disk moved since then
     // (checkout, pull, another process), writing would replace that line's HEAD. Refuse before
     // touching any file.
@@ -276,6 +284,11 @@ export class FileStore implements ModelStore {
         "STORE_CHANGED",
         "model store files changed on disk since this change was validated (for example a Git merge or checkout); nothing was written. Re-read the model and retry.",
       );
+    }
+    // Change identity: the record this commit replaces must be exactly the one the decision was
+    // made on (none for a new proposal, the pending record for an approval).
+    if (g && "previous" in g && !sameRecord(this.recordOnDisk(record.changeId), g.previous)) {
+      throw new StoreError("STORE_CHANGED", `change ${record.changeId} on disk is not the record this change was validated with; nothing was written`);
     }
     const rev = model.project.modelRevision;
     const next: Head = { format: 1, revision: rev, history: [...this.head.history, rev], lastCommit: record };
@@ -304,14 +317,7 @@ export class FileStore implements ModelStore {
     if (guard) {
       // A Git checkout after validation could put another branch's record under this ID; never
       // overwrite it, and never write into a store state other than the one validated against.
-      let onDisk: ChangeRecord | null = null;
-      if (existsSync(path)) {
-        try {
-          onDisk = JSON.parse(readFileSync(path, "utf8")) as ChangeRecord;
-        } catch {
-          onDisk = { changeId: "\0unreadable" } as ChangeRecord;
-        }
-      }
+      const onDisk = this.recordOnDisk(record.changeId);
       if (before !== this.validated || guard.token !== before || !sameRecord(onDisk, guard.previous)) {
         throw new StoreError(
           "STORE_CHANGED",
@@ -447,6 +453,16 @@ export class FileStore implements ModelStore {
     this.recoverFor(disk);
     this.head = disk;
     this.validated = storeFingerprint(this.dir); // recovery may have moved a leftover
+  }
+
+  private recordOnDisk(id: string): ChangeRecord | null {
+    const path = this.changePath(id);
+    if (!existsSync(path)) return null;
+    try {
+      return JSON.parse(readFileSync(path, "utf8")) as ChangeRecord;
+    } catch {
+      return { changeId: "\0unreadable" } as ChangeRecord;
+    }
   }
 
   private changePath(id: string): string {
