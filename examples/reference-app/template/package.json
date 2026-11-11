@@ -1,0 +1,20 @@
+{
+  "name": "course-desk",
+  "private": true,
+  "description": "Course Desk: students enroll in courses; the outcome is announced through notifications.",
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "engines": {
+    "node": ">=22.22.2"
+  },
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "test": "npm test --workspaces",
+    "start": "npm start -w server",
+    "dev:web": "npm run dev -w web",
+    "smoke": "node scripts/smoke.mjs"
+  }
+}
