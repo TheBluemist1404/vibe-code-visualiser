@@ -22,14 +22,15 @@ import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { persistedIdProblem, persistedIdSchema } from "@vcv/ir";
-import { proposalDigest } from "@vcv/core";
+import { implementationRequestSchema, proposalDigest } from "@vcv/core";
 import type { HostContext, ImplementationRequest } from "@vcv/core";
-import { changedFilesSince, isAncestor, resolveCommit } from "./git.ts";
+import { isAncestor, resolveCommit } from "./git.ts";
 import { VCV_DIR } from "./project.ts";
-import { affectedBindings, approvedChange, digestOf, redact } from "./handoff.ts";
+import { affectedBindings, approvedChange, attestationKey, digestOf, guardOf, redact, worktreeOf } from "./handoff.ts";
 import type { ApprovedChange, HandoffBinding } from "./handoff.ts";
 import { describeOperation, failFinal, finish, observed, readClaims } from "./proposals.ts";
 import type { Observation, ProposalError, ProposalHooks, ProposalResult } from "./proposals.ts";
+import type { WorktreeState } from "./worktree.ts";
 
 export const IMPLEMENTATIONS_DIR = "implementations";
 export const IMPLEMENTATION_LIMITS = { files: 500, reportBytes: 256 * 1024 } as const;
@@ -71,6 +72,12 @@ export type ImplementationObservation = {
   outOfScope: string[];
   /** `.vcv/` files changed since the base commit, by area. */
   store: { bindings: string[]; model: string[]; other: string[] };
+  /**
+   * The bytes observed: every changed file and every bound source file, by content (or by size
+   * and mtime past the budget). Ties the report to one concrete dirty source state; rechecked
+   * before the report is written or shown.
+   */
+  worktree: WorktreeState;
   bindings: (HandoffBinding & { claimedAtRevision: string | null; reasserted: boolean })[];
 };
 
@@ -88,6 +95,61 @@ export type ImplementationReport = {
   warnings: ImplementationWarning[];
 };
 
+const hex64 = z.string().regex(/^[0-9a-f]{64}$/);
+const commitId = z.string().regex(/^([0-9a-f]{40}|[0-9a-f]{64})$/);
+const text = (max = 8000) => z.string().max(max);
+const paths = z.array(text(1000)).max(IMPLEMENTATION_LIMITS.files);
+const observedBinding = z
+  .object({
+    bindingId: text(200),
+    modelObjectId: text(200),
+    relation: text(100),
+    locator: text(2000),
+    why: z.enum(["changed", "removed", "impacted"]),
+    state: text(100),
+    source: text(100).nullable(),
+    model: text(100).nullable(),
+    reassertAfterImplementing: z.boolean(),
+    claimedAtRevision: text(200).nullable(),
+    reasserted: z.boolean(),
+  })
+  .strict();
+
+/** A recorded report, as read back: validated completely before any field is used. */
+export const persistedImplementationReport = z
+  .object({
+    format: z.literal(1),
+    kind: z.literal("vcv-implementation-report"),
+    changeId: persistedIdSchema,
+    approvedRevision: text(200),
+    proposalDigest: hex64,
+    handoffDigest: hex64,
+    approvedIntent: z.object({ request: implementationRequestSchema.nullable(), operations: z.array(text()).max(10_000), note: text() }).strict(),
+    agentClaims: implementationReportInput
+      .omit({ changeId: true, baseCommit: true, handoffDigest: true })
+      .extend({ claimedBy: text(500), verifiedByVcv: z.literal(false), note: text() })
+      .strict(),
+    vcvObserved: z
+      .object({
+        baseCommit: commitId,
+        headCommit: commitId.nullable(),
+        branch: text(1000).nullable(),
+        dirty: z.boolean().nullable(),
+        modelRevision: text(200),
+        filesModified: paths,
+        filesTruncated: z.boolean(),
+        outOfScope: paths,
+        store: z.object({ bindings: paths, model: paths, other: paths }).strict(),
+        worktree: z.object({ digest: hex64, files: z.number().int().nonnegative(), complete: z.boolean() }).strict(),
+        bindings: z.array(observedBinding).max(10_000),
+        note: text(),
+      })
+      .strict(),
+    notReconciled: z.object({ state: z.literal("not-reconciled"), note: text() }).strict(),
+    warnings: z.array(z.object({ code: text(100), message: text(), path: text(1000).optional(), bindingId: text(200).optional() }).strict()).max(10_000),
+  })
+  .strict();
+
 export type RecordImplementationResult = { file: string; digest: string; report: ImplementationReport; replaced: boolean };
 
 /**
@@ -102,11 +164,13 @@ export function recordImplementation(path: string, input: unknown, host: HostCon
   }
   const req = parsed.data;
   return observed(path, hooks, (obs) => {
+    const attestation = attestationKey(obs, req.changeId);
     const brief = approvedChange(obs, req.changeId);
     if ("error" in brief) return failFinal(brief.error, obs, hooks);
     const claims = readClaims(obs.status.root);
-    const observation = observe(obs, brief, req.baseCommit, claims.entries);
-    if ("error" in observation) return failFinal(observation.error, obs, hooks);
+    const seen = observe(obs, brief, req.baseCommit, claims.entries);
+    if ("error" in seen) return failFinal(seen.error, obs, hooks);
+    const observation = seen.observation;
 
     const dir = join(obs.status.storeDir, IMPLEMENTATIONS_DIR);
     const file = join(dir, `${req.changeId}.json`);
@@ -117,20 +181,33 @@ export function recordImplementation(path: string, input: unknown, host: HostCon
     if (existing.kind === "absent" && expected !== null) return failFinal({ code: "NO_REPORT", message: `there is no report for ${req.changeId} to replace` }, obs, hooks);
 
     const report = redact(assemble(brief, req, host, observation), obs.status.root);
-    const text = JSON.stringify(report, null, 2) + "\n";
-    if (Buffer.byteLength(text) > IMPLEMENTATION_LIMITS.reportBytes) return failFinal({ code: "INVALID_REQUEST", message: `the report would be larger than ${IMPLEMENTATION_LIMITS.reportBytes} bytes; shorten the claims` }, obs, hooks);
+    const body = JSON.stringify(report, null, 2) + "\n";
+    if (Buffer.byteLength(body) > IMPLEMENTATION_LIMITS.reportBytes) return failFinal({ code: "INVALID_REQUEST", message: `the report would be larger than ${IMPLEMENTATION_LIMITS.reportBytes} bytes; shorten the claims` }, obs, hooks);
+    // What is written must read back: the same schema `vcv implementation show` applies.
+    const self = persistedImplementationReport.safeParse(report);
+    if (!self.success) return failFinal({ code: "INVALID_REQUEST", message: "the report would not read back as a valid report (after redaction)", details: issues(self.error) }, obs, hooks);
 
-    const done = finish(obs, hooks, null, { key: claims.key, again: () => readClaims(obs.status.root).key });
+    // Recheck store, commit, records, claims, attestation and working tree (files and bytes).
+    const done = finish(obs, hooks, null, guardOf(obs, req.changeId, attestation, req.baseCommit, claims, seen.tree));
     if (!done.ok) return done as ProposalResult<RecordImplementationResult>;
+    // The report file is part of the guard too: re-read it right before writing, so a report
+    // written since it was checked is never overwritten (exclusive link for a new one).
+    const now = readPlain(file);
+    if (existing.kind === "file" && (now.kind !== "file" || digestBytes(now.bytes) !== digestBytes(existing.bytes))) {
+      return { ok: false, context: done.context, error: { code: "REPORT_CHANGED", message: `${VCV_DIR}/${IMPLEMENTATIONS_DIR}/${req.changeId}.json changed while the replacement was prepared; nothing was written, read it again and retry` } };
+    }
+    if (existing.kind === "absent" && now.kind !== "absent") {
+      return { ok: false, context: done.context, error: { code: "REPORT_EXISTS", message: `${VCV_DIR}/${IMPLEMENTATIONS_DIR}/${req.changeId}.json appeared while the report was prepared; nothing was written` } };
+    }
     try {
       const st = lstatOrNull(dir);
       if (st && (st.isSymbolicLink() || !st.isDirectory())) return { ok: false, context: done.context, error: { code: "UNSAFE_PATH", message: `${VCV_DIR}/${IMPLEMENTATIONS_DIR}/ is not a plain directory` } };
       if (!st) mkdirSync(dir);
-      writeFile(file, text, existing.kind === "file");
+      writeFile(file, body, existing.kind === "file");
     } catch (e) {
       return { ok: false, context: done.context, error: { code: (e as NodeJS.ErrnoException).code === "EEXIST" ? "REPORT_EXISTS" : "UNSAFE_PATH", message: `the report was not written: ${(e as Error).message}` } };
     }
-    return { ok: true, context: done.context, data: { file: `${VCV_DIR}/${IMPLEMENTATIONS_DIR}/${req.changeId}.json`, digest: digestBytes(Buffer.from(text)), report, replaced: existing.kind === "file" } };
+    return { ok: true, context: done.context, data: { file: `${VCV_DIR}/${IMPLEMENTATIONS_DIR}/${req.changeId}.json`, digest: digestBytes(Buffer.from(body)), report, replaced: existing.kind === "file" } };
   });
 }
 
@@ -153,19 +230,31 @@ export function implementationStatus(path: string, changeId: string, hooks: Prop
     const f = readPlain(join(obs.status.storeDir, IMPLEMENTATIONS_DIR, `${changeId}.json`));
     if (f.kind === "absent") return failFinal({ code: "NO_REPORT", message: `no implementation report ${rel}` }, obs, hooks);
     if (f.kind === "unsafe") return failFinal({ code: "UNSAFE_PATH", message: f.problem }, obs, hooks);
-    let report: ImplementationReport;
+    let raw: unknown;
     try {
-      report = JSON.parse(f.bytes.toString("utf8")) as ImplementationReport;
-      if (report.kind !== "vcv-implementation-report" || report.changeId !== changeId) throw new Error("not a report for this change");
+      raw = JSON.parse(f.bytes.toString("utf8"));
     } catch (e) {
-      return failFinal({ code: "INVALID_RECORD", message: `${rel} is not an implementation report: ${(e as Error).message}` }, obs, hooks);
+      return failFinal({ code: "INVALID_RECORD", message: `${rel} is not valid JSON: ${(e as Error).message}` }, obs, hooks);
     }
+    const parsedReport = persistedImplementationReport.safeParse(raw);
+    if (!parsedReport.success) return failFinal({ code: "INVALID_RECORD", message: `${rel} is not a valid implementation report; record it again with vcv implementation record --expect ${digestBytes(f.bytes)}`, details: issues(parsedReport.error) }, obs, hooks);
+    const report = parsedReport.data as ImplementationReport;
+    if (report.changeId !== changeId) return failFinal({ code: "INVALID_RECORD", message: `${rel} is the report of ${report.changeId}, not ${changeId}` }, obs, hooks);
+    const attestation = attestationKey(obs, changeId);
     const brief = approvedChange(obs, changeId);
     if ("error" in brief) return failFinal(brief.error, obs, hooks);
     const claims = readClaims(obs.status.root);
-    const now = observe(obs, brief, report.vcvObserved.baseCommit, claims.entries);
-    if ("error" in now) return failFinal(now.error, obs, hooks);
-    const nowRedacted = redact(now, obs.status.root);
+    const seen = observe(obs, brief, report.vcvObserved.baseCommit, claims.entries);
+    if ("error" in seen) return failFinal(seen.error, obs, hooks);
+    const nowRedacted = redact(seen.observation, obs.status.root);
+    const file = join(obs.status.storeDir, IMPLEMENTATIONS_DIR, `${changeId}.json`);
+    const reportGuard = {
+      key: digestBytes(f.bytes),
+      again: () => {
+        const g = readPlain(file);
+        return g.kind === "file" ? digestBytes(g.bytes) : g.kind;
+      },
+    };
     const { note: _n, headCommit: _h, dirty: _d, ...recorded } = report.vcvObserved;
     const { headCommit: _h2, dirty: _d2, ...current } = nowRedacted;
     const agent = { ...report.agentClaims, changeId, baseCommit: report.vcvObserved.baseCommit, handoffDigest: report.handoffDigest };
@@ -176,26 +265,31 @@ export function implementationStatus(path: string, changeId: string, hooks: Prop
       now: nowRedacted,
       changedSinceReport: digestOf(recorded) !== digestOf(current),
       warningsNow: warningsFor(brief, agent as ImplementationReportInput, nowRedacted),
-    }, { key: claims.key, again: () => readClaims(obs.status.root).key });
+    }, guardOf(obs, changeId, attestation, report.vcvObserved.baseCommit, claims, seen.tree, reportGuard));
   });
 }
 
+const issues = (e: z.ZodError) => e.issues.slice(0, 20).map((i) => ({ path: i.path.join("."), message: i.message }));
+
 // ---- observation and warnings ------------------------------------------------------------
 
-function observe(obs: Observation, brief: ApprovedChange, baseCommit: string, entries: ReturnType<typeof readClaims>["entries"]): ImplementationObservation | { error: ProposalError } {
+type Seen = { observation: ImplementationObservation; tree: NonNullable<ReturnType<typeof worktreeOf>> };
+
+function observe(obs: Observation, brief: ApprovedChange, baseCommit: string, entries: ReturnType<typeof readClaims>["entries"]): Seen | { error: ProposalError } {
   const root = obs.status.root;
   if (!obs.status.git) return { error: { code: "UNKNOWN_COMMIT", message: "the checkout is not a Git repository: there is no base commit to compare with" } };
   if (resolveCommit(root, baseCommit) !== baseCommit) return { error: { code: "UNKNOWN_COMMIT", message: `base commit ${baseCommit} is not in this repository` } };
   if (obs.commit && !isAncestor(root, baseCommit, obs.commit)) return { error: { code: "UNKNOWN_COMMIT", message: `base commit ${baseCommit.slice(0, 12)} is not an ancestor of HEAD (${obs.commit.slice(0, 12)}): record the report on the branch that was implemented` } };
-  const changed = changedFilesSince(root, baseCommit);
-  if (!changed) return { error: { code: "UNKNOWN_COMMIT", message: `cannot compare the working tree with ${baseCommit}` } };
+  // Snapshot the changed files and the bound sources (bytes) before binding verification reads them.
+  const tree = worktreeOf(obs, baseCommit, entries);
+  if (!tree) return { error: { code: "UNKNOWN_COMMIT", message: `cannot compare the working tree with ${baseCommit}` } };
+  const changed = tree.changed;
   const store = { bindings: [] as string[], model: [] as string[], other: [] as string[] };
   const source: string[] = [];
   for (const f of changed) {
     if (f === VCV_DIR || f.startsWith(`${VCV_DIR}/`)) {
       const sub = f.slice(VCV_DIR.length + 1);
       if (sub.startsWith("bindings/")) store.bindings.push(f);
-      else if (sub.startsWith(`${IMPLEMENTATIONS_DIR}/`)) continue;
       else if (sub === "HEAD" || sub.startsWith("revisions/") || sub.startsWith("changes/") || sub.startsWith("approvals/")) store.model.push(f);
       else store.other.push(f);
     } else source.push(f);
@@ -213,7 +307,7 @@ function observe(obs: Observation, brief: ApprovedChange, baseCommit: string, en
     return { ...b, claimedAtRevision: claimedAt, reasserted };
   });
   const cap = <T>(xs: T[]) => xs.slice(0, IMPLEMENTATION_LIMITS.files);
-  return {
+  const observation: ImplementationObservation = {
     baseCommit,
     headCommit: obs.commit,
     branch: obs.status.git.branch ?? null,
@@ -223,8 +317,10 @@ function observe(obs: Observation, brief: ApprovedChange, baseCommit: string, en
     filesTruncated: source.length > IMPLEMENTATION_LIMITS.files,
     outOfScope: cap(outOfScope),
     store: { bindings: cap(store.bindings), model: cap(store.model), other: cap(store.other) },
+    worktree: tree.state,
     bindings,
   };
+  return { observation, tree };
 }
 
 function warningsFor(brief: ApprovedChange, req: ImplementationReportInput, o: ImplementationObservation): ImplementationWarning[] {

@@ -114,7 +114,9 @@ export type ProposalErrorCode =
   /** The implementations directory or report file is not a plain directory/file. */
   | "UNSAFE_PATH"
   /** No implementation report for this change. */
-  | "NO_REPORT";
+  | "NO_REPORT"
+  /** The handoff would exceed its byte limit even with every derived list cut. */
+  | "HANDOFF_TOO_LARGE";
 
 export type ProposalError = { code: ProposalErrorCode; message: string; details?: { path: string; message: string }[] };
 
@@ -827,7 +829,7 @@ function changed<T>(obs: Observation): ProposalResult<T> {
     ok: false,
     error: {
       code: "STATE_CHANGED",
-      message: `the checkout changed while it was read (a Git checkout, or an edit of .vcv/ or of binding claims); nothing was mixed, retry the call`,
+      message: `the checkout changed while it was read (a Git checkout, or an edit of .vcv/, of binding claims or of the observed source files); nothing was mixed, retry the call`,
     },
     context: contextOf(obs.status, obs.model),
   } as ProposalResult<T>;

@@ -19,11 +19,27 @@ import type { ChangeRecord, ImplementationRequest } from "@vcv/core";
 import { verifyBinding } from "./bindings.ts";
 import { formatLocator } from "./locator.ts";
 import { approvalCheck } from "./integrity.ts";
-import { TRUST_VERIFICATION } from "./approval.ts";
+import { TRUST_VERIFICATION, readAttestation } from "./approval.ts";
+import { changedFilesSince } from "./git.ts";
+import { VCV_DIR } from "./project.ts";
+import { worktreeState } from "./worktree.ts";
+import type { WorktreeState } from "./worktree.ts";
 import { describeOperation, diffModels, failFinal, finish, impactOf, observed, readClaims, readRevision } from "./proposals.ts";
 import type { ObjectChange, Observation, ProposalHooks, ProposalPreview, ProposalResult } from "./proposals.ts";
 
-export const HANDOFF_LIMITS = { delta: 50, candidates: 30, bindings: 50, scopeFromBindings: 50, bytes: 128 * 1024 } as const;
+export const HANDOFF_LIMITS = {
+  delta: 50,
+  candidates: 30,
+  bindings: 50,
+  scopeFromBindings: 50,
+  testsBound: 50,
+  operations: 100,
+  laterRevisions: 20,
+  rationaleChars: 4000,
+  summaryChars: 500,
+  /** The whole handoff as printed (2-space JSON), digest included. */
+  bytes: 128 * 1024,
+} as const;
 
 export type HandoffBinding = {
   bindingId: string;
@@ -50,15 +66,20 @@ export type Handoff = {
     approvedRevision: string;
     proposerId: string;
     approverId: string | null;
+    /** Display text, cut to HANDOFF_LIMITS.rationaleChars; the proposal digest covers the full text. */
     rationale: string | null;
+    rationaleTruncated: boolean;
+    /** Display summaries (each cut to HANDOFF_LIMITS.summaryChars), at most HANDOFF_LIMITS.operations. */
     operations: { index: number; type: string; summary: string }[];
+    operationsTotal: number;
+    operationsTruncated: boolean;
   };
   /** The attestation, checked here without a trust list: provenance is decided by the host gate. */
   approval: { attestation: "valid-signature"; keyFingerprint: string | null; trustVerification: typeof TRUST_VERIFICATION; note: string };
   /** Where the model is now; later revisions are other changes this handoff does not cover. */
-  modelNow: { revision: string; atApprovedRevision: boolean; laterRevisions: string[] };
+  modelNow: { revision: string; atApprovedRevision: boolean; laterRevisions: string[]; laterRevisionsTotal: number };
   delta: { changes: ObjectChange[]; total: number; truncated: boolean };
-  impact: NonNullable<ProposalPreview["impact"]>;
+  impact: NonNullable<ProposalPreview["impact"]> & { listsTruncated: boolean };
   /** The implementation request approved with the change, or null when the proposal had none. */
   request: ImplementationRequest | null;
   scope: {
@@ -72,9 +93,17 @@ export type Handoff = {
     requested: string[];
     /** Claims with relation "tests" on changed or impacted objects. */
     bound: { bindingId: string; modelObjectId: Id; locator: string }[];
+    boundTotal: number;
+    boundTruncated: boolean;
   };
   bindings: { items: HandoffBinding[]; total: number; truncated: boolean };
-  git: { baseCommit: string | null; branch: string | null; dirty: boolean | null };
+  git: {
+    baseCommit: string | null;
+    branch: string | null;
+    dirty: boolean | null;
+    /** The bytes this handoff was derived from: bound source files and files changed since HEAD. */
+    worktree: WorktreeState;
+  };
   /** What the implementing agent does, in order. Fixed text. */
   steps: string[];
   caveats: string[];
@@ -105,12 +134,67 @@ const CAVEATS = [
  */
 export function buildHandoff(path: string, changeId: string, hooks: ProposalHooks = {}): ProposalResult<Handoff> {
   return observed(path, hooks, (obs) => {
+    const attestation = attestationKey(obs, changeId);
     const brief = approvedChange(obs, changeId);
     if ("error" in brief) return failFinal(brief.error, obs, hooks);
     const claims = readClaims(obs.status.root);
-    const handoff = assemble(obs, brief, claims.entries);
-    return finish(obs, hooks, handoff, { key: claims.key, again: () => readClaims(obs.status.root).key });
+    // Snapshot the working tree before binding verification reads it, and recheck after.
+    const tree = worktreeOf(obs, obs.commit, claims.entries);
+    if (!tree) return failFinal({ code: "STORE_ERROR", message: "the working tree could not be compared with HEAD" }, obs, hooks);
+    const handoff = assemble(obs, brief, claims.entries, tree.state);
+    if ("error" in handoff) return failFinal(handoff.error, obs, hooks);
+    return finish(obs, hooks, handoff, guardOf(obs, changeId, attestation, obs.commit, claims, tree));
   });
+}
+
+/**
+ * The working-tree part of an observation: the files changed since `base` (none without Git or a
+ * base) outside .vcv/implementations/, plus every file a binding claim points at, with their bytes.
+ */
+export function worktreeOf(obs: Observation, base: string | null, entries: ReturnType<typeof readClaims>["entries"]): { changed: string[]; state: WorktreeState } | null {
+  const root = obs.status.root;
+  let changed: string[] = [];
+  if (obs.status.git && base) {
+    const c = changedFilesSince(root, base);
+    if (!c) return null;
+    changed = c.filter((f) => !f.startsWith(`${VCV_DIR}/implementations/`));
+  }
+  const bound = entries.map((e) => e.claim?.locator.path).filter((p): p is string => !!p);
+  return { changed, state: worktreeState(root, [...changed, ...bound]) };
+}
+
+/**
+ * What finish() rechecks besides the store, commit and change records: the claim files, the
+ * attestation of the change, and the working tree (changed-file set and bytes), plus `more`
+ * (e.g. the report file's bytes).
+ */
+export function guardOf(
+  obs: Observation,
+  changeId: string,
+  attestation: string,
+  base: string | null,
+  claims: ReturnType<typeof readClaims>,
+  tree: { changed: string[]; state: WorktreeState },
+  more?: { key: string; again: () => string },
+): { key: string; again: () => string } {
+  const keyOf = (claimsKey: string, att: string, t: { changed: string[]; state: WorktreeState } | null, m: string | null) =>
+    canonicalJson([claimsKey, att, t ? [t.changed, t.state.digest] : "unreadable", m]);
+  return {
+    key: keyOf(claims.key, attestation, tree, more ? more.key : null),
+    again: () => {
+      const c = readClaims(obs.status.root);
+      return keyOf(c.key, attestationKey(obs, changeId), worktreeOf(obs, base, c.entries), more ? more.again() : null);
+    },
+  };
+}
+
+/** The attestation file as read now; read it before approvedChange() so the guard covers that read. */
+export function attestationKey(obs: Observation, changeId: string): string {
+  try {
+    return canonicalJson(readAttestation(obs.status.storeDir, changeId));
+  } catch (e) {
+    return `unreadable:${(e as Error).message}`;
+  }
 }
 
 export type ApprovedChange = {
@@ -174,12 +258,17 @@ export function affectedBindings(obs: Observation, brief: ApprovedChange, entrie
   return out.sort((p, q) => (p.bindingId < q.bindingId ? -1 : p.bindingId > q.bindingId ? 1 : 0));
 }
 
-function assemble(obs: Observation, brief: ApprovedChange, entries: ReturnType<typeof readClaims>["entries"]): Handoff {
+const cut = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+
+function assemble(obs: Observation, brief: ApprovedChange, entries: ReturnType<typeof readClaims>["entries"], worktree: WorktreeState): Handoff | { error: { code: "HANDOFF_TOO_LARGE"; message: string } } {
   const r = brief.record;
   const change = r.change as { rationale?: string; operations: Parameters<typeof describeOperation>[0][] };
   const bindings = affectedBindings(obs, brief, entries);
   const at = obs.history.indexOf(r.resultingRevision);
+  const later = obs.history.slice(at + 1);
   const scopeFiles = [...new Set(bindings.map((b) => b.locator.split("#")[0]!))].sort();
+  const bound = bindings.filter((b) => b.relation === "tests").map((b) => ({ bindingId: b.bindingId, modelObjectId: b.modelObjectId, locator: b.locator }));
+  const rationale = change.rationale ?? null;
   const body: Omit<Handoff, "digest"> = {
     format: 1,
     kind: "vcv-implementation-handoff",
@@ -191,8 +280,11 @@ function assemble(obs: Observation, brief: ApprovedChange, entries: ReturnType<t
       approvedRevision: r.resultingRevision,
       proposerId: r.proposerId,
       approverId: r.approverId ?? null,
-      rationale: change.rationale ?? null,
-      operations: change.operations.map((op, index) => ({ index, type: op.type, summary: describeOperation(op) })),
+      rationale: rationale === null ? null : cut(rationale, HANDOFF_LIMITS.rationaleChars),
+      rationaleTruncated: rationale !== null && rationale.length > HANDOFF_LIMITS.rationaleChars,
+      operations: change.operations.slice(0, HANDOFF_LIMITS.operations).map((op, index) => ({ index, type: op.type, summary: cut(describeOperation(op), HANDOFF_LIMITS.summaryChars) })),
+      operationsTotal: change.operations.length,
+      operationsTruncated: change.operations.length > HANDOFF_LIMITS.operations,
     },
     approval: {
       attestation: "valid-signature",
@@ -200,27 +292,29 @@ function assemble(obs: Observation, brief: ApprovedChange, entries: ReturnType<t
       trustVerification: TRUST_VERIFICATION,
       note: "Signature checked against the record; key trust is decided by the host gate (docs/approvals.md).",
     },
-    modelNow: { revision: obs.model.project.modelRevision, atApprovedRevision: obs.model.project.modelRevision === r.resultingRevision, laterRevisions: obs.history.slice(at + 1) },
+    modelNow: { revision: obs.model.project.modelRevision, atApprovedRevision: obs.model.project.modelRevision === r.resultingRevision, laterRevisions: later.slice(0, HANDOFF_LIMITS.laterRevisions), laterRevisionsTotal: later.length },
     delta: { changes: brief.changes.slice(0, HANDOFF_LIMITS.delta), total: brief.changes.length, truncated: brief.changes.length > HANDOFF_LIMITS.delta },
-    impact: brief.impact,
+    impact: { ...brief.impact, listsTruncated: false },
     request: brief.request,
     scope: { declared: brief.request?.scope ?? null, fromBindings: scopeFiles.slice(0, HANDOFF_LIMITS.scopeFromBindings), fromBindingsTruncated: scopeFiles.length > HANDOFF_LIMITS.scopeFromBindings },
     tests: {
       requested: brief.request?.suggestedTests ?? [],
-      bound: bindings.filter((b) => b.relation === "tests").map((b) => ({ bindingId: b.bindingId, modelObjectId: b.modelObjectId, locator: b.locator })),
+      bound: bound.slice(0, HANDOFF_LIMITS.testsBound),
+      boundTotal: bound.length,
+      boundTruncated: bound.length > HANDOFF_LIMITS.testsBound,
     },
     bindings: { items: bindings.slice(0, HANDOFF_LIMITS.bindings), total: bindings.length, truncated: bindings.length > HANDOFF_LIMITS.bindings },
-    git: { baseCommit: obs.commit, branch: obs.status.git?.branch ?? null, dirty: obs.status.git?.dirty ?? null },
+    git: { baseCommit: obs.commit, branch: obs.status.git?.branch ?? null, dirty: obs.status.git?.dirty ?? null, worktree },
     steps: STEPS,
     caveats: [
       ...CAVEATS,
       ...(brief.request ? [] : ["The proposal carried no implementation request: there are no approved acceptance criteria or scope; ask the reviewer before implementing."]),
-      ...(obs.status.git?.dirty ? ["The working tree is dirty: the base commit does not describe all of the starting point."] : []),
-      ...(obs.history.length > at + 1 ? [`The model has moved past the approved revision (${obs.history.slice(at + 1).join(", ")}): those changes are not part of this handoff.`] : []),
+      ...(obs.status.git?.dirty ? ["The working tree is dirty: the base commit does not describe all of the starting point (git.worktree names the bytes seen)."] : []),
+      ...(later.length ? [`The model has moved past the approved revision (${later.length} later revision${later.length === 1 ? "" : "s"}, see modelNow): those changes are not part of this handoff.`] : []),
+      ...(rationale !== null && rationale.length > HANDOFF_LIMITS.rationaleChars ? ["The rationale is shortened for display; the proposal digest covers the full text in the change record."] : []),
     ],
   };
-  const redacted = boundBytes(redact(body, obs.status.root));
-  return { ...redacted, digest: digestOf(redacted) };
+  return boundBytes(redact(body, obs.status.root));
 }
 
 export const digestOf = (v: unknown) => createHash("sha256").update(canonicalJson(v)).digest("hex");
@@ -238,14 +332,36 @@ export function redact<T>(v: T, root: string): T {
   return walk(v) as T;
 }
 
-/** Keep the handoff under its byte budget by cutting the longest lists first. */
-function boundBytes(h: Omit<Handoff, "digest">): Omit<Handoff, "digest"> {
-  const size = () => Buffer.byteLength(JSON.stringify(h));
-  while (size() > HANDOFF_LIMITS.bytes) {
-    if (h.delta.changes.length > 5) h = { ...h, delta: { ...h.delta, changes: h.delta.changes.slice(0, Math.floor(h.delta.changes.length / 2)), truncated: true } };
-    else if (h.impact.candidates.length > 5) h = { ...h, impact: { ...h.impact, candidates: h.impact.candidates.slice(0, Math.floor(h.impact.candidates.length / 2)), truncated: true } };
-    else if (h.bindings.items.length > 5) h = { ...h, bindings: { ...h.bindings, items: h.bindings.items.slice(0, Math.floor(h.bindings.items.length / 2)), truncated: true } };
-    else break;
+/** The handoff as printed, digest included: what the byte limit applies to. */
+export const handoffBytes = (h: Handoff) => Buffer.byteLength(JSON.stringify(h, null, 2));
+
+const seal = (b: Omit<Handoff, "digest">): Handoff => ({ ...b, digest: digestOf(b) });
+
+/**
+ * Keep the printed handoff (digest included) within HANDOFF_LIMITS.bytes: halve the longest
+ * derived lists, each marked truncated, until it fits; never the approved identity (change ID,
+ * digests, revisions, request). If it still does not fit, fail with HANDOFF_TOO_LARGE rather than
+ * returning more than the limit.
+ */
+function boundBytes(b: Omit<Handoff, "digest">): Handoff | { error: { code: "HANDOFF_TOO_LARGE"; message: string } } {
+  const half = <T>(xs: T[]) => xs.slice(0, Math.floor(xs.length / 2));
+  const cutters: [() => number, () => void][] = [
+    [() => b.delta.changes.length, () => (b = { ...b, delta: { ...b.delta, changes: half(b.delta.changes), truncated: true } })],
+    [() => b.impact.candidates.length, () => (b = { ...b, impact: { ...b.impact, candidates: half(b.impact.candidates), truncated: true, listsTruncated: true } })],
+    [() => b.bindings.items.length, () => (b = { ...b, bindings: { ...b.bindings, items: half(b.bindings.items), truncated: true } })],
+    [() => b.tests.bound.length, () => (b = { ...b, tests: { ...b.tests, bound: half(b.tests.bound), boundTruncated: true } })],
+    [() => b.scope.fromBindings.length, () => (b = { ...b, scope: { ...b.scope, fromBindings: half(b.scope.fromBindings), fromBindingsTruncated: true } })],
+    [() => b.impact.modules.length + b.impact.contracts.length, () => (b = { ...b, impact: { ...b.impact, modules: half(b.impact.modules), contracts: half(b.impact.contracts), listsTruncated: true } })],
+    [() => b.change.operations.length, () => (b = { ...b, change: { ...b.change, operations: half(b.change.operations), operationsTruncated: true } })],
+  ];
+  let h = seal(b);
+  while (handoffBytes(h) > HANDOFF_LIMITS.bytes) {
+    const next = cutters.map(([n, c]) => [n(), c] as const).filter(([n]) => n > 0).sort((p, q) => q[0] - p[0])[0];
+    if (!next) {
+      return { error: { code: "HANDOFF_TOO_LARGE", message: `the handoff would be ${handoffBytes(h)} bytes, over its ${HANDOFF_LIMITS.bytes}-byte limit, even with every derived list cut; read the change with vcv proposal show and the delta with vcv proposal preview` } };
+    }
+    next[1]();
+    h = seal(b);
   }
   return h;
 }

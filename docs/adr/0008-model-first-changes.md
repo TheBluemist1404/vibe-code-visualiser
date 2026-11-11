@@ -172,6 +172,18 @@ what a proposal changes before deciding.
   base commit must be an ancestor of HEAD. Recording never touches the model.
 - **No new trust claims.** `claimedBy` is the host-asserted principal; nothing in a report is
   authorization. The integrity gate is unaffected by reports.
+- **The working tree is part of the observation** (review of PR #20). The handoff and the report
+  hash the bytes of every bound source file and every file changed since their base (HEAD, or the
+  report's base commit), within a byte budget (`worktreeState`). They recheck that, the
+  changed-file set and the change's attestation before answering or writing, so a dirty edit
+  mid-read is `STATE_CHANGED`. The digest is stored (`git.worktree`, `vcvObserved.worktree`), so a
+  report names one concrete dirty source state, and `show` sees a same-path edit. This is
+  observation integrity: which bytes were looked at, not whether they are correct.
+- **Bounds are enforced on the output, not hoped for.** The printed handoff, digest included, is
+  at most 128 KiB; display text is cut with explicit flags while the proposal digest keeps covering
+  the full text, and `HANDOFF_TOO_LARGE` is returned when cutting derived lists cannot fit it. A
+  stored report is validated against its full schema before any field is used (`INVALID_RECORD`),
+  and the same schema is applied before writing one.
 - Not done: MCP tools for the handoff or the report (the agent already has the CLI), test
   execution, a universal verifier, and anything that triggers code generation.
 

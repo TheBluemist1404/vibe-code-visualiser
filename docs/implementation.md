@@ -49,7 +49,7 @@ It contains:
 
 | Field | What it is |
 | ----- | ---------- |
-| `change` | Change ID, proposal digest, base and approved revision, proposer, approver, rationale, operation summaries |
+| `change` | Change ID, proposal digest, base and approved revision, proposer, approver, rationale and operation summaries (display text, cut with `rationaleTruncated` / `operationsTruncated`; the proposal digest covers the full text) |
 | `approval` | `valid-signature`, the key fingerprint, and `trustVerification: caller-asserted` |
 | `modelNow` | The current revision; whether it is still the approved one; any later revisions (not covered) |
 | `delta`, `impact` | The object-level before/after of the approved revisions, plus structural impact (modules, contracts, cross-module) |
@@ -57,7 +57,7 @@ It contains:
 | `scope` | `declared` (the approved scope), and `fromBindings`: files that binding claims on changed or impacted objects point at |
 | `tests` | Requested tests, plus `tests` claims on the affected objects |
 | `bindings` | Each affected claim verified now (`resolved` / `stale` / `missing` …, with source and model freshness). `reassertAfterImplementing` marks claims on changed objects |
-| `git` | Base commit, branch and dirty flag of the checkout the agent starts from |
+| `git` | Base commit, branch and dirty flag of the checkout the agent starts from, and `worktree`: a digest of the bytes seen (bound source files and files changed since HEAD) |
 | `steps`, `caveats` | Fixed instructions and what the handoff does not establish |
 | `digest` | sha256 over the canonical JSON of everything above |
 
@@ -65,11 +65,16 @@ Properties:
 
 - **Deterministic.** There are no timestamps and the ordering is stable, so the same checkout
   state gives the same bytes and the same digest.
-- **Bounded.** Lists are capped and the whole handoff stays under 128 KB.
+- **Bounded.** Strings and lists are capped, each cut marked. The printed handoff (2-space JSON,
+  digest included) never exceeds 128 KiB: derived lists are halved until it fits, and if it still
+  does not, the call fails with `HANDOFF_TOO_LARGE` instead.
 - **Redacted.** Only repository-relative paths appear. The checkout's absolute path and the home
   directory are scrubbed from every string, including free text.
 - **One observation.** Like every read surface, it reads the checkout once and rechecks before
-  answering (`STATE_CHANGED`).
+  answering (`STATE_CHANGED`). The recheck covers the model store, the Git commit, the change
+  records, the binding claims, the change's attestation, and the working tree: the set of changed
+  files and the bytes of every changed or bound file. An edit during binding verification is
+  never mixed into the result.
 
 ## Implementing (the agent's job)
 
@@ -112,6 +117,9 @@ four sections apart, and none implies another:
   - source files changed since the base commit (committed, staged, unstaged and untracked);
   - those outside the approved scope;
   - `.vcv/` changes by area;
+  - `worktree`: a digest of the bytes of every changed and bound file (content hashes, or size and
+    mtime past the budget, then `complete: false`), so the report names one concrete dirty source
+    state, not only file names;
   - each affected binding claim verified now, with `reasserted` (claimed at the approved revision
     or later).
 - **`notReconciled`**: always `not-reconciled`. Whether the code implements the model is M4's
@@ -139,13 +147,18 @@ It **warns rather than passes silently**:
 
 Recording changes no model state. The base commit must be in the repository and an ancestor of
 HEAD (`UNKNOWN_COMMIT`). A second report is refused (`REPORT_EXISTS`). To replace a report, pass
-the current file's digest with `--expect` (`REPORT_CHANGED` if it moved). A symlinked or
-non-directory `.vcv/implementations/` is refused (`UNSAFE_PATH`). Reports are bounded to 256 KB
-and redacted like the handoff.
+the current file's digest with `--expect` (`REPORT_CHANGED` if it moved, including when another
+report is written while the replacement is prepared: the file is re-read right before the
+rename). A symlinked or non-directory `.vcv/implementations/` is refused (`UNSAFE_PATH`). Reports
+are bounded to 256 KB and redacted like the handoff. Recording rechecks the same state as the
+handoff (store, commit, records, claims, attestation, changed files and their bytes) before it
+writes (`STATE_CHANGED`).
 
 `vcv implementation show <path> <changeId>` reads a report and recomputes VCV's observations now.
-`changedSinceReport` says whether the files, scope or binding states moved on since the report
-was recorded, and `warningsNow` lists the warnings as they stand now.
+The stored report is validated against the full report schema first; a malformed or foreign file
+is `INVALID_RECORD`, with the failing fields. `changedSinceReport` says whether the files, their
+bytes, the scope or the binding states moved on since the report was recorded (an edit of an
+already-dirty file counts), and `warningsNow` lists the warnings as they stand now.
 
 ## What this does not do
 

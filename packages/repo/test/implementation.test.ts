@@ -293,3 +293,123 @@ test("scope globs", () => {
   assert.equal(m("**/*.spec.ts")("x.spec.ts"), true);
   assert.equal(m("README.md")("README.md"), true);
 });
+
+// ---- review of PR #20: observation integrity, replacement races, byte limit, persisted schema ----
+
+test("handoff and report observe the working tree: an edit of a bound or changed file while reading is STATE_CHANGED, never a mixed result", () => {
+  const { repo, id } = approved();
+  const svc = join(repo, SERVICE);
+  const original = readFileSync(svc, "utf8");
+
+  // A bound source file edited after binding verification read it.
+  const h1 = buildHandoff(repo, id, { afterRead: () => writeFileSync(svc, original + "\nexport const value = 2;\n") });
+  assert.equal(!h1.ok && h1.error.code, "STATE_CHANGED", JSON.stringify(h1));
+  writeFileSync(svc, original);
+  // A new dirty file appearing mid-read changes the observed file set.
+  const h2 = buildHandoff(repo, id, { afterRead: () => writeFileSync(join(repo, "notes.txt"), "x\n") });
+  assert.equal(!h2.ok && h2.error.code, "STATE_CHANGED");
+  rmSync(join(repo, "notes.txt"));
+  // The attestation is part of the guard too.
+  const att = join(repo, ".vcv/approvals", `${id}.json`);
+  const attBytes = readFileSync(att, "utf8");
+  const h3 = buildHandoff(repo, id, { afterRead: () => writeFileSync(att, "{}") });
+  assert.equal(!h3.ok && h3.error.code, "STATE_CHANGED");
+  writeFileSync(att, attBytes);
+
+  const ok = buildHandoff(repo, id);
+  assert.ok(ok.ok);
+  assert.match(ok.data.git.worktree.digest, /^[0-9a-f]{64}$/);
+  assert.equal(ok.data.git.worktree.complete, true);
+  // The handoff names the bytes it saw: a dirty edit gives another worktree digest.
+  edit(repo, SERVICE, "taken.length >= course.capacity", "taken.length >= course.capacity /* a */");
+  const dirty = buildHandoff(repo, id);
+  assert.ok(dirty.ok);
+  assert.notEqual(dirty.data.git.worktree.digest, ok.data.git.worktree.digest);
+
+  // Recording: a file becoming newly out of scope mid-read is STATE_CHANGED, and nothing is written.
+  const input = report(ok.data);
+  const r1 = recordImplementation(repo, input, implementer, null, { afterRead: () => writeFileSync(join(repo, "late.txt"), "x\n") });
+  assert.equal(!r1.ok && r1.error.code, "STATE_CHANGED");
+  assert.throws(() => statSync(join(repo, ".vcv/implementations", `${id}.json`)));
+  rmSync(join(repo, "late.txt"));
+  const r2 = recordImplementation(repo, input, implementer, null, { afterRead: () => edit(repo, SERVICE, "/* a */", "/* b */") });
+  assert.equal(!r2.ok && r2.error.code, "STATE_CHANGED", "a same-path edit of a dirty file mid-read");
+  edit(repo, SERVICE, "/* b */", "/* a */");
+
+  // show: a same-path edit of a dirty file, with the same commit and file set, is a change since the report.
+  const r = recordImplementation(repo, input, implementer);
+  assert.ok(r.ok, JSON.stringify(r));
+  const before = implementationStatus(repo, id);
+  assert.ok(before.ok);
+  assert.equal(before.data.changedSinceReport, false);
+  edit(repo, SERVICE, "/* a */", "/* c */");
+  const after = implementationStatus(repo, id);
+  assert.ok(after.ok);
+  assert.deepEqual(after.data.now.filesModified, before.data.now.filesModified, "same file set");
+  assert.equal(after.data.changedSinceReport, true, "same paths, other bytes");
+  const s = implementationStatus(repo, id, { afterRead: () => edit(repo, SERVICE, "/* c */", "/* d */") });
+  assert.equal(!s.ok && s.error.code, "STATE_CHANGED");
+});
+
+test("replacing a report never overwrites one written since it was checked", () => {
+  const { repo, id } = approved();
+  const h = (buildHandoff(repo, id) as { ok: true; data: Handoff }).data;
+  edit(repo, SERVICE, "taken.length >= course.capacity", "taken.length >= course.capacity /* capacity reported */");
+  const first = recordImplementation(repo, report(h, { notes: "first" }), implementer);
+  assert.ok(first.ok, JSON.stringify(first));
+  const file = join(repo, ".vcv/implementations", `${id}.json`);
+  const concurrent = { ...first.data.report, agentClaims: { ...first.data.report.agentClaims, notes: "concurrent update" } };
+  const r = recordImplementation(repo, report(h, { notes: "replacement" }), implementer, first.data.digest, {
+    afterRead: () => writeFileSync(file, JSON.stringify(concurrent, null, 2) + "\n"),
+  });
+  assert.equal(!r.ok && r.error.code, "REPORT_CHANGED", JSON.stringify(r));
+  assert.equal(JSON.parse(readFileSync(file, "utf8")).agentClaims.notes, "concurrent update", "the intervening report is kept");
+  // A report changing while it is shown is STATE_CHANGED as well.
+  const s = implementationStatus(repo, id, { afterRead: () => writeFileSync(file, JSON.stringify(first.data.report, null, 2) + "\n") });
+  assert.equal(!s.ok && s.error.code, "STATE_CHANGED");
+});
+
+test("the handoff byte limit holds for worst-case valid input, and the approved identity is kept", () => {
+  const rationale = "x".repeat(150_000);
+  const { repo, id, preview } = approved("chg-long", { rationale });
+  const r = buildHandoff(repo, id);
+  assert.ok(r.ok, JSON.stringify(r).slice(0, 500));
+  const bytes = Buffer.byteLength(JSON.stringify(r.data, null, 2));
+  assert.ok(bytes <= 128 * 1024, `${bytes} bytes`);
+  assert.equal(r.data.change.rationaleTruncated, true);
+  assert.ok(r.data.change.rationale!.length <= 4000);
+  assert.equal(r.data.change.proposalDigest, preview.proposal.proposalDigest, "the digest still covers the full rationale");
+  assert.ok(r.data.caveats.some((c) => /shortened for display/.test(c)));
+  assert.deepEqual(r.data.request, REQUEST);
+});
+
+test("a malformed persisted report is INVALID_RECORD, never a crash", () => {
+  const { repo, id } = approved();
+  const h = (buildHandoff(repo, id) as { ok: true; data: Handoff }).data;
+  edit(repo, SERVICE, "taken.length >= course.capacity", "taken.length >= course.capacity /* capacity reported */");
+  const r = recordImplementation(repo, report(h), implementer);
+  assert.ok(r.ok, JSON.stringify(r));
+  const file = join(repo, ".vcv/implementations", `${id}.json`);
+  const good = r.data.report as unknown as Record<string, Record<string, unknown>>;
+  const corrupt: unknown[] = [
+    { kind: "vcv-implementation-report", changeId: id },
+    { ...good, vcvObserved: { ...good.vcvObserved, baseCommit: 7 } },
+    { ...good, vcvObserved: { ...good.vcvObserved, filesModified: "README.md" } },
+    { ...good, vcvObserved: { ...good.vcvObserved, worktree: undefined } },
+    { ...good, agentClaims: { ...good.agentClaims, testsRun: null } },
+    { ...good, agentClaims: { ...good.agentClaims, verifiedByVcv: true } },
+    { ...good, approvedIntent: { ...good.approvedIntent, request: { behavior: 1 } } },
+    { ...good, changeId: "chg-other" },
+    { ...good, extra: true },
+    [],
+    null,
+  ];
+  for (const c of corrupt) {
+    writeFileSync(file, c === undefined ? "" : JSON.stringify(c));
+    const s = implementationStatus(repo, id);
+    assert.equal(!s.ok && s.error.code, "INVALID_RECORD", JSON.stringify(c).slice(0, 120));
+  }
+  writeFileSync(file, "{not json");
+  const s = implementationStatus(repo, id);
+  assert.equal(!s.ok && s.error.code, "INVALID_RECORD");
+});
