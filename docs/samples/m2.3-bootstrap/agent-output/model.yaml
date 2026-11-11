@@ -1,0 +1,145 @@
+schemaVersion: "0.2"
+project:
+  id: prj-course-desk
+  name: Course Desk
+  modelRevision: rev-1
+  status: draft
+  description: >-
+    Draft bootstrapped from the repository at commit adb423c; not reviewed. Students enroll in
+    courses and every enrollment decision is announced as a notification. NestJS API (server/,
+    in-memory storage) plus a React page (web/). Based on README.md and the sources.
+actors:
+  - id: act-student
+    kind: actor
+    owner: prj-course-desk
+    name: Student
+    description: >-
+      The only kind of user. The code has no authentication; a student is just a free-form
+      studentId string sent by the client (web/src/components/EnrollmentForm.tsx defaults to "stu-ada").
+modules:
+  - id: mod-enrollment
+    kind: module
+    owner: prj-course-desk
+    name: Enrollment
+    purpose: Holds the course catalog and decides, records and exposes enrollments.
+    dependsOn: [mod-notifications]
+    description: >-
+      server/src/enrollment/ (EnrollmentModule). EnrollmentService calls NotificationsService.notify
+      directly (injected via NotificationsModule import); this is a direct call, not an event, so
+      no events or contracts are modelled.
+  - id: mod-notifications
+    kind: module
+    owner: prj-course-desk
+    name: Notifications
+    purpose: In-memory outbox of messages to recipients, readable over HTTP.
+    description: server/src/notifications/ (NotificationsModule). Exports NotificationsService; has no dependencies.
+  - id: mod-web
+    kind: module
+    owner: prj-course-desk
+    name: Web
+    purpose: Single-page React UI for enrolling and viewing the student's notifications.
+    dependsOn: [mod-enrollment, mod-notifications]
+    description: >-
+      web/src (App.tsx, api/client.ts, components/). Depends on the other modules only through
+      their HTTP routes under /api (api/client.ts), not through imports.
+capabilities:
+  - id: cap-list-courses
+    kind: capability
+    owner: mod-enrollment
+    name: List courses with seats left
+    initiatorActorId: act-student
+    description: GET /courses (enrollment.controller.ts). Initiator inferred from the UI; the API itself is open.
+  - id: cap-enroll
+    kind: capability
+    owner: mod-enrollment
+    name: Enroll in a course
+    initiatorActorId: act-student
+    description: >-
+      POST /enrollments {studentId, courseId}. Always 201 with the recorded decision (confirmed or
+      rejected); 400 for a malformed body, 404 for an unknown course. Spec and e2e tests were not read in full.
+  - id: cap-get-enrollment
+    kind: capability
+    owner: mod-enrollment
+    name: Get an enrollment
+    description: GET /enrollments/:id; 404 if unknown. Not used by the web client.
+  - id: cap-list-notifications
+    kind: capability
+    owner: mod-notifications
+    name: List notifications for a recipient
+    initiatorActorId: act-student
+    description: GET /notifications?recipientId=...; 400 without recipientId; oldest first.
+  - id: cap-use-ui
+    kind: capability
+    owner: mod-web
+    name: Enroll and see outcome via the page
+    initiatorActorId: act-student
+    description: >-
+      App.tsx: submit the form, show outcome, then reload that student's notifications and the course seat counts.
+data:
+  - id: dat-course
+    kind: data
+    owner: mod-enrollment
+    name: Course
+    description: Seeded in course-catalog.ts (Linear Algebra cap 2, Modern Poetry cap 1); fixed, no create/update API. seatsLeft in CourseSummary is derived (capacity minus confirmed enrollments).
+    attributes:
+      - { id: att-course-id, name: id, type: id }
+      - { id: att-course-title, name: title, type: string }
+      - { id: att-course-capacity, name: capacity, type: integer }
+  - id: dat-enrollment
+    kind: data
+    owner: mod-enrollment
+    name: Enrollment
+    description: enrollment.types.ts, in-memory EnrollmentRepository; ids enr-N. status is confirmed|rejected; reason is COURSE_FULL|ALREADY_ENROLLED, set only when rejected. Rejections are stored too.
+    attributes:
+      - { id: att-enr-id, name: id, type: id }
+      - { id: att-enr-student, name: studentId, type: string }
+      - { id: att-enr-course, name: courseId, type: reference, refDataId: dat-course }
+      - { id: att-enr-status, name: status, type: string }
+      - { id: att-enr-reason, name: reason, type: string, nullable: true }
+  - id: dat-notification
+    kind: data
+    owner: mod-notifications
+    name: Notification
+    description: notification.types.ts, in-memory outbox; ids ntf-N. kind is enrollment-confirmed|enrollment-rejected. enrollmentId points at an Enrollment in another module, so it is typed id rather than reference.
+    attributes:
+      - { id: att-ntf-id, name: id, type: id }
+      - { id: att-ntf-recipient, name: recipientId, type: string }
+      - { id: att-ntf-kind, name: kind, type: string }
+      - { id: att-ntf-message, name: message, type: string }
+      - { id: att-ntf-enrollment, name: enrollmentId, type: id }
+rules:
+  - id: rul-seat-limit
+    kind: rule
+    owner: mod-enrollment
+    name: Course capacity
+    ruleKind: invariant
+    statement: Confirmed enrollments for a course never exceed its capacity; a request for a full course is rejected with COURSE_FULL.
+    description: enrollment.service.ts enroll(). Check-then-save is synchronous, so no race in this in-memory setup.
+  - id: rul-no-double-enroll
+    kind: rule
+    owner: mod-enrollment
+    name: One confirmed enrollment per student per course
+    ruleKind: invariant
+    statement: A student already holding a confirmed enrollment in a course is rejected with ALREADY_ENROLLED and takes no seat.
+    description: enrollment.service.ts. Checked before capacity, so ALREADY_ENROLLED wins when both apply.
+  - id: rul-announce-every-decision
+    kind: rule
+    owner: mod-enrollment
+    name: Every decision is notified
+    ruleKind: policy
+    statement: Each enrollment decision, confirmed or rejected, is recorded and results in exactly one notification to the student.
+    description: enrollment.service.ts enroll(). Unknown course and malformed request produce no enrollment and no notification.
+  - id: rul-request-valid
+    kind: rule
+    owner: mod-enrollment
+    name: Enrollment request validation
+    ruleKind: invariant
+    statement: studentId and courseId must be non-empty strings; both are trimmed before use.
+    description: parseEnrollmentRequest in enrollment.types.ts.
+  - id: rul-recipient-required
+    kind: rule
+    owner: mod-notifications
+    name: recipientId required
+    ruleKind: invariant
+    statement: Listing notifications requires a non-empty recipientId.
+    description: notifications.controller.ts.

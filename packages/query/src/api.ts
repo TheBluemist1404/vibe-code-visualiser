@@ -173,7 +173,7 @@ function search(req: z.output<typeof searchRequest>, snap: Snapshot): QueryResul
         const v = value.toLowerCase();
         let weight: number;
         if (v.includes(term)) {
-          // Matches at a word start count double: "enrollment" in "Enrollment events" beats "role" in "parole".
+          // Matches at a word start count double: "bill" in "Billing events" beats "bill" in "rebill".
           weight = new RegExp(`(^|[^a-z0-9])${term}`).test(v) ? 2 : 1;
         } else if (root !== term && v.includes(root)) {
           weight = 0.5; // "notify" finds "Notifications", "rejected" finds "rejection"
