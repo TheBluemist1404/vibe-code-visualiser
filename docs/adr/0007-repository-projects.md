@@ -1,6 +1,7 @@
-# ADR 0007: Repository-native projects, branch-safe revisions, source locators and freshness (M2)
+# ADR 0007: Repository-native projects, branch-safe revisions, source locators and binding verification (M2)
 
-Status: **proposed for review** (2026-11-11). Design contract for M2 (Issue #6). Sections 1–3
+Status: **proposed for review** (2026-11-11; revised after review on PR #8 for the agent-first
+operating model agreed on 2026-11-11). Design contract for M2 (Issue #6). Sections 1–3
 are implemented in the M2.1 PR; sections 4–6 are the contract the M2.2–M2.5 slices will build
 on and are not implemented yet. Items marked *(proposed)* are implementation choices the issue
 asks to keep open until this ADR is reviewed.
@@ -14,8 +15,17 @@ chosen Git ref. Three authorities stay separate:
 | Authority | Where | Canonical? |
 |---|---|---|
 | Declared intent (IR revisions) | `.vcv/HEAD`, `.vcv/revisions/` | yes, changed only by approved semantic operations |
-| Observed source structure (index) | `.vcv/cache/` (git-ignored), rebuildable | no |
-| Bindings: evidence-backed claims linking the two | `.vcv/bindings/` | the *claim* is shared; its *freshness* is derived |
+| Observed source (the checkout itself; resolver cache in `.vcv/cache/`, git-ignored) | working tree | no |
+| Bindings: agent- or human-supplied claims linking the two | `.vcv/bindings/` | the *claim* is shared; its *verification state* is derived |
+
+**Responsibility split (agent-first operating model).** VCV is the visualiser and validation
+gate for a versioned model; it does no repository-level reasoning. A coding agent analyses the
+repository with tools of its own choosing (TypeScript compiler API, Tree-sitter, Nx, plain
+reading), decides what to model, creates or updates `.vcv/` through VCV's supported operations,
+and records which code it believes implements what. VCV represents, validates, checks
+deterministically, enforces authorization/approval, versions, persists and displays. Optional
+deterministic analyzers may supply objective source facts; none of them infers business
+meaning. Sections 4–6 are written to this split.
 
 Before this ADR the engine minted `rev-<n+1>`, so two branches that each committed one change
 both produced `rev-2` with different content. Git would then either conflict on
@@ -36,7 +46,7 @@ subdirectories. Fixed name and location, so every clone agrees without configura
   .gitignore              shared   written by `vcv project init`
   audit.jsonl             local    attempt log (ADR 0004), per checkout   (proposed)
   orphaned/               local    recovery leftovers
-  cache/                  local    source index, observation snapshots (M2.3)
+  cache/                  local    locator-resolution cache (M2.3)
 ```
 
 Shared files contain **no absolute paths** and no machine- or user-specific data beyond what
@@ -106,25 +116,39 @@ the next commit continues with `rev-<n+1>-<digest>`. `nextRevision()` is kept, d
 don't, since their names differ). VCV reports `CONFLICTED` and refuses to write. If the
 conflict is resolved by keeping one side's HEAD, the other side's revisions remain on disk
 without being in HEAD's history. Recovery used to move any such file to `orphaned/`, which in a
-Git checkout would silently drop a branch's model. Now an unlisted revision is treated as an
-interrupted-commit **leftover** only if it is exactly the next child of HEAD (branch-safe: its
-digest verifies against HEAD as parent at `seq = len + 1`; legacy: its name is
-`nextRevision(HEAD)`). Anything else is **foreign**: inspection reports `diverged`, `FileStore`
-throws `DIVERGED`, and nothing is moved. No semantic auto-merge; the person keeps one line
-(removes the other line's revision files, or restores the matching HEAD).
+Git checkout would silently drop a branch's model. Recovery may now move an unlisted revision
+only if it is **provably an interrupted commit of this store**; all three must hold:
+
+1. it is the next child of HEAD: its digest verifies with HEAD as parent at `seq = len + 1`
+   (legacy IDs: it is named `nextRevision(HEAD)`);
+2. no change record says it was applied. The commit protocol writes the applied record only
+   after HEAD names the revision, so an applied record is durable evidence that the revision was
+   committed on some line of history (and Git carries that record along with the revision file);
+3. it is the only such candidate: one interrupted commit leaves at most one file.
+
+Anything else is **foreign**: inspection reports `diverged`, `FileStore` throws `DIVERGED`, and
+nothing is moved. This covers resolving a merge to one branch tip, and also resolving
+`.vcv/HEAD` to the branches' **common ancestor**, where every branch child verifies against HEAD
+by digest (rules 2 and 3 catch it; regression tests in `core/test/revisions.test.ts` and
+`repo/test/project.test.ts`). No semantic auto-merge; the person keeps one line (removes the
+other line's revision files, or restores the matching HEAD).
 
 Residual risks:
 
-- A sibling revision from another branch with the *same* parent as HEAD verifies as a
-  leftover and would be moved to `orphaned/` (visible in `git status`, recoverable). This needs a
-  deliberate resolution that keeps an older HEAD while adding a sibling's files.
+- One sibling revision whose applied change record was also deleted, merged in with HEAD at
+  its parent, still looks exactly like an interrupted commit and would be moved to
+  `orphaned/` (visible in `git status`, recoverable). This needs two deliberate edits to the
+  store's files.
 - `changes/<id>.json` uses caller-chosen IDs; two branches using the same change ID for
   different changes will conflict in Git (detected as `conflicted`), not silently merge.
 - 48-bit digest: collisions are negligible at this scale; length is a constant.
 
 *(proposed)* encoding: `rev-<seq>-<12 hex>`; digest input and `vcv-revision-v1` domain tag.
 
-## 4. Source locators (contract for M2.3/M2.4, proposed)
+## 4. Source locators (contract for M2.4, proposed)
+
+A locator is what an agent (or person) writes to say *where* an artifact is; VCV only checks
+that it resolves. It is not produced by VCV analysis.
 
 ```ts
 type SourceLocator = {
@@ -140,14 +164,22 @@ type SourceLocator = {
 Serialized for people as `path#symbol:EnrollmentService.reject`,
 `path#route:POST /enrollments/:id/reject`, `path#test:Enrollment > rejects`. `symbol.name` is the
 dotted container path (`Class.method`). Paths are compared case-sensitively; a locator whose
-path differs only by case from an indexed file is reported, not matched (case-insensitive
+path differs only by case from a file on disk is reported, not matched (case-insensitive
 filesystems).
 
-## 5. Bindings: claim vs derived freshness (contract for M2.4/M2.5, proposed)
+## 5. Bindings: three separate concerns (contract for M2.4/M2.5, proposed)
 
-The existing `Binding` in `packages/core/src/bindings.ts` is extended, not replaced. A stored
-**claim** (one file per binding under `.vcv/bindings/<binding-id>.json`, so branches rarely
-conflict):
+The existing `Binding` in `packages/core/src/bindings.ts` is extended, not replaced. A binding
+keeps three things apart that must never be read as each other:
+
+| Concern | Who supplies it | What it means | What it does **not** mean |
+|---|---|---|---|
+| **Interpretation + provenance** | the agent (or a person) | "this code implements/exposes/persists/tests that model object", with who said so, when, at which model revision and commit, and optionally a rationale/confidence | that VCV checked the meaning, or that the behaviour is correct |
+| **Deterministic verification** | VCV, recomputed on demand | the locator resolves to exactly one artifact; its fingerprint matches what was recorded; the bound object still exists and has or hasn't changed since | anything about semantics; a pass is "the pointer is intact", not "the code is right" |
+| **Approval** | a principal with permission, through the existing approval gate | a person accepted a *consequential model decision* | that every routine mapping needed a person |
+
+A stored **claim** (one file per binding under `.vcv/bindings/<binding-id>.json`, so branches
+rarely conflict):
 
 ```ts
 type BindingClaim = {
@@ -155,64 +187,84 @@ type BindingClaim = {
   modelObjectId: Id;            // stable IR ID
   relation: "implements" | "exposes" | "persists" | "tests";
   locator: SourceLocator;
-  confirmation: "confirmed" | "suggested" | "disputed";
-  provenance: "human" | "agent" | "inferred";
-  confirmedBy?: string;         // host principal; required for "confirmed"
+  provenance: {
+    source: "agent" | "human" | "tool";   // tool = an optional deterministic analyzer the agent ran
+    principalId: string;                   // from the trusted host, never from the payload
+    rationale?: string;
+    confidence?: number;                   // the supplier's own estimate, never computed by VCV
+  };
   modelRevision: string;        // revision the claim was made against
-  commit: string | null;        // Git commit inspected; null if made on an uncommitted tree
-  fingerprint: { file: string; selector?: string };   // see below
-  workingTreeDirty: boolean;    // the inspected file differed from `commit`
+  commit: string | null;        // Git commit inspected; null on a repository without commits
+  fingerprint: { file: string; selector?: string };
+  workingTreeDirty: boolean;    // the file differed from `commit` when the claim was made
+  disputed?: { by: string; reason: string };   // only by a person or evidence-based reconciliation (M4)
 };
 ```
 
-- Only an explicit confirmation by a principal with permission makes a claim `confirmed`. An
-  agent may create `suggested` claims; it may not confirm its own suggestion (same rule as
-  self-approval, ADR 0004).
-- `disputed` is only ever set by a person or reconciliation with evidence (M4), never by a
-  freshness check.
+**Recording** a claim is a normal semantic operation through `ModelEngine`-style propose/apply
+with the caller's host permissions. An agent holding the ordinary permission to record
+bindings can record routine mappings directly; there is **no universal manual mapping step**.
+Recording is refused (not downgraded) if the locator does not resolve at record time, so an
+agent cannot store a pointer to nothing.
 
-**Freshness is derived, never stored**, by comparing the claim with the current index:
+**Approval** follows the existing gate, not a new one: a claim is consequential, and goes to
+`pending` for a principal with approve permission, when it accompanies a model change that
+already needs approval (new module, contract, approved-draft change), or when policy marks a
+relation as sensitive *(proposed: none by default)*. A recorded agent claim is never presented as
+"approved" or "verified"; the UI and queries show its provenance verbatim.
 
-| Freshness | Precise meaning |
+**Derived verification state** (never stored; computed from the claim, the working tree and
+the model):
+
+| State | Precise meaning |
 |---|---|
-| `current` | path and selector resolve to exactly one artifact whose fingerprint equals the claim's, and the bound object did not change between the claim's revision and the current one |
-| `stale` | it resolves, but the selector fingerprint changed, or the bound object changed in the model since the claim's revision: needs revalidation, not a contradiction |
-| `missing` | the path or the selector no longer resolves anywhere in the index |
-| `ambiguous` | the selector resolves more than once, or it is missing and there are several relocation candidates |
-| `unverified` | the claim is `suggested`, or the artifact is in an unsupported/unindexed file |
+| `resolved` | path and selector resolve to exactly one artifact whose fingerprint equals the claim's, and the bound object did not change since the claim's revision |
+| `stale` | it resolves, but the selector fingerprint changed, or the bound object changed in the model since the claim's revision: the supplier should re-check, not a contradiction |
+| `missing` | the path or the selector no longer resolves |
+| `ambiguous` | the selector resolves more than once |
+| `unchecked` | the file type or selector kind is not supported by the resolver, so only the claim is reported |
 
-A changed Git commit alone does **not** make a binding stale: only a fingerprint change or a
-model change to the bound object does (model change computed by diffing the two stored
-revisions, which replaces the current `changedObjectIds` hint).
+`disputed` is a recorded fact about the claim, not a derived state, and is never set by these
+checks. A changed Git commit alone does **not** make a binding stale. Model change is computed
+by diffing the two stored revisions (replacing the current `changedObjectIds` hint).
 
 **Fingerprints** *(proposed)*: `file` = SHA-256 of the file bytes with CRLF normalized to LF;
 `selector` = SHA-256 of the selected declaration's source text with whitespace runs collapsed
-and comments removed. Structural fingerprints are candidate-finding signals, not identities.
+and comments removed.
 
-**Moves and renames**: when a locator is `missing`, candidates come from (a) Git rename
-detection between the claim's commit and now, (b) index entries with the same selector
-fingerprint, (c) the same symbol name in another file. One candidate with an equal selector
-fingerprint is offered as a `suggested` relocation; anything else is `ambiguous`. Nothing is
-rebound without a confirmation.
+**Moves and renames.** VCV reports `missing`; it does not relocate. It may attach objective
+hints for the agent (Git rename detection between the claim's commit and now; files containing a
+declaration with the same name or the same selector fingerprint). Interpreting those hints and
+recording a corrected claim is the agent's job. Nothing is rebound silently.
 
 **Branch changes** need no special case: claims are files in `.vcv/bindings/`, so they switch
-with the checkout, and freshness is recomputed against the new working tree.
+with the checkout, and verification is recomputed against the new working tree.
 
-## 6. Index (contract for M2.3, proposed)
+## 6. Locator resolution and optional analyzers (contract for M2.3, proposed)
 
-Rebuildable, deterministic, stored under `.vcv/cache/index.json`, never canonical. Coverage:
-`.ts`/`.tsx` files; imports/exports; top-level and class-member declarations; NestJS
-`@Controller` + `@Get/@Post/...` routes and `@Injectable` providers; React components
-(exported functions returning JSX) and entry points; test files (`*.test.ts(x)`, `*.spec.ts(x)`)
-with `describe`/`it`/`test` titles. Excluded: `node_modules`, `.git`, `.vcv`, `dist`, `build`,
-`coverage`, files over 1 MB, more than 5,000 files. Parser: the TypeScript compiler API
-(already a dev dependency) *(proposed)*. Unsupported constructs are reported, not guessed:
-computed route paths, dynamic imports, re-export cycles, decorators from aliases. Ordering is
-by path, then source position. No LLM-derived inference.
+VCV needs exactly one source capability: **resolving and fingerprinting the locators in
+section 4** for supported files, deterministically. That resolver is part of the evidence
+checks. It is not an architecture-discovery path and does not propose modules, mappings or
+meaning.
+
+- Resolver coverage *(proposed)*: `.ts`/`.tsx`; top-level and class-member declarations;
+  NestJS `@Controller` + `@Get/@Post/...` routes; `describe`/`it`/`test` titles in
+  `*.test.ts(x)`/`*.spec.ts(x)`. Parser: the TypeScript compiler API (already a dev dependency).
+  Anything else is `unchecked`, never guessed (computed routes, dynamic imports, aliased
+  decorators).
+- Results are a rebuildable, git-ignored cache under `.vcv/cache/`, keyed by file content hash;
+  never canonical, never a second model. Excluded: `node_modules`, `.git`, `.vcv`, `dist`,
+  `build`, `coverage`; files over 1 MB.
+- An optional **inventory tool** (list a repository's files, exports, routes and tests) may be
+  offered to agents as a convenience through the same adapters (CLI, MCP). It is one tool among
+  the agent's own (Tree-sitter, Nx, compiler APIs), is never required, and its output is objective
+  facts only. Onboarding an uninitialized repository is: agent analyses → agent proposes a draft
+  model and claims through supported operations → VCV validates → approval where the gate needs it.
+- No LLM-derived inference anywhere in VCV.
 
 ## Consequences
 
 - New package `@vcv/repo` (Git observation + project loading) depends on `@vcv/core`; Core
-  stays free of Git and process spawning.
+  stays free of Git and process spawning. The locator resolver (M2.3) belongs there too.
 - CLI: `vcv project status [path] [--json]`, `vcv project init <path> <model.yaml>`.
 - Tests that asserted the literal `rev-2` now assert the `rev-2-<digest>` shape.
