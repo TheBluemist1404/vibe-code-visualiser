@@ -41,6 +41,12 @@ Operations: `createModule`, `createEvent`, `createCapability` (new in M3.1), `cr
 `setModuleDependencies`, `removeObject`, `setRuleStatement`, `setDescription`, `approveDraft`.
 There is no generic patch. The payload cannot name a proposer, approver or status.
 
+A proposal may also carry an `implementation` request: `behavior`, `acceptanceCriteria`, optional
+`suggestedTests` and `scope` (repository-relative paths or globs). It is shown in the preview and
+covered by the proposal digest, so the reviewer approves it together with the operations; the
+engine never reads it. After approval it becomes the implementation handoff
+([implementation.md](implementation.md)).
+
 `submit` is **proposal-only**. It narrows whatever permissions the host holds to
 `model:propose` before calling the engine, so the result is always one of
 
@@ -135,8 +141,9 @@ Four things are reported separately and none implies another:
   flag. Approving a change does not approve a draft snapshot, and vice versa.
 - **binding resolution** (`vcv evidence`): whether a pointer into the code resolves. Not model
   approval, not correctness.
-- **implementation**: always `not-recorded`. VCV does not infer that approved intent was
-  implemented; M3.3 adds an explicit implementation report.
+- **implementation**: always `not-recorded` here. VCV never infers that approved intent was
+  implemented; the implementing agent's report is a separate claim
+  ([implementation.md](implementation.md)).
 
 ## What this does not do
 

@@ -220,3 +220,60 @@ test("host gate: a candidate that rewrites its own vcv script, CLI and integrity
   assert.equal(gate(repo, "0".repeat(40)).status, 2, "the base must be present in the candidate");
   assert.equal(spawnSync("bash", [GATE, repo, repo, base], { encoding: "utf8" }).status, 2, "the verifier must not come from the candidate");
 });
+
+test("handoff and implementation report through the CLI: JSON handoff, recorded report with warnings, show", async () => {
+  const { baseline, git, edit, SERVICE } = await import("../../../packages/repo/test/course-desk.ts");
+  const repo = baseline();
+  const key = join(tmp(), "hoang.pem");
+  assert.equal(vcv("reviewer", "init", key, "--id", "user:hoang", "--add", repo).status, 0);
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "trust user:hoang");
+  const base = git(repo, "rev-parse", "HEAD");
+  git(repo, "checkout", "-q", "-b", "feature");
+  const file = join(tmp(), "change.yaml");
+  writeFileSync(file, [
+    "changeId: chg-capacity",
+    "projectId: prj-course-desk",
+    "expectedRevision: rev-1",
+    "rationale: tell students the capacity",
+    "operations:",
+    "  - { type: setRuleStatement, ruleId: rul-seat-limit, statement: \"A full course is rejected with COURSE_FULL and the capacity.\" }",
+    "implementation:",
+    "  behavior: A COURSE_FULL rejection reports the capacity.",
+    "  acceptanceCriteria: [\"COURSE_FULL includes the capacity\"]",
+    "  scope: [\"server/src/enrollment/**\"]",
+    "",
+  ].join("\n"));
+  const agentEnv = { ...process.env, VCV_HOST_PRINCIPAL: "agent:coder", VCV_HOST_PERMISSIONS: "model:propose,binding:record" };
+  const asAgent = (...args: string[]) => spawnSync("node", ["--experimental-strip-types", "--no-warnings", MAIN, ...args], { encoding: "utf8", env: agentEnv });
+  assert.equal(asAgent("proposal", "submit", repo, file).status, 0);
+  const preview = vcv("proposal", "preview", repo, "chg-capacity");
+  assert.match(preview.stdout, /implementation requested \(approved together with the operations\):\n {2}behavior: A COURSE_FULL rejection reports the capacity\./);
+  assert.match(preview.stdout, /scope: server\/src\/enrollment\/\*\*/);
+  assert.equal(asAgent("handoff", repo, "chg-capacity").status, 1, "not before approval");
+  const digest = JSON.parse(vcv("proposal", "preview", repo, "chg-capacity", "--json").stdout).data.proposal.proposalDigest as string;
+  assert.equal(vcv("review", "approve", repo, "chg-capacity", "--digest", digest, "--key", key, "--trust-commit", base).status, 0);
+  git(repo, "add", "-A");
+  git(repo, "commit", "-q", "-m", "approved chg-capacity");
+
+  const h = asAgent("handoff", repo, "chg-capacity");
+  assert.equal(h.status, 0, h.stdout);
+  const handoff = JSON.parse(h.stdout);
+  assert.equal(handoff.kind, "vcv-implementation-handoff");
+  assert.equal(asAgent("handoff", repo, "chg-capacity").stdout, h.stdout, "deterministic");
+
+  edit(repo, SERVICE, "taken.length >= course.capacity", "taken.length >= course.capacity /* reported */");
+  const reportFile = join(tmp(), "report.json");
+  writeFileSync(reportFile, JSON.stringify({ changeId: "chg-capacity", baseCommit: handoff.git.baseCommit, handoffDigest: handoff.digest, testsRun: [{ command: "npm test -w server", outcome: "passed" }], acceptance: [{ criterion: "COURSE_FULL includes the capacity", status: "met" }], confidence: "high" }));
+  const rec = asAgent("implementation", "record", repo, "--report", reportFile);
+  assert.equal(rec.status, 0, rec.stdout + rec.stderr);
+  assert.match(rec.stdout, /\.vcv\/implementations\/chg-capacity\.json: recorded \(digest [0-9a-f]{64}\)/);
+  assert.match(rec.stdout, /claimed by agent:coder; not reconciled/);
+  assert.match(rec.stdout, /1 source file\(s\) changed since [0-9a-f]{12}, 0 outside the approved scope; 0\/\d+ affected binding\(s\) reasserted/);
+  assert.match(rec.stdout, /! BINDING_NOT_REASSERTED: impl\.rul-seat-limit/);
+  assert.match(rec.stdout, /! CLAIMS_UNVERIFIED/);
+  assert.match(asAgent("implementation", "record", repo, "--report", reportFile).stdout, /✗ REPORT_EXISTS/);
+  const show = vcv("implementation", "show", repo, "chg-capacity");
+  assert.equal(show.status, 0, show.stdout);
+  assert.match(show.stdout, /same as recorded/);
+});

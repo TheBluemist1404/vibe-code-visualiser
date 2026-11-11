@@ -140,6 +140,41 @@ what a proposal changes before deciding.
 - **No MCP approval tool**, no revocation list or key expiry (remove the entry on the protected
   branch); both can come later without changing the attestation format (`format: 1`).
 
+## M3.3 decisions
+
+- **The implementation request is part of the proposal.** `behavior`, `acceptanceCriteria`,
+  `suggestedTests` and `scope` ride in an optional, strict `implementation` field of the
+  proposed change, so the proposal digest covers them. The reviewer approves the criteria and
+  the scope together with the operations, and the handoff cannot invent either. The engine
+  never reads the field; existing proposals and their digests are unchanged.
+- **The handoff is derived, not stored.** `vcv handoff` is read-only. It is deterministic (no
+  timestamps, stable order, a digest), bounded (capped lists, 128 KB) and redacted (no absolute
+  paths, no home directory). It is built from one observation, like every read surface. It
+  requires an applied change whose attestation signature matches the record. Key trust stays
+  with the host gate (M3.2), so the handoff says `caller-asserted`.
+- **The report keeps claims and observations apart.** One file per change,
+  `.vcv/implementations/<changeId>.json`, holds four sections:
+  - `approvedIntent` (from the record);
+  - `agentClaims` (the agent's tests, outcomes, criteria, gaps and confidence; `verifiedByVcv:
+    false`);
+  - `vcvObserved` (files changed since the base commit, scope matches, `.vcv/` areas, and
+    affected bindings verified now, with a `reasserted` flag);
+  - `notReconciled`.
+
+  VCV runs no tests and infers nothing from code. Warnings are explicit instead of a pass/fail
+  verdict: out-of-scope files, an undeclared scope, unresolved or unreasserted bindings, failed or
+  missing tests, unmet or unaddressed criteria, a moved model.
+- **"Reasserted" is a revision fact, not a judgment.** A claim counts as reasserted when it was
+  made at the approved revision or later. That is the only thing VCV can tell about the agent
+  having looked again. It says nothing about whether the claim is right.
+- **Writes are explicit and guarded.** A report is created exclusively and replaced only with the
+  current file's digest (`--expect`), like binding claims. The directory must be plain. The
+  base commit must be an ancestor of HEAD. Recording never touches the model.
+- **No new trust claims.** `claimedBy` is the host-asserted principal; nothing in a report is
+  authorization. The integrity gate is unaffected by reports.
+- Not done: MCP tools for the handoff or the report (the agent already has the CLI), test
+  execution, a universal verifier, and anything that triggers code generation.
+
 ## Consequences
 
 - New: `readStoreFile` / `STORE_FILE_LIMITS` in core (now used by every store read), `packages/repo/src/proposals.ts` (`submitProposal`, `listProposals`, `previewProposal`,
@@ -153,3 +188,8 @@ what a proposal changes before deciding.
   `fileAtCommit` git helpers, CLI `vcv reviewer init`, `vcv review approve|finalize`, `vcv integrity`.
   New store files: `.vcv/reviewers.json`, `.vcv/approvals/`. Unchanged: change records,
   revision IDs, `vcv approve`.
+- M3.3 new: `implementation` request in `proposedChangeSchema` (core), `packages/repo/src/handoff.ts`
+  (`buildHandoff`), `packages/repo/src/implementation.ts` (`recordImplementation`,
+  `implementationStatus`, `globMatcher`), `changedFilesSince` git helper, CLI `vcv handoff`,
+  `vcv implementation record|show`, preview shows the request. New store directory:
+  `.vcv/implementations/`.

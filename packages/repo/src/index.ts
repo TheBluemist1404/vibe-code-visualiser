@@ -7,3 +7,5 @@ export * from "./evidence.ts";
 export * from "./proposals.ts";
 export * from "./approval.ts";
 export * from "./integrity.ts";
+export * from "./handoff.ts";
+export * from "./implementation.ts";

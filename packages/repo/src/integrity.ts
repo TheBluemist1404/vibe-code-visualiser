@@ -328,7 +328,7 @@ function listDir(dir: string): string[] {
   }
 }
 
-function approvalCheck(storeDir: string, r: ChangeRecord, rev: string, trust: LoadedTrust | null, trustRequested: boolean): RevisionCheck["approval"] {
+export function approvalCheck(storeDir: string, r: ChangeRecord, rev: string, trust: LoadedTrust | null, trustRequested: boolean): RevisionCheck["approval"] {
   const read = readAttestation(storeDir, r.changeId);
   if (!read) return { state: "missing", detail: r.approverId ? `record names ${r.approverId}, but there is no attestation: provenance unknown` : "applied without a separate approver and without an attestation: provenance unknown" };
   if (!read.attestation) return { state: "invalid", detail: read.problem! };

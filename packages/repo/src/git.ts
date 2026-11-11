@@ -159,3 +159,16 @@ export function isAncestor(root: string, ancestor: string, commit: string): bool
   if (!/^[0-9a-f]{40,64}$/.test(ancestor) || !/^[0-9a-f]{40,64}$/.test(commit)) return false;
   return git(root, ["merge-base", "--is-ancestor", ancestor, commit]) !== null;
 }
+
+/**
+ * Repository-relative paths that differ between `commit` and the working tree (committed,
+ * staged and unstaged changes, deletions, and untracked files not ignored), sorted. Read-only.
+ * Null when `commit` is not a commit here.
+ */
+export function changedFilesSince(root: string, commit: string): string[] | null {
+  if (!/^[0-9a-f]{40,64}$/.test(commit)) return null;
+  const diff = git(root, ["diff", "--name-only", "-z", "--no-renames", commit, "--"]);
+  const untracked = git(root, ["ls-files", "--others", "--exclude-standard", "-z"]);
+  if (diff === null || untracked === null) return null;
+  return [...new Set([...diff.split("\0"), ...untracked.split("\0")].filter(Boolean))].sort();
+}
