@@ -1,101 +1,146 @@
-# Vibe Code Visualiser: IR v0.2 engine spike
+# Vibe Code Visualiser
 
-The first slice of the plan in Notion: a typed IR, a validator, and a model engine that
-applies typed changes with revision checks and approvals, tested against the Enrollment
-fixture from *IR v0 — Conceptual Specification* (Draft v0.2).
+*Working name.* Vibe Code Visualiser (VCV) is a local-first tool for building software with
+coding agents **module by module**, with a model of the app that people and agents share,
+instead of one-shot generation of code nobody can follow.
 
-```
-packages/ir     IR types, shape schema (zod), reference index, validation, YAML load/dump, tree/graph projections
-packages/query  read-only Semantic Query API: overview, search, context, impact (ADR 0005)
-packages/repo   repository-native .vcv/ projects: project loading, Git observation, branch tracking (ADR 0007)
-packages/core   typed operations, ModelEngine (propose/approve), Memory/File stores with crash recovery, audit log, bindings, layout store
-apps/cli        thin CLI over the engine (no domain logic)
-apps/mcp        local stdio MCP server exposing the four read-only queries to coding agents (ADR 0006)
-examples/enrollment   model.rev-1.yaml (valid fixture), change.timeout.yaml (the spec's 7-day timeout change)
-docs/adr        decision records 0001–0007
-docs/samples    sample query results and the recorded agent demo on the Enrollment fixture
-```
+At its centre is a versioned, typed model of the application: its modules, capabilities, data,
+rules, events, contracts and behaviour. Agents read that model to understand what a change
+touches. Humans review and approve changes to it. Later milestones bind it to real source code,
+so VCV can show what was implemented and flag where the code no longer matches the agreed design.
 
-Requires Node 22.18+ (runs TypeScript directly, no build step).
+> Vibe coding with a software engineering team, not just a coding agent.
+
+## Why
+
+Coding agents are good at writing code and bad at keeping a whole system in their head.
+Once an app grows past a few files, a person who can't read the code loses track of what it
+does, and the agent guesses at structure it can't see. VCV keeps three things apart and makes
+them visible:
+
+- **Intent**: the approved model, changed only through typed, reviewable proposals.
+- **Code**: what the repository actually contains, observed at a specific commit.
+- **Evidence**: tests and checks that connect the two.
+
+When they disagree, VCV reports it and asks for a decision. It never silently rewrites
+approved intent to match the code, or the other way round.
+
+## Status
+
+Early and pre-release. The engine works from the command line and from coding agents over
+MCP, and a model can now live in a `.vcv/` folder inside your Git repository. There is no
+visual interface yet, and the model is not yet linked to source code.
+
+| Milestone | What it delivers | Status |
+|---|---|---|
+| **M0** Semantic foundation | Typed IR, validation, change/approval engine, file store with crash recovery, audit log, read-only query API, CLI | ✅ Done |
+| **M1** Local MCP for agents | stdio MCP server with four read-only query tools, opt-in agent guidance, Claude Code demo | ✅ Done ([#5](https://github.com/TheBluemist1404/vibe-code-visualiser/pull/5)) |
+| **M2** Repository integration | `.vcv/` in the repo, TypeScript indexer, portable model↔code bindings | 🚧 In progress ([#6](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/6)): `.vcv/` projects and branch-safe revisions done ([#8](https://github.com/TheBluemist1404/vibe-code-visualiser/pull/8)) |
+| **M3** Approved model → code | Agent proposes model changes, human approves, coding agent implements, VCV records diff and tests | Planned |
+| **M4** Code → model reconciliation | Detect stale bindings and real contract drift after direct code edits | Planned |
+| **M5** Local visual product | Module graph, change review and evidence panels in a local UI | Planned |
+
+M0 to M4 make up the technical MVP; M5 makes it usable without reading code. Everything is
+single-user and local for now. The file store assumes one writer at a time.
+
+## Quick start
+
+Requires **Node 22.18 or newer**. TypeScript runs directly; there is no build step.
 
 ```sh
+git clone https://github.com/TheBluemist1404/vibe-code-visualiser.git
+cd vibe-code-visualiser
 npm install
-npm test            # 126 tests
+npm test             # run the test suite
 npm run typecheck
+```
+
+### Try the engine on the sample model
+
+The repository ships a small LMS model (Enrollment and Notifications modules) and one change
+to it: rejecting an enrollment request automatically after seven days.
+
+```sh
+# Check the model and start a store from it
 npm run vcv -- validate examples/enrollment/model.rev-1.yaml
 npm run vcv -- init .vcv-store examples/enrollment/model.rev-1.yaml
+
+# An agent proposes the change; a human approves it, creating a new revision
 npm run vcv -- propose .vcv-store examples/enrollment/change.timeout.yaml --as agent:mcp --perm propose
 npm run vcv -- approve .vcv-store ch-timeout-01 --as hoang
+
+# Look at the result
 npm run vcv -- show .vcv-store --tree
 npm run vcv -- query .vcv-store search enrollment notifications --kind module
 npm run vcv -- query .vcv-store impact evt-enrollment-rejected
-node --experimental-strip-types apps/mcp/src/main.ts --store .vcv-store   # MCP over stdio
-npm run vcv -- project init <checkout> examples/enrollment/model.rev-1.yaml # create <checkout>/.vcv explicitly
-npm run vcv -- project status <checkout>                                    # model + Git state, read-only
 ```
 
-## Repository projects (M2)
+Revision IDs after the first look like `rev-2-84dfbfe94209`: the digest keeps two Git
+branches from minting the same ID. Run `npm run vcv` with no arguments for the full command list. `--as` and `--perm` simulate
+the identity a real host would supply; they are not authentication.
 
-A project lives in `.vcv/` at the root of a Git checkout and is committed with the code.
-`vcv project status` finds it from any subdirectory and reports `ready`, `absent`,
-`uninitialized`, `conflicted`, `diverged` or `invalid`, with the checkout's commit, branch and
-dirty state as observation context. Nothing is created or repaired by looking. New model
-revisions are named `rev-<seq>-<digest>` so two branches never mint the same ID, and a merged
-or half-merged `.vcv/` is refused rather than silently reset. See ADR 0007.
+### Keep the model in your repository
 
-## Agent access (MCP)
+A VCV project lives in `.vcv/` at the root of a Git checkout and is committed with the code.
 
-`apps/mcp` lets any MCP client (Claude Code, Codex, others) read the model of one local store
-(draft or approved) through `vcv_get_project_overview`, `vcv_search_objects`, `vcv_get_context` and
-`vcv_analyze_impact`. It is a transport adapter over `@vcv/query`; results are model intent only
-(`implementationChecked: false`). Client configs, opt-in `AGENTS.md`/`CLAUDE.md` guidance and
-the agent workflow are in [apps/mcp/README.md](apps/mcp/README.md); a recorded Claude Code run is
-in [docs/samples/mcp-agent-demo.md](docs/samples/mcp-agent-demo.md).
+```sh
+npm run vcv -- project init <checkout> examples/enrollment/model.rev-1.yaml   # create <checkout>/.vcv
+npm run vcv -- project status <checkout>                                      # model and Git state, read-only
+```
 
-## Spec acceptance cases (§10)
+`project status` works from any subdirectory and reports whether the project is ready,
+absent, conflicted, diverged or invalid, along with the checkout's commit, branch and dirty
+state. It never creates or repairs anything. A merged or half-merged `.vcv/` is refused rather
+than silently reset. See [ADR 0007](docs/adr/0007-repository-projects.md).
 
-| # | Case | Where |
-|---|------|-------|
-| 1 | Serialize/load keeps IDs, names, meaning | ir `AC1` |
-| 2 | Reject duplicate IDs (incl. state, attribute) and wrong-kind refs | ir `AC2` |
-| 3 | Reject multiple parents, wrong-kind or missing owners | ir `AC3` |
-| 4 | Reject unknown initial/from/to state | ir `AC4` |
-| 5 | State rename keeps references | core `AC5/AC14` |
-| 6 | Reject nonexistent event IDs | ir `AC6` |
-| 7 | Reject external event without contract boundary | ir `AC7` |
-| 8 | Permission guard must hit a permission rule with real actor/capability | ir `AC8` |
-| 9 | Timer anchor must be an existing temporal attribute | ir `AC9` |
-| 10 | Unresolved refs only in drafts; can't approve while unresolved | ir + core `AC10` |
-| 11 | Atomic change sets | core `AC11` |
-| 12 | ChangeRecord outcomes with host-verified proposer/approver | core `AC12` (×2) |
-| 13 | Revalidate approvals; reject stale and replayed changes | core `AC13` (×2) |
-| 14 | Rename/remove with referential integrity, incl. nested | core `AC14` |
-| 15 | Bindings carry modelRevision + commit; stale, not disputed | core `AC15` |
-| 16 | Layout edits never create revisions | core `AC16` |
+### Connect a coding agent
 
-Not covered yet: detecting a divergent code change (needs the repository indexer, Slice 3).
+```sh
+node --experimental-strip-types apps/mcp/src/main.ts --store .vcv-store
+```
 
-## Hardening (beyond §10)
+This starts a read-only MCP server over stdio for one store. Any MCP client (Claude Code,
+Codex and others) can then call `vcv_get_project_overview`, `vcv_search_objects`,
+`vcv_get_context` and `vcv_analyze_impact`. Results describe the model only
+(`implementationChecked: false`), so agents still need to check the code itself.
+Client configs, opt-in `CLAUDE.md` / `AGENTS.md` guidance and the recommended agent workflow
+are in [apps/mcp/README.md](apps/mcp/README.md).
 
-| Area | Tests |
-|------|-------|
-| Crash before each write/rename of each commit step, recovery, retry | `core/test/store.test.ts` |
-| Persisted-ID grammar (lowercase only), structured errors, nothing written outside the store | `core/test/ids.test.ts` |
-| Which attempts create records, attempt log, pending preserved on denied approvals | `core/test/audit.test.ts` |
+## Repository layout
 
-The file store assumes a **single writer**; see ADR 0003 for the commit protocol and its
-limits. CI (`.github/workflows/ci.yml`) runs `npm ci`, typecheck and tests on Node 22.18.0
-and the latest 22.x for pushes to `main` and every pull request.
+```
+packages/ir        The model (IR): types, schema, validation, YAML load/dump, tree and graph views
+packages/core      Typed operations, ModelEngine (propose/approve), file and memory stores, audit log, bindings, layout
+packages/query     Read-only semantic queries: overview, search, context, impact
+packages/repo      Repository projects: find and load .vcv/, observe Git state, track branches
+apps/cli           `vcv` command-line tool, a thin layer over the engine
+apps/mcp           Local stdio MCP server for coding agents
+examples/          Sample Enrollment model and a proposed change
+docs/adr/          Architecture decision records
+docs/samples/      Sample query output and a recorded Claude Code session
+```
 
-## Decisions the spec left open (made here, review them)
+Every interface (CLI, MCP, and the future canvas) calls the same engine operations. None of
+them holds its own copy of the model or its own rules.
 
-1. **Rule `name` is optional.** The spec's own permission-rule example has no name.
-2. **Emitting another module's event** requires a consumed contract of that module that
-   `accepts` it (triggers on a foreign event need `publishes`). The spec only describes
-   the publish direction.
-3. **Fixing a draft needs targeted operations.** Added `setModuleDependencies`. The spec's
-   `updateObject` is not implemented because a generic version is a JSON patch in disguise.
-4. **`approveDraft` needs approve rights** even for principals that can apply changes.
-5. **Self-approval is forbidden by default** (`allowSelfApproval` policy flag).
-6. The rejection event still carries no reason, so timeout and lecturer rejections look the
-   same to consumers (spec open question 2).
+## Documentation
+
+- **Architecture decisions** in [docs/adr](docs/adr):
+  [0001](docs/adr/0001-ir-first-scope.md) IR first, Enrollment as the only domain ·
+  [0002](docs/adr/0002-semantic-command-api.md) one typed command API for every write ·
+  [0003](docs/adr/0003-persistence.md) file persistence and crash recovery ·
+  [0004](docs/adr/0004-audit.md) change records and audit log ·
+  [0005](docs/adr/0005-semantic-query-api.md) semantic query API ·
+  [0006](docs/adr/0006-mcp-adapter.md) MCP adapter ·
+  [0007](docs/adr/0007-repository-projects.md) repository projects, revisions and bindings
+- [IR v0.2 conformance](docs/ir-v0.2-conformance.md): which tests cover the spec's acceptance
+  cases, extra hardening, and decisions the spec left open
+- [Sample semantic queries](docs/samples/semantic-queries.md) and the
+  [recorded agent demo](docs/samples/mcp-agent-demo.md)
+- [MCP server](apps/mcp/README.md): tools, configuration and agent guidance
+
+## Development
+
+CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs `npm ci`, typecheck and tests on
+Node 22.18.0 and the latest 22.x for pushes to `main` and every pull request. Commit messages
+follow [Conventional Commits](https://www.conventionalcommits.org).
