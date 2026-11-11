@@ -7,7 +7,8 @@ Status: proposed for review (2026-11-11). Implements M1 of the local-first MVP r
 
 VCV is interface-agnostic: the canvas, the integrated consultant, the CLI and external MCP
 agents are callers of the same application contracts. M1 gives external coding agents read
-access to the model; it must not introduce agent-specific domain logic or a second state model.
+access to the model, draft or approved (each result's `context.snapshotStatus` says
+which, and guidance tells agents not to treat a draft as agreed intent); it must not introduce agent-specific domain logic or a second state model.
 
 ## Decisions
 
@@ -55,5 +56,6 @@ access to the model; it must not introduce agent-specific domain logic or a seco
 - **File-store lifecycle.** Single writer is still assumed (ADR 0003). A reader racing a writer
   is safe for the reasons above, but each call re-reads `HEAD` and may parse a new revision file;
   for very large models a cheaper change check (mtime) may be needed.
-- **Pre-existing:** `npm audit` reports a high-severity advisory for `zod` < 4.6.6
-  (GHSA-mrhx-c7xc-m3w5), which this repo already used before M1. Not changed here.
+- **Dependency floor.** Tool arguments reach zod validation (`kinds`/`relations` arrays have no
+  max length), so the zod minimum is `^4.6.6` in every package that imports it, past
+  GHSA-mrhx-c7xc-m3w5 (memory exhaustion validating oversized collections).
