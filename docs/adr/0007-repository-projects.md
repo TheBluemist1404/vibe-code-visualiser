@@ -113,6 +113,12 @@ concurrently, and MCP stays read-only. A single writer is not enough in a checko
   refuses a commit whose `record.baseRevision` is not its current HEAD (`HEAD_CHANGED`) or whose
   branch-safe ID does not verify as the model's digest after that HEAD (`BAD_COMMIT`). A refused
   commit becomes a `rejected` outcome with that code; no record is created or changed.
+- **Record writes too.** Non-committing ChangeRecord writes (a new `pending` or `rejected`
+  proposal, `pending` → `rejected` on a failed approval) carry the same snapshot token plus the
+  record the engine expects on disk (none, for a new proposal). The store refuses with
+  `STORE_CHANGED`, writing nothing, if the store moved or the record on disk differs, so a
+  checkout after validation can never overwrite another branch's proposal with the same ID. The
+  outcome is `rejected` without a record; the attempt is still audited locally.
 - **Write guard.** `commit()` re-checks immediately before its first write: `HEAD_CHANGED` if
   HEAD's line moved, `STORE_CHANGED` if any fingerprinted file differs from the snapshot token
   (including a same-ID revision swap that the store has since adopted). Nothing is written in either case. The writer's own
