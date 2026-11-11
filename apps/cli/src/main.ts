@@ -16,6 +16,9 @@ import {
   checkIntegrity,
   createReviewerKey,
   reviewApprove,
+  buildHandoff,
+  recordImplementation,
+  implementationStatus,
   reviewFinalize,
   PROPOSAL_LIMITS,
   createEvidenceApi,
@@ -36,7 +39,7 @@ import {
 } from "../../../packages/repo/src/index.ts";
 import type { BindingHost, HintedDiagnostic, IntegrityReport, TrustSource, ProjectStatus, ProposalPreview, ProposalResult, Verification } from "../../../packages/repo/src/index.ts";
 import type { BindingRelation, ClaimSource } from "../../../packages/core/src/index.ts";
-import type { HostContext, Outcome, Permission } from "../../../packages/core/src/index.ts";
+import type { HostContext, ImplementationRequest, Outcome, Permission } from "../../../packages/core/src/index.ts";
 
 const USAGE = `vcv <command> [options]
 
@@ -82,6 +85,17 @@ const USAGE = `vcv <command> [options]
                                         Read-only check of the .vcv/ history: every revision derived by its
                                         applied change's typed operations, records consistent, base history
                                         unchanged, approvals attested by trusted keys. Exit 1 on any error.
+
+  handoff <path> <changeId>             The bounded implementation handoff (JSON) of an applied, attested change:
+                                        approved operations and request, delta, impact, affected binding claims
+                                        verified now, base commit, scope, steps. Read-only and deterministic.
+  implementation record <path> --report <file> [--expect <digest>] [--json]
+                                        Record the agent's implementation report (.vcv/implementations/<id>.json):
+                                        its claims kept apart from what VCV observes (changed files, scope,
+                                        binding states); warns on out-of-scope edits, stale or unreasserted
+                                        bindings, failed tests, unmet criteria. Never changes the model.
+  implementation show <path> <changeId> [--json]
+                                        A recorded report with VCV's observations recomputed now.
 
   binding add <path> --object <id> --relation <r> --locator <loc> --source agent|human|tool
               [--id <bindingId>] [--rationale <text>] [--confidence <0..1>] [--revision <rev>] [--allow-unchecked]
@@ -154,6 +168,7 @@ const { positionals, values } = parseArgs({
     base: { type: "string" },
     "require-attestation": { type: "boolean", default: false },
     add: { type: "string" },
+    report: { type: "string" },
   },
 });
 const [cmd, a, b, ...rest] = positionals;
@@ -323,6 +338,10 @@ function main(): number {
       return reviewCommand();
     case "integrity":
       return integrityCommand();
+    case "handoff":
+      return handoffCommand();
+    case "implementation":
+      return implementationCommand();
     default:
       console.log(USAGE);
       return cmd ? 1 : 0;
@@ -436,6 +455,54 @@ function printResultError(r: Extract<ProposalResult<unknown>, { ok: false }>) {
   for (const d of r.error.details ?? []) console.log(`  ${d.path || "(root)"}: ${d.message}`);
 }
 
+function handoffCommand(): number {
+  const r = buildHandoff(need(a, "<path>"), need(b, "<changeId>"));
+  console.log(JSON.stringify(r.ok ? r.data : r, null, 2));
+  return r.ok ? 0 : 1;
+}
+
+function printWarnings(ws: { code: string; message: string }[]) {
+  for (const w of ws) console.log(`  ! ${w.code}: ${w.message}`);
+}
+
+function implementationCommand(): number {
+  const path = need(b, "<path>");
+  if (a === "record") {
+    const r = recordImplementation(path, readProposalFile(need(values.report, "--report")), ctx, values.expect ?? null);
+    if (values.json) console.log(JSON.stringify(r, null, 2));
+    else if (!r.ok) printResultError(r);
+    else {
+      const o = r.data.report.vcvObserved;
+      console.log(`${r.data.file}: ${r.data.replaced ? "replaced" : "recorded"} (digest ${r.data.digest})`);
+      console.log(`  change ${r.data.report.changeId} approved as ${r.data.report.approvedRevision}; claimed by ${r.data.report.agentClaims.claimedBy}; not reconciled`);
+      console.log(`  ${o.filesModified.length} source file(s) changed since ${o.baseCommit.slice(0, 12)}, ${o.outOfScope.length} outside the approved scope; ${o.bindings.filter((x) => x.reasserted).length}/${o.bindings.length} affected binding(s) reasserted`);
+      printWarnings(r.data.report.warnings);
+    }
+    return r.ok ? 0 : 1;
+  }
+  if (a === "show") {
+    const r = implementationStatus(path, need(rest[0], "<changeId>"));
+    if (values.json) console.log(JSON.stringify(r, null, 2));
+    else if (!r.ok) printResultError(r);
+    else {
+      console.log(`${r.data.file} (digest ${r.data.digest}): change ${r.data.report.changeId} at ${r.data.report.approvedRevision}; not reconciled`);
+      console.log(`  observed now: ${r.data.now.filesModified.length} source file(s) changed, ${r.data.now.outOfScope.length} out of scope${r.data.changedSinceReport ? "; DIFFERENT from the recorded report" : "; same as recorded"}`);
+      printWarnings(r.data.warningsNow);
+    }
+    return r.ok ? 0 : 1;
+  }
+  console.log(USAGE);
+  return 1;
+}
+
+function printImplementationRequest(r: ImplementationRequest) {
+  console.log("implementation requested (approved together with the operations):");
+  console.log(`  behavior: ${r.behavior}`);
+  for (const c of r.acceptanceCriteria) console.log(`  ✓? ${c}`);
+  for (const t of r.suggestedTests ?? []) console.log(`  test: ${t}`);
+  console.log(`  scope: ${r.scope?.join(", ") ?? "(not declared)"}`);
+}
+
 function printPreview(p: ProposalPreview, revision: string) {
   const q = p.proposal;
   console.log(`proposal ${q.changeId} (${q.origin === "record" ? `${q.lifecycle}, proposed by ${q.proposerId}` : "not submitted: dry run"})`);
@@ -445,6 +512,7 @@ function printPreview(p: ProposalPreview, revision: string) {
   console.log(`  states:   change ${p.states.change}; approval ${p.states.approval}; snapshot ${p.states.snapshotStatus}; implementation ${p.states.implementation}`);
   console.log("operations:");
   for (const o of q.operations) console.log(`  ${o.index + 1}. ${o.summary}`);
+  if (q.implementation) printImplementationRequest(q.implementation);
   if (p.validation.errors.length || p.validation.warnings.length) {
     console.log("validation now:");
     printHinted([...p.validation.errors, ...p.validation.warnings]);
@@ -457,7 +525,7 @@ function printPreview(p: ProposalPreview, revision: string) {
     }
   }
   if (p.impact) {
-    console.log(`impact (structural candidates only)${p.impact.crossModule ? ": CROSS-MODULE" : ""}:`);
+    console.log(`impact (structural candidates only)${p.impact.crossModule === "yes" ? ": CROSS-MODULE" : p.impact.crossModule === "not-determined" ? ": cross-module not determined" : ""}:`);
     console.log(`  modules:   ${p.impact.modules.map((m) => `${m.id} (${m.via})`).join(", ") || "(none)"}`);
     console.log(`  contracts: ${p.impact.contracts.map((c) => `${c.id} (${c.via})`).join(", ") || "(none)"}`);
     for (const c of p.impact.candidates) console.log(`  · ${c.kind} ${c.id}: ${c.reason}`);

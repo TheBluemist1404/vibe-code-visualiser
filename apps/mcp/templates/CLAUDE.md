@@ -61,4 +61,10 @@ them with `mcp__vcv__vcv_get_evidence_overview`, `mcp__vcv__vcv_get_object_evide
 - Before submitting, dry-run your change with `vcv_preview_proposal` (`{ change }`): it shows
   the model delta, cross-module impact, the binding claims you will have to revisit and the
   engine's diagnostics with hints. A pending proposal is not approved and not implemented.
+  Put what should be implemented (behavior, acceptance criteria, tests, scope) in the
+  proposal's `implementation` field, so the reviewer approves it too.
+- Implement only after a person approved the change, and when asked to: start from
+  `vcv handoff <path> <changeId>`, stay in its scope, reassert the binding claims it marks, and
+  record what really happened with `vcv implementation record` (docs/implementation.md). Your
+  report is a claim; VCV does not verify it, and a model change needs a new proposal.
 - Routes are controller-relative (no global prefix); only syntax is read.

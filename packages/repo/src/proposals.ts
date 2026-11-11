@@ -13,7 +13,8 @@
 //     assumptions nobody has verified;
 //   - a lifecycle that keeps four things apart: the change record's state (rejected, pending,
 //     stale, applied), the model snapshot's own draft/approved status, binding resolution, and
-//     implementation (never recorded here: approval does not mean the code was written).
+//     implementation (never inferred: approval does not mean the code was written; an implementing
+//     agent's report, M3.3, is a separate claim read with `vcv implementation show`).
 //
 // Previews and listings never write anything, not even store recovery (FileStoreReader).
 import { z } from "zod";
@@ -32,7 +33,7 @@ import {
   proposedChangeSchema,
   storeFingerprint,
 } from "@vcv/core";
-import type { ChangeRecord, ChangeRecordEntry, ChangeStatus, HostContext, ProposedModelChange } from "@vcv/core";
+import type { ChangeRecord, ChangeRecordEntry, ChangeStatus, HostContext, ImplementationRequest, ProposedModelChange } from "@vcv/core";
 import { LIMITS as QUERY_LIMITS, createQueryApi } from "@vcv/query";
 import type { ImpactCandidate } from "@vcv/query";
 import { listBindings } from "./bindings.ts";
@@ -96,7 +97,26 @@ export type ProposalErrorCode =
   /** The model store could not be read. */
   | "STORE_ERROR"
   /** The checkout, model store, change records or claims changed while reading (e.g. a Git checkout). Nothing was mixed; retry. */
-  | "STATE_CHANGED";
+  | "STATE_CHANGED"
+  // M3.3 handoff and implementation reports:
+  /** The change is not applied (pending, rejected): there is nothing approved to implement. */
+  | "NOT_APPLIED"
+  /** The change's resulting revision is not in this checkout's model history (another branch?). */
+  | "NOT_IN_HISTORY"
+  /** The change has no attestation whose signature verifies against its record. */
+  | "NOT_ATTESTED"
+  /** A commit named in the request is not in this repository, or not an ancestor of HEAD. */
+  | "UNKNOWN_COMMIT"
+  /** An implementation report for this change exists; pass its digest to replace it. */
+  | "REPORT_EXISTS"
+  /** The existing report's digest is not the one passed. */
+  | "REPORT_CHANGED"
+  /** The implementations directory or report file is not a plain directory/file. */
+  | "UNSAFE_PATH"
+  /** No implementation report for this change. */
+  | "NO_REPORT"
+  /** The handoff would exceed its byte limit even with every derived list cut. */
+  | "HANDOFF_TOO_LARGE";
 
 export type ProposalError = { code: ProposalErrorCode; message: string; details?: { path: string; message: string }[] };
 
@@ -136,7 +156,7 @@ export type ProposalLifecycle = "rejected" | "pending" | "stale" | "applied" | "
  */
 export type ApprovalState = "none" | "applied-by-host" | "approved-by-separate-reviewer";
 
-function approvalOf(r: ChangeRecord | undefined): ApprovalState {
+export function approvalOf(r: ChangeRecord | undefined): ApprovalState {
   if (r?.status !== "applied") return "none";
   return r.approverId && r.approverId !== r.proposerId ? "approved-by-separate-reviewer" : "applied-by-host";
 }
@@ -191,6 +211,8 @@ export type ProposalPreview = {
     baseRevision: string;
     rationale?: string;
     operations: { index: number; type: string; summary: string }[];
+    /** What the proposer asks to be implemented after approval (covered by the digest). */
+    implementation?: ImplementationRequest;
   };
   /** The engine's checkChange() against this checkout's current model, now. */
   validation: {
@@ -277,7 +299,7 @@ function hinted(ds: readonly Diagnostic[]): HintedDiagnostic[] {
   return ds.map((d) => (HINTS[d.code] ? { ...d, hint: HINTS[d.code] } : { ...d }));
 }
 
-const NOT_IMPLEMENTED = "VCV does not record or infer implementation. Approving a change approves intent only; code, tests and binding claims are separate work and separate evidence.";
+const NOT_IMPLEMENTED = "VCV never infers implementation. Approving a change approves intent only; code, tests and binding claims are separate work and separate evidence. An implementing agent's report (vcv implementation record) is a separate, unverified claim and is not shown here.";
 
 // ---- submit ----------------------------------------------------------------------------
 
@@ -486,6 +508,7 @@ export function previewProposal(path: string, input: unknown, hooks: ProposalHoo
         baseRevision: change.expectedRevision,
         ...(change.rationale ? { rationale: change.rationale } : {}),
         operations: change.operations.map((op, index) => ({ index, type: op.type, summary: describeOperation(op) })),
+        ...(change.implementation ? { implementation: change.implementation } : {}),
       },
       validation: {
         appliesToCurrent: !!check.model,
@@ -514,7 +537,7 @@ export function previewProposal(path: string, input: unknown, hooks: ProposalHoo
   });
 }
 
-function readRevision(reader: FileStoreReader, rev: string): Model | undefined {
+export function readRevision(reader: FileStoreReader, rev: string): Model | undefined {
   try {
     return reader.revision(rev);
   } catch {
@@ -536,6 +559,8 @@ function assumptionsFor(
   ];
   if (record) out.push(`The proposer identity "${record.proposerId}" is what the host asserted when the proposal was submitted; see docs/proposals.md for what that proves locally.`);
   if (!change.rationale) out.push("The proposal carries no rationale: ask the proposer what request it implements.");
+  if (!change.implementation) out.push("The proposal states no implementation request (behavior, acceptance criteria, scope): the implementation handoff will have none to give the coding agent.");
+  else if (!change.implementation.scope) out.push("The implementation request declares no code scope: every changed file will be reported as unscoped.");
   if (lifecycle === "stale") out.push("This proposal is stale: the delta shown is against its base revision, and an approval would fail. It needs a new proposal against the current revision.");
   if (impact?.crossModule === "not-determined") out.push("Whether the change reaches other modules is not determined: the impact list was cut before all candidates were seen.");
   if (impact?.crossModule === "yes") out.push("The change reaches more than one module: check each module's contracts and binding claims, not only the module that was asked about.");
@@ -631,7 +656,7 @@ export function diffModels(before: Model, after: Model): ObjectChange[] {
   return out.sort((p, q) => (p.kind === q.kind ? (p.id < q.id ? -1 : p.id > q.id ? 1 : 0) : p.kind < q.kind ? -1 : 1));
 }
 
-function impactOf(before: Model, after: Model, changes: ObjectChange[], limit: number): NonNullable<ProposalPreview["impact"]> {
+export function impactOf(before: Model, after: Model, changes: ObjectChange[], limit: number): NonNullable<ProposalPreview["impact"]> {
   const seen = new Map<Id, ImpactCandidate>();
   let truncated = false;
   const changedIds = new Set(changes.map((c) => c.id));
@@ -670,7 +695,7 @@ function impactOf(before: Model, after: Model, changes: ObjectChange[], limit: n
 }
 
 /** The checkout's claim files and a key for exactly this set (IDs and digests). */
-function readClaims(root: string): { entries: ClaimEntry[]; key: string } {
+export function readClaims(root: string): { entries: ClaimEntry[]; key: string } {
   try {
     const entries = listBindings(root);
     return { entries, key: canonicalJson(entries.map((e) => [e.bindingId, e.digest])) };
@@ -680,7 +705,7 @@ function readClaims(root: string): { entries: ClaimEntry[]; key: string } {
   }
 }
 
-function bindingsFor(entries: ClaimEntry[], changes: ObjectChange[], candidates: ImpactCandidate[]): ProposalPreview["bindings"]["items"] {
+export function bindingsFor(entries: ClaimEntry[], changes: ObjectChange[], candidates: ImpactCandidate[]): ProposalPreview["bindings"]["items"] {
   const why = new Map<Id, "changed" | "removed" | "impacted">();
   for (const c of changes) why.set(c.id, c.change === "removed" ? "removed" : "changed");
   for (const c of candidates) if (!why.has(c.id)) why.set(c.id, "impacted");
@@ -752,7 +777,7 @@ export type ProposalHooks = { afterRead?: () => void };
  * (and, for previews, the claim files) are read again; if any moved (a checkout, a record rewrite),
  * the call fails with STATE_CHANGED instead of mixing two generations. No locks, no writes.
  */
-type Observation = {
+export type Observation = {
   status: ProjectStatus;
   model: Model;
   history: string[];
@@ -766,7 +791,7 @@ type Observation = {
 const recordsKeyOf = (records: ChangeRecordEntry[]) => createHash("sha256").update(canonicalJson(records)).digest("hex");
 const commitOf = (status: ProjectStatus) => (status.git ? headCommit(status.root) : null);
 
-function observed<T>(path: string, hooks: ProposalHooks, body: (obs: Observation) => ProposalResult<T>): ProposalResult<T> {
+export function observed<T>(path: string, hooks: ProposalHooks, body: (obs: Observation) => ProposalResult<T>): ProposalResult<T> {
   const status = projectStatus(path);
   if (status.state !== "ready" || !status.model) return notReady(status);
   let obs: Observation;
@@ -804,19 +829,19 @@ function changed<T>(obs: Observation): ProposalResult<T> {
     ok: false,
     error: {
       code: "STATE_CHANGED",
-      message: `the checkout changed while it was read (a Git checkout, or an edit of .vcv/ or of binding claims); nothing was mixed, retry the call`,
+      message: `the checkout changed while it was read (a Git checkout, or an edit of .vcv/, of binding claims or of the observed source files); nothing was mixed, retry the call`,
     },
     context: contextOf(obs.status, obs.model),
   } as ProposalResult<T>;
 }
 
-function finish<T>(obs: Observation, hooks: ProposalHooks, data: T, extra?: { key: string; again: () => string }): ProposalResult<T> {
+export function finish<T>(obs: Observation, hooks: ProposalHooks, data: T, extra?: { key: string; again: () => string }): ProposalResult<T> {
   if (!unchanged(obs, hooks, extra)) return changed(obs);
   return { ok: true, context: contextOf(obs.status, obs.model), data };
 }
 
 /** An error about what was observed (e.g. UNKNOWN_CHANGE), still only if the observation held. */
-function failFinal<T>(error: ProposalError, obs: Observation, hooks: ProposalHooks): ProposalResult<T> {
+export function failFinal<T>(error: ProposalError, obs: Observation, hooks: ProposalHooks): ProposalResult<T> {
   if (!unchanged(obs, hooks)) return changed(obs);
   return { ok: false, context: contextOf(obs.status, obs.model), error };
 }

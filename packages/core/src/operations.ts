@@ -31,6 +31,34 @@ export const operationSchema = z.discriminatedUnion("type", [
 
 export type ModelOperation = z.infer<typeof operationSchema>;
 
+/** A repository-relative path or glob: no absolute paths, no `..`, no backslashes. */
+const scopePath = z
+  .string()
+  .min(1)
+  .max(200)
+  .refine((p) => !p.startsWith("/") && !/^[A-Za-z]:/.test(p) && !p.includes("\\") && !p.split("/").includes("..") && !p.includes("\0"), "must be a repository-relative path or glob (no leading /, no .., no backslashes)");
+const line = (max: number) => z.string().min(1).max(max);
+
+/**
+ * What the proposer asks to be implemented once the change is approved (M3.3). Part of the
+ * proposal, so the proposal digest covers it and the reviewer approves it together with the
+ * operations. It changes nothing in the model: the engine never reads it.
+ */
+export const implementationRequestSchema = z
+  .object({
+    /** The behavior the code should have afterwards, in plain words. */
+    behavior: line(4000),
+    /** Checkable statements an implementation must satisfy. */
+    acceptanceCriteria: z.array(line(500)).min(1).max(30),
+    /** Tests the proposer expects to be added or run. */
+    suggestedTests: z.array(line(500)).max(30).optional(),
+    /** Where code may change (repository-relative paths or globs). Anything else is out of scope. */
+    scope: z.array(scopePath).min(1).max(50).optional(),
+  })
+  .strict();
+
+export type ImplementationRequest = z.infer<typeof implementationRequestSchema>;
+
 export const proposedChangeSchema = z
   .object({
     // Change and revision IDs become file names in the store, so they use the persisted-ID grammar.
@@ -39,6 +67,7 @@ export const proposedChangeSchema = z
     expectedRevision: persistedIdSchema,
     operations: z.array(operationSchema).min(1),
     rationale: z.string().optional(),
+    implementation: implementationRequestSchema.optional(),
   })
   // Strict: a caller cannot smuggle proposer, approver or status fields into a change.
   .strict();
