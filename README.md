@@ -9,16 +9,17 @@ packages/ir     IR types, shape schema (zod), reference index, validation, YAML 
 packages/query  read-only Semantic Query API: overview, search, context, impact (ADR 0005)
 packages/core   typed operations, ModelEngine (propose/approve), Memory/File stores with crash recovery, audit log, bindings, layout store
 apps/cli        thin CLI over the engine (no domain logic)
+apps/mcp        local stdio MCP server exposing the four read-only queries to coding agents (ADR 0006)
 examples/enrollment   model.rev-1.yaml (valid fixture), change.timeout.yaml (the spec's 7-day timeout change)
-docs/adr        decision records 0001–0005
-docs/samples    sample query results on the Enrollment fixture
+docs/adr        decision records 0001–0006
+docs/samples    sample query results and the recorded agent demo on the Enrollment fixture
 ```
 
 Requires Node 22.18+ (runs TypeScript directly, no build step).
 
 ```sh
 npm install
-npm test            # 64 tests
+npm test            # 72 tests
 npm run typecheck
 npm run vcv -- validate examples/enrollment/model.rev-1.yaml
 npm run vcv -- init .vcv-store examples/enrollment/model.rev-1.yaml
@@ -27,7 +28,17 @@ npm run vcv -- approve .vcv-store ch-timeout-01 --as hoang
 npm run vcv -- show .vcv-store --tree
 npm run vcv -- query .vcv-store search enrollment notifications --kind module
 npm run vcv -- query .vcv-store impact evt-enrollment-rejected
+node --experimental-strip-types apps/mcp/src/main.ts --store .vcv-store   # MCP over stdio
 ```
+
+## Agent access (MCP)
+
+`apps/mcp` lets any MCP client (Claude Code, Codex, others) read the model of one local store
+through `vcv_get_project_overview`, `vcv_search_objects`, `vcv_get_context` and
+`vcv_analyze_impact`. It is a transport adapter over `@vcv/query`; results are model intent only
+(`implementationChecked: false`). Client configs, opt-in `AGENTS.md`/`CLAUDE.md` guidance and
+the agent workflow are in [apps/mcp/README.md](apps/mcp/README.md); a recorded Claude Code run is
+in [docs/samples/mcp-agent-demo.md](docs/samples/mcp-agent-demo.md).
 
 ## Spec acceptance cases (§10)
 
