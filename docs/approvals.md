@@ -190,25 +190,37 @@ attested under the anchor given; it authorizes only when the host supplied that 
 
 ### In CI: the authorization gate
 
-Read the base and the trust list from the protected branch, never from the PR's own tree, and
-make sure the check itself is one the PR cannot change:
+The gate must not run anything the candidate controls. Protecting the trust *data* is not
+enough: a gate that runs `npm ci && npm run vcv …` inside the PR's checkout executes the PR's
+`package.json` scripts, dependencies and its own copy of the verifier, any of which can be
+rewritten to print "ok". So the supported recipe runs a **trusted VCV build from the base** and
+reads the PR head **only as data**:
 
-```yaml
-# .github/workflows/vcv.yml (excerpt)
-- uses: actions/checkout@v4
-  with: { fetch-depth: 0 }          # the base ref must be present
-- run: npm ci && npm run vcv -- integrity . --base origin/main --trust-ref origin/main --require-attestation
+```sh
+scripts/vcv-host-gate.sh <trusted-vcv-checkout> <candidate-checkout> <base-commit>
 ```
 
-- Make it a **required status check** on `main`, and protect `main` so that changes to
-  `.vcv/reviewers.json` and to the workflow file need a human code-owner review (for example
-  CODEOWNERS on `.vcv/reviewers.json` and `.github/workflows/`). A `pull_request` workflow runs
-  the PR's own copy of the workflow file, so without that protection a PR could edit the gate.
-- If you run it from `pull_request_target` instead, check out and run VCV from the base, and
-  treat the PR head only as data to read; never install or run the PR's code there.
+- `<trusted-vcv-checkout>`: VCV checked out at the protected base and installed with
+  `npm ci --ignore-scripts`, outside the candidate (the script refuses one inside it);
+- `<candidate-checkout>`: the PR head. Nothing from it is installed, imported or executed; only
+  read-only `git` commands run in it, and its `.vcv/` files are read with the bounded safe reader;
+- `<base-commit>`: the base's full commit ID, supplied by the host (on GitHub,
+  `github.event.pull_request.base.sha`) and fetched into the candidate. It is both `--base` and
+  the pinned trust anchor.
 
-A PR that adds the agent's own key to `reviewers.json` and signs with it locally then fails
-here: the key is `untrusted-key` under the protected base's list.
+It exits 0 only for a consistent history whose introduced revisions are attested by keys in the
+base's trust list, 1 on any integrity error, 2 on a setup problem (never a pass).
+
+[`docs/ci/vcv-gate.example.yml`](ci/vcv-gate.example.yml) is a complete GitHub Actions job.
+It uses `pull_request_target`, so the workflow file itself comes from the base and a PR cannot
+edit it; it checks out the base into `trusted/` and the PR head into `candidate/` (no
+credentials persisted), installs only `trusted/`, and runs the script. Make it a **required
+status check** on `main`, and require code-owner review for `.vcv/reviewers.json` there.
+
+A PR that adds the agent's own key, forges an attestation, or rewrites its own `vcv` script,
+CLI or integrity code then fails here: the regression test in `apps/cli/test/cli.test.ts` does
+all of that and checks the gate still reports `APPROVAL_INVALID` (and passes once the
+attestation is valid).
 
 ## What this does not do
 

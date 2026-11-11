@@ -101,6 +101,14 @@ what a proposal changes before deciding.
   a Git trust anchor must be the base or an ancestor of it (`TRUST_NOT_FROM_BASE`), so the gate
   cannot be pointed at a branch-chosen list. The documented gate is a required CI check on the
   protected branch whose workflow and trust list are code-owner protected.
+- **The host gate runs a trusted verifier on candidate data** (review round 4). A gate that
+  installs and runs the PR's own checkout executes candidate-controlled code (`package.json`
+  scripts, dependencies, the verifier itself). `scripts/vcv-host-gate.sh` runs VCV from a
+  base checkout (installed with `--ignore-scripts`) against the candidate as data, with the
+  host-supplied base commit as both `--base` and the pinned trust anchor;
+  `docs/ci/vcv-gate.example.yml` wires it into `pull_request_target`. A pinned anchor skips the
+  "only reachable from the checked-out branch" heuristic, since a CI checkout may hold the base
+  by ID only; that heuristic only ever refused, and pins are caller-asserted anyway.
 - **Preflight, exclusive write, explicit repair** (review round 1). The attestation destination
   is checked before the model commit; the file is created exclusively (link, never rename over).
   If the write still fails after the commit, `ATTESTATION_NOT_WRITTEN` names `vcv review

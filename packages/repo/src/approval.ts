@@ -156,7 +156,7 @@ function insideCheckout(root: string, file: string): boolean {
  * that names HEAD or the checked-out branch, or a commit only that branch contains, is
  * something the change under review can rewrite.
  */
-function candidateRefReason(root: string, ref: string, commit: string): string | null {
+function candidateRefReason(root: string, ref: string, commit: string, pinned: boolean): string | null {
   if (/^(HEAD|@)([~^@:]|$)/.test(ref)) return `${ref} names the checked-out HEAD`;
   const cur = currentBranchRef(root);
   if (cur) {
@@ -164,6 +164,9 @@ function candidateRefReason(root: string, ref: string, commit: string): string |
     const name = ref.split(/[~^]/)[0]!;
     if (fullRefName(root, name) === cur || name === short || name === cur) return `${ref} is the checked-out branch (${short})`;
   }
+  // For an unpinned name, a commit only the checked-out branch contains is the candidate. A pin
+  // is the host's or reviewer's statement instead (a CI checkout may hold the base by ID only).
+  if (pinned) return null;
   const others = refsContaining(root, commit).filter((r) => r !== cur);
   if (others.length === 0) return `${ref} (${commit.slice(0, 12)}) is only reachable from the checked-out branch`;
   return null;
@@ -204,7 +207,7 @@ export function loadTrust(root: string, source: TrustSource): LoadedTrust {
       }
       const bytes = fileAtCommit(root, commit, `${VCV_DIR}/${REVIEWERS_FILE}`, MAX_TRUST_BYTES);
       if (!bytes) throw new ApprovalError("NO_TRUST_LIST", `${source.ref} (${commit.slice(0, 12)}) has no ${VCV_DIR}/${REVIEWERS_FILE}`);
-      const why = candidateRefReason(root, source.ref, commit);
+      const why = candidateRefReason(root, source.ref, commit, source.pinnedCommit !== undefined);
       return {
         list: parseTrust(bytes, `${VCV_DIR}/${REVIEWERS_FILE} at ${source.ref}`),
         source: `${VCV_DIR}/${REVIEWERS_FILE} at ${source.ref} (${commit.slice(0, 12)})`,
