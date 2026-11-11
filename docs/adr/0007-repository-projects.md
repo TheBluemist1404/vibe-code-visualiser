@@ -83,8 +83,19 @@ paths differ from Git HEAD, and any merge/rebase/cherry-pick/revert in progress.
 read (`rev-parse`, `symbolic-ref`, `status`), with `GIT_OPTIONAL_LOCKS=0` so `git status` does
 not rewrite the index. VCV never fetches, pulls, checks out or merges.
 
-Writers are unchanged: `FileStore` on `.vcv/`, single writer (ADR 0003). UI and MCP must not
-write concurrently; MCP stays read-only.
+Writers use `FileStore` on `.vcv/`, still single writer (ADR 0003); UI and MCP must not write
+concurrently, and MCP stays read-only. A single writer is not enough in a checkout, though:
+`git checkout`/`pull` replace `.vcv/HEAD` under a writer that stays open. So:
+
+- **Read policy.** Every `FileStore` read (`current`, `revision`, `revisions`) first compares HEAD
+  on disk with the line it holds. If it moved, the writer adopts the new HEAD and re-runs the
+  open-time checks (conflict, divergence, digest verification). The engine therefore validates
+  a change against the checked-out line, and a change based on the old line fails with
+  `STALE_REVISION`.
+- **Write guard.** `commit()` re-reads HEAD immediately before writing and refuses with
+  `HEAD_CHANGED`, writing nothing, if it differs from the line the change was validated
+  against. This closes the window between validation and write. It is a check-then-rename, not
+  a lock: a checkout landing inside the few milliseconds of the write itself is not prevented.
 
 ## 3. Branch-safe revision identity (implemented)
 
@@ -142,6 +153,14 @@ Residual risks:
 - `changes/<id>.json` uses caller-chosen IDs; two branches using the same change ID for
   different changes will conflict in Git (detected as `conflicted`), not silently merge.
 - 48-bit digest: collisions are negligible at this scale; length is a constant.
+
+**Committed revisions are verified, not trusted.** Whenever a revision listed in HEAD is read
+(writer open and reads, `FileStoreReader`, `inspectStore`), its `project.modelRevision` must equal
+its file name, and for branch-safe IDs after the first entry its digest must verify against the
+previous history entry as parent at that position. A file edited after commit, or listed out of
+place, is `CORRUPT` (`invalid` for inspection) and is never rewritten. Legacy IDs carry no digest,
+so their content cannot be checked; the first history entry (the `init` model, whatever its ID)
+has no parent and is exempt.
 
 *(proposed)* encoding: `rev-<seq>-<12 hex>`; digest input and `vcv-revision-v1` domain tag.
 
