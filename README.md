@@ -35,7 +35,7 @@ visual interface yet, and the model is not yet linked to source code.
 |---|---|---|
 | **M0** Semantic foundation | Typed IR, validation, change/approval engine, file store with crash recovery, audit log, read-only query API, CLI | ✅ Done |
 | **M1** Local MCP for agents | stdio MCP server with four read-only query tools, opt-in agent guidance, Claude Code demo | ✅ Done ([#5](https://github.com/TheBluemist1404/vibe-code-visualiser/pull/5)) |
-| **M2** Repository integration | `.vcv/` in the repo, TypeScript indexer, portable model↔code bindings | 🚧 In progress ([#6](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/6)): `.vcv/` projects and branch-safe revisions done ([#8](https://github.com/TheBluemist1404/vibe-code-visualiser/pull/8)); reference app for agent-led bootstrap in review ([#10](https://github.com/TheBluemist1404/vibe-code-visualiser/pull/10)) |
+| **M2** Repository integration | `.vcv/` in the repo, TypeScript indexer, portable model↔code bindings | 🚧 In progress ([#6](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/6)): `.vcv/` projects and branch-safe revisions done ([#8](https://github.com/TheBluemist1404/vibe-code-visualiser/pull/8)) |
 | **M3** Approved model → code | Agent proposes model changes, human approves, coding agent implements, VCV records diff and tests | Planned |
 | **M4** Code → model reconciliation | Detect stale bindings and real contract drift after direct code edits | Planned |
 | **M5** Local visual product | Module graph, change review and evidence panels in a local UI | Planned |
@@ -93,17 +93,6 @@ absent, conflicted, diverged or invalid, along with the checkout's commit, branc
 state. It never creates or repairs anything. A merged or half-merged `.vcv/` is refused rather
 than silently reset. See [ADR 0007](docs/adr/0007-repository-projects.md).
 
-### Reference app
-
-[examples/reference-app](examples/reference-app) holds Course Desk, a small runnable React +
-NestJS app (Enrollment and Notifications) that a coding agent will build a first model for.
-It is meant to be used as an unfamiliar repository, so copy it out first:
-
-```sh
-examples/reference-app/materialize.sh /tmp/course-desk   # its own Git repo, baseline commit, no .vcv/
-examples/reference-app/check.sh                          # install, test, build and run it; VCV must report "absent"
-```
-
 ### Connect a coding agent
 
 ```sh
@@ -126,7 +115,7 @@ packages/query     Read-only semantic queries: overview, search, context, impact
 packages/repo      Repository projects: find and load .vcv/, observe Git state, track branches
 apps/cli           `vcv` command-line tool, a thin layer over the engine
 apps/mcp           Local stdio MCP server for coding agents
-examples/          Sample Enrollment model and a proposed change; Course Desk reference app
+examples/          Sample Enrollment model and a proposed change
 docs/adr/          Architecture decision records
 docs/samples/      Sample query output and a recorded Claude Code session
 ```
@@ -153,6 +142,5 @@ them holds its own copy of the model or its own rules.
 ## Development
 
 CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs `npm ci`, typecheck and tests on
-Node 22.18.0 and the latest 22.x for pushes to `main` and every pull request. A second job runs
-`examples/reference-app/check.sh` on the app's own minimum (Node 22.22.2) and the latest 22.x. Commit messages
+Node 22.18.0 and the latest 22.x for pushes to `main` and every pull request. Commit messages
 follow [Conventional Commits](https://www.conventionalcommits.org).
