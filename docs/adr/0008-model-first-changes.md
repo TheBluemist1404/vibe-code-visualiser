@@ -86,6 +86,13 @@ what a proposal changes before deciding.
   (`TRUST_FROM_CHECKOUT`). A ref is reported as a pinned commit with protection *asserted by the
   caller*: Git cannot verify branch protection. `--trust-working-tree` remains as an explicit
   unsafe development mode that cannot produce a trusted approval.
+- **Approval authority is established outside the checkout, never inferred from refs** (review
+  round 2). Any local ref (tag, branch, remote-tracking ref) can be created or moved by a shell
+  agent, so reachability from "another ref" is not independence. `vcv review approve|finalize`
+  accept only `pinned-commit` (`--trust-commit <full ID>` copied from the hosting service; the
+  ref, if given, must resolve to it: `TRUST_PIN_MISMATCH`) or `external-file` (a reviewer-owned
+  list outside the checkout). An unpinned `--trust-ref` is `local-ref` authority: accepted by
+  `vcv integrity`, whose CI use relies on the host providing the base ref, and reported as such.
 - **Preflight, exclusive write, explicit repair** (review round 1). The attestation destination
   is checked before the model commit; the file is created exclusively (link, never rename over).
   If the write still fails after the commit, `ATTESTATION_NOT_WRITTEN` names `vcv review

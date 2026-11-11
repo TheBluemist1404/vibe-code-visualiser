@@ -68,16 +68,17 @@ const USAGE = `vcv <command> [options]
                                         keep it outside the repository and any agent sandbox). Prints the
                                         public trust-list entry; --add appends it to <path>/.vcv/reviewers.json
   review approve <path> <changeId> --digest <proposalDigest> --key <key-file>
-              (--trust-ref <protected base, e.g. origin/main> | --trust <file outside the checkout>
-               | --trust-working-tree (UNSAFE development mode))
+              (--trust-commit <full commit ID of the protected base, from the hosting service> [--trust-ref origin/main]
+               | --trust <reviewer-owned file outside the checkout> | --trust-working-tree (UNSAFE development mode))
                                         The trusted reviewer step: identity and permission come from the key's
                                         entry in the trust list, never from --as/--perm/VCV_HOST_* (refused here).
-                                        The trust anchor is required and must be outside the candidate branch.
+                                        The trust anchor is required; a local ref alone is refused (anyone with a
+                                        shell here can create or move one), so pin the commit or use your own file.
                                         Approves exactly the reviewed content and writes a signed attestation.
-  review finalize <path> <changeId> --digest <proposalDigest> --key <key-file> (--trust-ref <ref> | --trust <file>)
+  review finalize <path> <changeId> --digest <proposalDigest> --key <key-file> (--trust-commit <sha> [--trust-ref <ref>] | --trust <file>)
                                         Write the missing attestation of an applied change, if approve committed
                                         but could not write it. Only the recorded approver; never overwrites.
-  integrity <path> [--base <ref>] [--trust-ref <ref> | --trust <file> | --trust-working-tree] [--require-attestation] [--json]
+  integrity <path> [--base <ref>] [--trust-ref <ref> [--trust-commit <sha>] | --trust <file> | --trust-working-tree] [--require-attestation] [--json]
                                         Read-only check of the .vcv/ history: every revision derived by its
                                         applied change's typed operations, records consistent, base history
                                         unchanged, approvals attested by trusted keys. Exit 1 on any error.
@@ -148,6 +149,7 @@ const { positionals, values } = parseArgs({
     key: { type: "string" },
     trust: { type: "string" },
     "trust-ref": { type: "string" },
+    "trust-commit": { type: "string" },
     "trust-working-tree": { type: "boolean", default: false },
     base: { type: "string" },
     "require-attestation": { type: "boolean", default: false },
@@ -519,9 +521,11 @@ function refuseAssertedIdentity(what: string) {
 }
 
 function trustSource(defaultRef: string | null): TrustSource | undefined {
-  const given = [values.trust !== undefined, values["trust-ref"] !== undefined, values["trust-working-tree"]].filter(Boolean).length;
+  const pinned = values["trust-commit"];
+  const given = [values.trust !== undefined, values["trust-ref"] !== undefined || pinned !== undefined, values["trust-working-tree"]].filter(Boolean).length;
   if (given > 1) throw new InputError("pass one of --trust <file>, --trust-ref <ref> or --trust-working-tree");
   if (values.trust !== undefined) return { kind: "file", path: values.trust };
+  if (pinned !== undefined) return { kind: "git-ref", ref: values["trust-ref"] ?? pinned, pinnedCommit: pinned };
   if (values["trust-ref"] !== undefined) return { kind: "git-ref", ref: values["trust-ref"] };
   if (values["trust-working-tree"]) return { kind: "working-tree" };
   return defaultRef ? { kind: "git-ref", ref: defaultRef } : undefined;
@@ -548,7 +552,7 @@ function reviewCommand(): number {
   refuseAssertedIdentity(`vcv review ${a}`);
   const path = need(b, "<path>");
   const trust = trustSource(null);
-  if (!trust) throw new InputError("a trust anchor is required: --trust-ref <protected base, e.g. origin/main> or --trust <file outside the checkout> (--trust-working-tree is an unsafe development mode)");
+  if (!trust) throw new InputError("a trust anchor is required: --trust-commit <full commit ID of the protected base, from the hosting service> [--trust-ref origin/main], or --trust <reviewer-owned file outside the checkout> (--trust-working-tree is an unsafe development mode)");
   const unsafe = trust.kind === "working-tree";
   if (unsafe) console.log("! UNSAFE development mode: the trust list comes from the checkout under review; this is not a trusted approval and a strict integrity check rejects it");
   const input = { changeId: need(rest[0], "<changeId>"), expectedDigest: need(values.digest, "--digest"), keyFile: need(values.key, "--key"), trust, allowUnprotectedTrust: unsafe };

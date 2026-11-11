@@ -52,7 +52,25 @@ export type TrustList = z.infer<typeof trustListSchema>;
 export type TrustEntry = TrustList["reviewers"][number];
 
 /** Where a trust list comes from. Only a source the reviewed change cannot alter makes an attestation meaningful. */
-export type TrustSource = { kind: "file"; path: string } | { kind: "git-ref"; ref: string } | { kind: "working-tree" };
+/**
+ * Where to read the trust list. For `git-ref`, `pinnedCommit` is the full commit ID the caller
+ * obtained from outside this checkout (the hosting service's protected branch); the ref must
+ * resolve to exactly that commit. A ref without a pin is only a local name, which anyone with a
+ * shell in the checkout can create or move.
+ */
+export type TrustSource = { kind: "file"; path: string } | { kind: "git-ref"; ref: string; pinnedCommit?: string } | { kind: "working-tree" };
+
+/**
+ * How the trust list's authority was established:
+ *   external-file   a file outside the checkout, chosen by the caller (reviewer-owned)
+ *   pinned-commit   a commit the caller pinned by its full ID, obtained outside the checkout
+ *   local-ref       a local ref name only: writable by anyone with a shell here (tags, branches,
+ *                   remote-tracking refs alike); acceptable where the host provides the ref (CI),
+ *                   never for a local approval
+ *   checkout        the candidate itself (working tree, a file inside the checkout, HEAD or the
+ *                   checked-out branch)
+ */
+export type TrustAuthority = "external-file" | "pinned-commit" | "local-ref" | "checkout";
 
 /**
  * A loaded trust list and where it came from. `protectedFromCheckout` is false when the list is
@@ -61,7 +79,7 @@ export type TrustSource = { kind: "file"; path: string } | { kind: "git-ref"; re
  * why. True never means "branch protection verified": Git cannot prove that. It means the list
  * comes from an anchor outside the candidate branch that the caller chose and vouches for.
  */
-export type LoadedTrust = { list: TrustList; source: string; commit?: string; protectedFromCheckout: boolean; unprotectedReason?: string; anchor: string };
+export type LoadedTrust = { list: TrustList; source: string; commit?: string; authority: TrustAuthority; protectedFromCheckout: boolean; unprotectedReason?: string; anchor: string };
 
 export class ApprovalError extends Error {
   readonly code: string;
@@ -158,14 +176,21 @@ export function loadTrust(root: string, source: TrustSource): LoadedTrust {
       return {
         list: parseTrust(readPlainFile(source.path, MAX_TRUST_BYTES, "trust list"), source.path),
         source: `file ${resolve(source.path)}`,
+        authority: inside ? "checkout" : "external-file",
         protectedFromCheckout: !inside,
         ...(inside ? { unprotectedReason: `${source.path} is inside the checkout under review` } : {}),
         anchor: inside ? "file inside the checkout (unprotected)" : "file outside the checkout; its integrity is the caller's responsibility",
       };
     }
     case "git-ref": {
+      if (source.pinnedCommit !== undefined && !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(source.pinnedCommit)) {
+        throw new ApprovalError("INVALID_PIN", "--trust-commit must be a full commit ID (40 or 64 hex), copied from the hosting service's protected branch");
+      }
       const commit = resolveCommit(root, source.ref);
-      if (!commit) throw new ApprovalError("UNKNOWN_REF", `${source.ref} is not a commit in this repository`);
+      if (!commit) throw new ApprovalError("UNKNOWN_REF", `${source.ref} is not a commit in this repository${source.pinnedCommit ? " (fetch the protected branch first)" : ""}`);
+      if (source.pinnedCommit !== undefined && commit !== source.pinnedCommit) {
+        throw new ApprovalError("TRUST_PIN_MISMATCH", `${source.ref} resolves to ${commit}, not the pinned ${source.pinnedCommit}; the local ref was moved or is stale`);
+      }
       const bytes = fileAtCommit(root, commit, `${VCV_DIR}/${REVIEWERS_FILE}`, MAX_TRUST_BYTES);
       if (!bytes) throw new ApprovalError("NO_TRUST_LIST", `${source.ref} (${commit.slice(0, 12)}) has no ${VCV_DIR}/${REVIEWERS_FILE}`);
       const why = candidateRefReason(root, source.ref, commit);
@@ -173,9 +198,14 @@ export function loadTrust(root: string, source: TrustSource): LoadedTrust {
         list: parseTrust(bytes, `${VCV_DIR}/${REVIEWERS_FILE} at ${source.ref}`),
         source: `${VCV_DIR}/${REVIEWERS_FILE} at ${source.ref} (${commit.slice(0, 12)})`,
         commit,
+        authority: why ? "checkout" : source.pinnedCommit ? "pinned-commit" : "local-ref",
         protectedFromCheckout: !why,
         ...(why ? { unprotectedReason: why } : {}),
-        anchor: why ? `candidate branch (unprotected): ${why}` : `${anchorKind(root, source.ref)} ${source.ref} pinned at ${commit.slice(0, 12)}; ${UNVERIFIED}`,
+        anchor: why
+          ? `candidate branch (unprotected): ${why}`
+          : source.pinnedCommit
+            ? `commit ${commit.slice(0, 12)} pinned by the caller (from outside this checkout); that it is the protected branch is the caller's assertion`
+            : `${anchorKind(root, source.ref)} ${source.ref} at ${commit.slice(0, 12)}: a local ref, not pinned; anyone with a shell here can create or move it; ${UNVERIFIED}`,
       };
     }
     case "working-tree": {
@@ -185,6 +215,7 @@ export function loadTrust(root: string, source: TrustSource): LoadedTrust {
       return {
         list: parseTrust(f.bytes, `${VCV_DIR}/${REVIEWERS_FILE}`),
         source: `${VCV_DIR}/${REVIEWERS_FILE} in the working tree`,
+        authority: "checkout",
         protectedFromCheckout: false,
         unprotectedReason: "the working tree is the checkout under review",
         anchor: "working tree (unsafe development mode)",
@@ -316,7 +347,7 @@ export type ReviewApproveInput = {
 
 export type ReviewApproveResult = {
   outcome: Outcome;
-  reviewer: { id: string; keyFingerprint: string; trustSource: string; trustAnchor: string; protectedTrust: boolean };
+  reviewer: { id: string; keyFingerprint: string; trustSource: string; trustAnchor: string; trustAuthority: TrustAuthority };
   attestation?: { file: string; attestation: Attestation; alreadyPresent?: boolean };
 };
 
@@ -324,15 +355,19 @@ type Reviewer = { entry: TrustEntry; key: KeyObject; pub: string; info: ReviewAp
 
 function reviewerFor(root: string, input: Pick<ReviewApproveInput, "keyFile" | "trust" | "allowUnprotectedTrust">): Reviewer {
   const trust = loadTrust(root, input.trust);
-  if (!trust.protectedFromCheckout && !input.allowUnprotectedTrust) {
-    throw new ApprovalError("UNPROTECTED_TRUST", `the trust list (${trust.source}) cannot anchor an approval: ${trust.unprotectedReason}. Pass --trust-ref <protected base, e.g. origin/main> or --trust <file outside the checkout>`);
+  // An approval anchor needs authority established outside the agent's reach: a local ref name
+  // (tag, branch, remote-tracking ref) is not, because the agent can create or move it.
+  const established = trust.authority === "external-file" || trust.authority === "pinned-commit";
+  if (!established && !input.allowUnprotectedTrust) {
+    const why = trust.unprotectedReason ?? `${input.trust.kind === "git-ref" ? input.trust.ref : "it"} is a local ref, which anyone with a shell in this checkout can create or move`;
+    throw new ApprovalError("UNPROTECTED_TRUST", `the trust list (${trust.source}) cannot anchor an approval: ${why}. Pin the protected base with --trust-commit <full commit ID from the hosting service> (optionally with --trust-ref origin/main), or use --trust <reviewer-owned file outside the checkout>`);
   }
   const key = loadPrivateKey(input.keyFile);
   const pub = encodePublic(createPublicKey(key));
   const entry = trust.list.reviewers.find((r) => r.publicKey === pub);
   if (!entry) throw new ApprovalError("UNTRUSTED_KEY", `the key ${keyFingerprint(pub)} is not in the trust list (${trust.source})`);
   if (!entry.permissions.includes("model:approve")) throw new ApprovalError("UNTRUSTED_KEY", `${entry.id} is listed without model:approve in ${trust.source}`);
-  return { entry, key, pub, info: { id: entry.id, keyFingerprint: keyFingerprint(pub), trustSource: trust.source, trustAnchor: trust.anchor, protectedTrust: trust.protectedFromCheckout } };
+  return { entry, key, pub, info: { id: entry.id, keyFingerprint: keyFingerprint(pub), trustSource: trust.source, trustAnchor: trust.anchor, trustAuthority: trust.authority } };
 }
 
 /** Refuse before committing anything if the attestation could not be written afterwards. */
@@ -417,7 +452,7 @@ function writeAttestation(storeDir: string, r: ChangeRecord, a: Attestation): st
 }
 
 const finalizeHint = (r: ChangeRecord) =>
-  `change ${r.changeId} was applied as ${r.resultingRevision}, but its attestation was not written; after fixing the cause, the approver can write it with: vcv review finalize <path> ${r.changeId} --digest ${proposalDigest(r.change)} --key <key> --trust-ref <protected base>`;
+  `change ${r.changeId} was applied as ${r.resultingRevision}, but its attestation was not written; after fixing the cause, the approver can write it with: vcv review finalize <path> ${r.changeId} --digest ${proposalDigest(r.change)} --key <key> --trust-commit <protected base commit ID>`;
 
 /**
  * The trusted reviewer invocation. Identity and permission come only from the key and the trust

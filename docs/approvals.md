@@ -20,21 +20,31 @@ tools. So the reviewer's identity must not come from anything that agent can set
 | `VCV_HOST_PRINCIPAL` / `VCV_HOST_PERMISSIONS` | yes                         | no, refused                   |
 | a principal ID written in a change record    | yes (edit the file)         | no, only reported             |
 | `.vcv/reviewers.json` in the working tree, a file inside the checkout, or `HEAD` / the checked-out branch / a commit only it contains | yes (commit it on the feature branch) | refused (`UNPROTECTED_TRUST`); only `--trust-working-tree`, an explicit unsafe development mode |
-| `.vcv/reviewers.json` at a base ref outside the candidate branch (`--trust-ref origin/main`) | only by a push the hosting service lets through | yes, required explicitly (no default) |
-| a trust file outside the checkout (`--trust <file>`) | only if the agent can write there | yes, required explicitly |
+| any other local ref name: a tag, a second branch, even `origin/main` (`git tag`, `git branch`, `git update-ref`) | yes | refused for approval (`UNPROTECTED_TRUST`); accepted by `vcv integrity` where the host provides the ref (CI) |
+| `.vcv/reviewers.json` at a commit the reviewer pins by full ID, copied from the hosting service's protected branch (`--trust-commit <sha>`) | no: a commit ID cannot be forged, and a ref that does not resolve to it is refused (`TRUST_PIN_MISMATCH`) | yes |
+| a reviewer-owned trust file outside the checkout (`--trust <file>`) | only if the agent can write there | yes |
 | an Ed25519 private key kept outside the checkout and any agent sandbox | no, unless it is leaked | yes, this is the identity |
 
 The boundary is therefore **a private key the agent cannot read**, matched against a **trust
-list read from an anchor outside the candidate branch**. Everything else is reported, never
-trusted.
+list whose authority is established outside the agent's reach**. Everything else is reported,
+never trusted.
 
-A Git ref only pins a commit. Git cannot prove that a branch is protected: that is the hosting
-service's setting, and the person who picks `--trust-ref` vouches for it. VCV refuses the
-anchors it can recognise as the candidate (`HEAD`, `@`, the checked-out branch under any
-spelling, a commit no other ref contains, any file whose resolved path, parent symlinks
-followed, is inside the checkout) and reports every other anchor as "pinned at <commit>;
-branch protection is asserted, not verified". Prefer a remote-tracking ref of the protected
-branch (`origin/main`), fetched just before.
+A local ref name proves nothing: whoever has a shell in the checkout can create a tag or a
+branch, or move `refs/remotes/origin/main`, to point at a commit with their own key in it. So a
+local approval accepts only two anchors, each reported with how its authority was established:
+
+- `pinned-commit`: `--trust-commit <full commit ID>`, which the reviewer copies from the hosting
+  service's view of the protected branch (not from this checkout). The commit must exist
+  locally (fetch first); with `--trust-ref`, the ref must resolve to exactly that commit.
+- `external-file`: `--trust <file>`, a trust list the reviewer keeps outside the checkout,
+  where the agent cannot write. VCV checks the resolved path (parent symlinks followed) is
+  outside the checkout; it cannot check who else can write it.
+
+Neither proves the branch is protected (Git cannot): the reviewer asserts it by choosing the
+pin. The candidate is refused outright (`HEAD`, `@`, the checked-out branch under any spelling,
+a commit only it contains, any trust file inside the checkout). An unpinned `--trust-ref` is
+`local-ref` authority: fine for `vcv integrity` in CI, where the hosting service provides the
+ref and the agent does not control the runner, never for a local approval.
 
 What VCV cannot prove, and says so in every integrity report (`limits`):
 
@@ -74,11 +84,13 @@ reviewer's shell.
 vcv proposal preview <checkout> chg-cancel-enrollment     # shows proposalDigest
 vcv review approve <checkout> chg-cancel-enrollment \
     --digest <proposalDigest> --key ~/.config/vcv/hoang.pem \
-    (--trust-ref origin/main | --trust <file outside the checkout> | --trust-working-tree)
+    (--trust-commit <sha from the hosting service> [--trust-ref origin/main]
+     | --trust <reviewer-owned file outside the checkout> | --trust-working-tree)
 ```
 
-- A trust anchor is required; there is no default. An anchor in the candidate branch is refused
-  before anything is applied (`UNPROTECTED_TRUST`). `--trust-working-tree` is an explicit
+- A trust anchor is required; there is no default. Anything but a pinned commit or an
+  external file is refused before anything is applied (`UNPROTECTED_TRUST`), including a tag,
+  a second branch or a locally moved `origin/main`. `--trust-working-tree` is an explicit
   **unsafe development mode**: the change is applied and signed, the command says it is not a
   trusted approval, and a strict integrity check rejects it.
 - It refuses to run under `VCV_HOST_PRINCIPAL` / `VCV_HOST_PERMISSIONS` or with `--as` /
@@ -106,7 +118,7 @@ full, a crash, a directory changed in between), the command fails with
 attestation exists. To finish it:
 
 ```sh
-vcv review finalize <checkout> <changeId> --digest <proposalDigest> --key <key-file> --trust-ref origin/main
+vcv review finalize <checkout> <changeId> --digest <proposalDigest> --key <key-file> --trust-commit <sha>
 ```
 
 It signs and writes only the attestation (the model and the record are untouched), and only
@@ -133,7 +145,7 @@ operation, itself a change that goes through the same proposal and review.
 ## Checking: `vcv integrity`
 
 ```sh
-vcv integrity <checkout> [--base <ref>] [--trust-ref <ref> | --trust <file> | --trust-working-tree] \
+vcv integrity <checkout> [--base <ref>] [--trust-ref <ref> [--trust-commit <sha>] | --trust <file> | --trust-working-tree] \
     [--require-attestation] [--json]
 ```
 

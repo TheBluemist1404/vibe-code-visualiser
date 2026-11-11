@@ -122,27 +122,31 @@ test("review approve: refused under an agent host or with --as/--perm; a trusted
   const run = (env: NodeJS.ProcessEnv, ...args: string[]) => spawnSync("node", ["--experimental-strip-types", "--no-warnings", MAIN, ...args], { encoding: "utf8", env });
   assert.equal(run(agentEnv, "proposal", "submit", repo, file).status, 0);
   const digest = JSON.parse(vcv("proposal", "preview", repo, "chg-a", "--json").stdout).data.proposal.proposalDigest as string;
+  const mainSha = git(repo, "rev-parse", "main");
 
-  const asAgent = run(agentEnv, "review", "approve", repo, "chg-a", "--digest", digest, "--key", key, "--trust-ref", "main");
+  const asAgent = run(agentEnv, "review", "approve", repo, "chg-a", "--digest", digest, "--key", key, "--trust-ref", "main", "--trust-commit", mainSha);
   assert.equal(asAgent.status, 2);
   assert.match(asAgent.stderr, /refuses to run under VCV_HOST_PRINCIPAL/);
-  assert.equal(vcv("review", "approve", repo, "chg-a", "--digest", digest, "--key", key, "--trust-ref", "main", "--as", "user:hoang").status, 2);
+  assert.equal(vcv("review", "approve", repo, "chg-a", "--digest", digest, "--key", key, "--trust-ref", "main", "--trust-commit", mainSha, "--as", "user:hoang").status, 2);
   const noAnchor = vcv("review", "approve", repo, "chg-a", "--digest", digest, "--key", key);
   assert.equal(noAnchor.status, 2);
   assert.match(noAnchor.stderr, /✗ INPUT: a trust anchor is required/);
+  const localRef = vcv("review", "approve", repo, "chg-a", "--digest", digest, "--key", key, "--trust-ref", "main");
+  assert.equal(localRef.status, 2);
+  assert.match(localRef.stderr, /✗ UNPROTECTED_TRUST: .*main is a local ref/);
   const candidate = vcv("review", "approve", repo, "chg-a", "--digest", digest, "--key", key, "--trust-ref", "HEAD");
   assert.equal(candidate.status, 2);
   assert.match(candidate.stderr, /✗ UNPROTECTED_TRUST: .*HEAD names the checked-out HEAD/);
-  const wrong = vcv("review", "approve", repo, "chg-a", "--digest", "0".repeat(64), "--key", key, "--trust-ref", "main");
+  const wrong = vcv("review", "approve", repo, "chg-a", "--digest", "0".repeat(64), "--key", key, "--trust-ref", "main", "--trust-commit", mainSha);
   assert.equal(wrong.status, 1);
   assert.match(wrong.stdout, /✗ DIGEST_MISMATCH/);
 
-  const ok = vcv("review", "approve", repo, "chg-a", "--digest", digest, "--key", key, "--trust-ref", "main");
+  const ok = vcv("review", "approve", repo, "chg-a", "--digest", digest, "--key", key, "--trust-ref", "main", "--trust-commit", mainSha);
   assert.equal(ok.status, 0, ok.stderr + ok.stdout);
   assert.match(ok.stdout, /chg-a: applied → rev-2-[0-9a-f]{12} \(proposed by agent:coder, approved by user:hoang/);
   assert.match(ok.stdout, /attestation: \.vcv\/approvals\/chg-a\.json/);
-  assert.match(ok.stdout, /trust anchor: local branch main pinned at [0-9a-f]{12}; branch protection is asserted/);
-  const again = vcv("review", "finalize", repo, "chg-a", "--digest", digest, "--key", key, "--trust-ref", "main");
+  assert.match(ok.stdout, /trust anchor: commit [0-9a-f]{12} pinned by the caller/);
+  const again = vcv("review", "finalize", repo, "chg-a", "--digest", digest, "--key", key, "--trust-ref", "main", "--trust-commit", mainSha);
   assert.equal(again.status, 0, again.stderr);
   assert.match(again.stdout, /already present; unchanged/);
 

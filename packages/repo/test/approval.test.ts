@@ -43,10 +43,13 @@ function propose(repo: string, c: ProposedModelChange) {
   assert.equal(r.ok && r.data.status, "pending", JSON.stringify(r));
   return proposalDigest(c);
 }
+/** For integrity: main as a local ref (in CI the host provides it). */
 const MAIN: TrustSource = { kind: "git-ref", ref: "main" };
-const approve = (repo: string, id: string, digest: string, keyFile: string, trust: TrustSource = MAIN, extra: Partial<ReviewApproveInput> = {}) =>
+/** For approval: main pinned by its full commit ID, as a reviewer copies it from the hosting service. */
+const pinned = (repo: string, ref = "main"): TrustSource => ({ kind: "git-ref", ref, pinnedCommit: git(repo, "rev-parse", ref) });
+const approve = (repo: string, id: string, digest: string, keyFile: string, trust: TrustSource = pinned(repo), extra: Partial<ReviewApproveInput> = {}) =>
   reviewApprove(repo, { changeId: id, expectedDigest: digest, keyFile, trust, ...extra });
-const finalize = (repo: string, id: string, digest: string, keyFile: string, trust: TrustSource = MAIN) => reviewFinalize(repo, { changeId: id, expectedDigest: digest, keyFile, trust });
+const finalize = (repo: string, id: string, digest: string, keyFile: string, trust: TrustSource = pinned(repo)) => reviewFinalize(repo, { changeId: id, expectedDigest: digest, keyFile, trust });
 const throwsCode = (fn: () => unknown, code: string) => assert.throws(fn, (e: ApprovalError) => (assert.equal(e.code, code, e.message), true));
 const codes = (r: IntegrityReport) => r.problems.map((p) => `${p.severity}:${p.code}`);
 const storeHash = (repo: string) => {
@@ -165,15 +168,33 @@ test("an agent that commits its own key on the feature branch cannot anchor trus
     assert.equal(t.protectedFromCheckout, false, path);
     throwsCode(() => approve(repo, "chg-a", digest, own.file, { kind: "file", path }), "UNPROTECTED_TRUST");
   }
-  // The protected base does not list the agent's key.
+  // The pinned protected base does not list the agent's key.
   throwsCode(() => approve(repo, "chg-a", digest, own.file), "UNTRUSTED_KEY");
+
+  // Local refs are names the agent can create or move: none of them anchors an approval.
+  git(repo, "tag", "agent-trust", "HEAD");
+  git(repo, "branch", "agent-branch", "HEAD");
+  git(repo, "update-ref", "refs/remotes/origin/main", "HEAD"); // a "remote-tracking" ref, moved locally
+  for (const ref of ["agent-trust", "agent-branch", "origin/main", "refs/remotes/origin/main", "main"]) {
+    throwsCode(() => approve(repo, "chg-a", digest, own.file, { kind: "git-ref", ref }), "UNPROTECTED_TRUST");
+  }
+  // A pin is checked against what the ref resolves to: a moved ref cannot stand in for the pinned base.
+  const mainSha = git(repo, "rev-parse", "main");
+  throwsCode(() => approve(repo, "chg-a", digest, own.file, { kind: "git-ref", ref: "origin/main", pinnedCommit: mainSha }), "TRUST_PIN_MISMATCH");
+  throwsCode(() => approve(repo, "chg-a", digest, own.file, { kind: "git-ref", ref: "agent-trust", pinnedCommit: mainSha }), "TRUST_PIN_MISMATCH");
+  throwsCode(() => approve(repo, "chg-a", digest, own.file, { kind: "git-ref", ref: "main", pinnedCommit: mainSha.slice(0, 12) }), "INVALID_PIN");
+  // Pinned to the real base (by ID, whatever local name is used), the agent's key is simply not trusted.
+  throwsCode(() => approve(repo, "chg-a", digest, own.file, { kind: "git-ref", ref: mainSha, pinnedCommit: mainSha }), "UNTRUSTED_KEY");
   assert.equal(rev(repo), "rev-1", "nothing was applied");
   assert.equal(JSON.parse(readFileSync(join(repo, ".vcv/changes/chg-a.json"), "utf8")).status, "pending");
   // A file outside the checkout is an external anchor (its integrity is the caller's).
   const outside = join(mkdtempSync(join(tmpdir(), "vcv-trust-")), "reviewers.json");
-  writeFileSync(outside, readFileSync(inTree));
-  assert.equal(loadTrust(repo, { kind: "file", path: outside }).protectedFromCheckout, true);
-  assert.match(loadTrust(repo, MAIN).anchor, /local branch main pinned at [0-9a-f]{12}; branch protection is asserted .* not verified by Git/);
+  writeFileSync(outside, git(repo, "show", "main:.vcv/reviewers.json")); // the reviewer's own copy of the base list
+  assert.equal(loadTrust(repo, { kind: "file", path: outside }).authority, "external-file");
+  throwsCode(() => approve(repo, "chg-a", digest, own.file, { kind: "file", path: outside }), "UNTRUSTED_KEY");
+  assert.equal(loadTrust(repo, MAIN).authority, "local-ref");
+  assert.match(loadTrust(repo, MAIN).anchor, /local branch main at [0-9a-f]{12}: a local ref, not pinned; anyone with a shell here can create or move it/);
+  assert.equal(loadTrust(repo, pinned(repo)).authority, "pinned-commit");
 
   // Explicit unsafe development mode: applied and signed, but not a trusted approval.
   assert.equal(approve(repo, "chg-a", digest, own.file, { kind: "working-tree" }, { allowUnprotectedTrust: true }).outcome.status, "applied");
@@ -223,8 +244,8 @@ test("the attestation destination is checked before anything is committed, and a
     git(repo, "merge", "-q", "main");
     const digest = propose(repo, change(repo, "chg-a"));
     assert.throws(
-      () => approve(repo, "chg-a", digest, hoang.file, MAIN, { afterCommit: () => { throw new Error("simulated crash"); } }),
-      (e: ApprovalError) => e.code === "ATTESTATION_NOT_WRITTEN" && /simulated crash/.test(e.message) && /vcv review finalize .* chg-a --digest [0-9a-f]{64}/.test(e.message),
+      () => approve(repo, "chg-a", digest, hoang.file, pinned(repo), { afterCommit: () => { throw new Error("simulated crash"); } }),
+      (e: ApprovalError) => e.code === "ATTESTATION_NOT_WRITTEN" && /simulated crash/.test(e.message) && /vcv review finalize .* chg-a --digest [0-9a-f]{64} --key <key> --trust-commit/.test(e.message),
     );
     const applied = rev(repo);
     assert.notEqual(applied, "rev-1", "the model commit happened");
@@ -237,6 +258,7 @@ test("the attestation destination is checked before anything is committed, and a
     throwsCode(() => finalize(repo, "chg-a", digest, lan.file), "NOT_APPROVER");
     throwsCode(() => finalize(repo, "chg-a", "0".repeat(64), hoang.file), "DIGEST_MISMATCH");
     throwsCode(() => finalize(repo, "chg-a", digest, hoang.file, { kind: "git-ref", ref: "HEAD" }), "UNPROTECTED_TRUST");
+    throwsCode(() => finalize(repo, "chg-a", digest, hoang.file, MAIN), "UNPROTECTED_TRUST");
     throwsCode(() => finalize(repo, "chg-a", digest, keyFor("user:hoang").file), "UNTRUSTED_KEY");
     throwsCode(() => finalize(repo, "chg-nope", digest, hoang.file), "UNKNOWN_CHANGE");
     const before = readFileSync(join(repo, ".vcv/HEAD"), "utf8");

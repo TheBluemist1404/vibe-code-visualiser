@@ -59,7 +59,7 @@ export type IntegrityReport = {
   revision: string | null;
   revisions: RevisionCheck[];
   problems: IntegrityProblem[];
-  trust: { source: string; reviewers: number; protectedFromCheckout: boolean; anchor: string } | null;
+  trust: { source: string; reviewers: number; protectedFromCheckout: boolean; authority: LoadedTrust["authority"]; anchor: string } | null;
   base: { ref: string; commit: string; revision: string | null; history: string[] } | null;
   requireAttestation: boolean;
   /** What this check cannot establish. Always read with the result. */
@@ -77,7 +77,7 @@ export type IntegrityOptions = {
 
 const LIMITS = [
   "An attestation proves that the holder of a trusted reviewer key signed this exact change; it does not prove which person held the key, or that the key was not shared or stolen.",
-  "Trust is only as strong as its source. A trust list in the checkout under review can be changed by that same change; in CI, read it from the protected base branch (--trust-ref) and protect who may change it there. Git pins the commit the list was read from; it cannot prove that the branch is protected.",
+  "Trust is only as strong as its source. A trust list in the checkout under review can be changed by that same change; in CI, read it from the protected base branch (--trust-ref) and protect who may change it there. Git pins the commit the list was read from; it cannot prove that the branch is protected. An unpinned --trust-ref is a local name anyone with a shell in the checkout can create or move: rely on it only where the host provides the ref (a CI checkout), or pin it with --trust-commit.",
   "The initial revision has no recorded derivation: who created it, and from what, is not provable from the repository.",
   "Derivation replays the recorded typed operations; it says nothing about whether the source code implements the model (that is M4's reconciliation).",
   "The local audit log (.vcv/audit.jsonl) is not shared through Git and is not evidence here.",
@@ -266,7 +266,7 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
     projectId,
     revision,
     revisions,
-    trust: trust ? { source: trust.source, reviewers: trust.list.reviewers.length, protectedFromCheckout: trust.protectedFromCheckout, anchor: trust.anchor } : null,
+    trust: trust ? { source: trust.source, reviewers: trust.list.reviewers.length, protectedFromCheckout: trust.protectedFromCheckout, authority: trust.authority, anchor: trust.anchor } : null,
     base,
   });
 }
