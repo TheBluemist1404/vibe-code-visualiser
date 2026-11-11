@@ -301,7 +301,7 @@ test("the server refuses to start without an explicit, initialized store and kee
   const none = run([]);
   assert.equal(none.status, 2);
   assert.equal(none.stdout, "");
-  assert.match(none.stderr, /no model store given: pass --store <store-dir> or set VCV_STORE/);
+  assert.match(none.stderr, /nothing to serve: pass --store <store-dir> or --repo <checkout>/);
 
   const empty = mkdtempSync(join(tmpdir(), "vcv-mcp-empty-"));
   const uninit = run(["--store", empty]);

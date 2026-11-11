@@ -1,0 +1,168 @@
+{
+  "ok": true,
+  "context": {
+    "projectId": "prj-course-desk",
+    "modelRevision": "rev-1",
+    "snapshotStatus": "draft",
+    "source": "repository-evidence",
+    "implementationChecked": false,
+    "meaning": "unverified",
+    "observed": {
+      "commit": "a580bd7fbede50b228c62f2c1ae2dcc2a90eec54",
+      "branch": "main",
+      "dirty": true,
+      "resolver": "vcv-ts-subset-1/typescript-6.0.3",
+      "fingerprintAlgorithm": "vcv-fp-1"
+    }
+  },
+  "data": {
+    "object": {
+      "id": "rul-seat-limit",
+      "kind": "rule",
+      "name": "Course capacity",
+      "inCurrentModel": true
+    },
+    "counts": {
+      "resolved": 0,
+      "stale": 1,
+      "missing": 1,
+      "ambiguous": 0,
+      "unchecked": 0,
+      "indeterminate": 0,
+      "invalid": 0,
+      "total": 2,
+      "disputed": 0
+    },
+    "bindings": [
+      {
+        "bindingId": "impl.rul-seat-limit",
+        "file": ".vcv/bindings/impl.rul-seat-limit.json",
+        "digest": "9d2a6d0917e8c1d4922e3b5d5eb60d7b41b993aa06db8293b57267985fabee74",
+        "state": "stale",
+        "claim": {
+          "modelObjectId": "rul-seat-limit",
+          "relation": "implements",
+          "locator": {
+            "text": "server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll",
+            "path": "server/src/enrollment/enrollment.service.ts",
+            "selector": {
+              "kind": "symbol",
+              "name": "EnrollmentService.enroll"
+            }
+          },
+          "provenance": {
+            "source": "agent",
+            "principalId": "agent:bootstrap",
+            "rationale": "the capacity check is in enroll()",
+            "confidence": 0.8
+          },
+          "modelRevision": "rev-1",
+          "observed": {
+            "commit": "adb423c256ca72cf8242da855e6cb433655dbd1a",
+            "workingTree": "clean",
+            "fingerprint": {
+              "algorithm": "vcv-fp-1",
+              "file": "e813335c0a59aadca98651b161b1d181797b3ee17f7ddc809cc256082fc52a77",
+              "selector": "d170277f547d0719cd10e62c4dabb3101737036bf4dae857d43f64ed7373ffc8"
+            }
+          }
+        },
+        "locator": {
+          "state": "resolved",
+          "detail": "symbol EnrollmentService.enroll resolves to method EnrollmentService.enroll at line 24",
+          "matches": [
+            {
+              "label": "EnrollmentService.enroll",
+              "declaration": "method",
+              "line": 24
+            }
+          ],
+          "matchesTotal": 1
+        },
+        "freshness": {
+          "source": {
+            "state": "changed",
+            "cause": "the selected declaration's code differs from the recorded fingerprint",
+            "fileChanged": true
+          },
+          "model": {
+            "state": "unchanged",
+            "cause": "claim was made against the current revision rev-1"
+          },
+          "git": {
+            "commitMoved": true,
+            "workingTree": "modified"
+          }
+        },
+        "disputed": null,
+        "approval": {
+          "approved": false,
+          "note": "binding claims are never approved; context.snapshotStatus is the model's own status"
+        }
+      },
+      {
+        "bindingId": "test.rul-seat-limit",
+        "file": ".vcv/bindings/test.rul-seat-limit.json",
+        "digest": "d8e0c04c4b402d282419d3996a309de0d16279454d9f76d10b951e4c0abcfba2",
+        "state": "missing",
+        "claim": {
+          "modelObjectId": "rul-seat-limit",
+          "relation": "tests",
+          "locator": {
+            "text": "server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > rejects an enrollment into a full course and notifies the student",
+            "path": "server/src/enrollment/enrollment.service.spec.ts",
+            "selector": {
+              "kind": "test",
+              "name": "EnrollmentService > rejects an enrollment into a full course and notifies the student"
+            }
+          },
+          "provenance": {
+            "source": "agent",
+            "principalId": "agent:bootstrap",
+            "rationale": "the unit test for a full course",
+            "confidence": 0.8
+          },
+          "modelRevision": "rev-1",
+          "observed": {
+            "commit": "adb423c256ca72cf8242da855e6cb433655dbd1a",
+            "workingTree": "clean",
+            "fingerprint": {
+              "algorithm": "vcv-fp-1",
+              "file": "6bbcbc3ea40902b78791c5da20c7be48ecaf6191cad186338e569156503c0f34",
+              "selector": "e4e2fcbf2e77b4b2ee672441018eb1fbe2e3425bd0bcdd750a83af6546fe74cc"
+            }
+          }
+        },
+        "locator": {
+          "state": "missing",
+          "detail": "test \"EnrollmentService > rejects an enrollment into a full course and notifies the student\" not found in server/src/enrollment/enrollment.service.spec.ts",
+          "matches": [],
+          "matchesTotal": 0
+        },
+        "freshness": {
+          "source": {
+            "state": "unknown",
+            "cause": "locator is missing",
+            "fileChanged": true
+          },
+          "model": {
+            "state": "unchanged",
+            "cause": "claim was made against the current revision rev-1"
+          },
+          "git": {
+            "commitMoved": true,
+            "workingTree": "modified"
+          }
+        },
+        "disputed": null,
+        "approval": {
+          "approved": false,
+          "note": "binding claims are never approved; context.snapshotStatus is the model's own status"
+        }
+      }
+    ],
+    "matched": 2,
+    "truncated": false,
+    "unreadableClaims": 0
+  }
+}

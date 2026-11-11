@@ -1,0 +1,14 @@
+ M README.md
+ M scripts/smoke.mjs
+ M server/src/enrollment/enrollment.repository.ts
+ M server/src/enrollment/enrollment.service.spec.ts
+ M server/src/enrollment/enrollment.service.ts
+ M server/src/enrollment/enrollment.types.ts
+ M server/src/notifications/notification.types.ts
+ M server/test/app.e2e-spec.ts
+ M web/src/App.test.tsx
+ M web/src/App.tsx
+ M web/src/api/client.ts
+?? .vcv/changes/ch-maint-01.json
+?? vcv-maintenance/change.yaml
+?? vcv-maintenance/report.md

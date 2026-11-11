@@ -45,8 +45,11 @@ commit protocol and its limits.
 2. **Emitting another module's event** requires a consumed contract of that module that
    `accepts` it (triggers on a foreign event need `publishes`). The spec only describes
    the publish direction.
-3. **Fixing a draft needs targeted operations.** Added `setModuleDependencies`. The spec's
-   `updateObject` is not implemented because a generic version is a JSON patch in disguise.
+3. **Fixing a draft needs targeted operations.** Added `setModuleDependencies`, and in M2.5
+   `createRule`, `setRuleStatement` and `setDescription` (keeping a model true after a code change
+   needs to change a rule's statement or an object's description without remove-and-recreate).
+   The spec's `updateObject` is not implemented because a generic version is a JSON patch in
+   disguise.
 4. **`approveDraft` needs approve rights** even for principals that can apply changes.
 5. **Self-approval is forbidden by default** (`allowSelfApproval` policy flag).
 6. The rejection event still carries no reason, so timeout and lecturer rejections look the

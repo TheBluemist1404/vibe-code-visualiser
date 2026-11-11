@@ -1,0 +1,289 @@
+diff --git a/README.md b/README.md
+index 2fe2945..2cec72f 100644
+--- a/README.md
++++ b/README.md
+@@ -28,7 +28,7 @@ sequential (`enr-1`, `ntf-1`, …).
+ | Route | Result |
+ |-------|--------|
+ | `GET /courses` | The course catalog with remaining seats |
+-| `POST /enrollments` `{ "studentId", "courseId" }` | `201` with the recorded enrollment: `confirmed`, or `rejected` with a reason. `400` for a malformed body, `404` for an unknown course |
++| `POST /enrollments` `{ "studentId", "courseId" }` | `201` with the recorded enrollment: `confirmed`, `waitlisted` with a `waitlistPosition` when the course is full, or `rejected` with a reason. `400` for a malformed body, `404` for an unknown course |
+ | `GET /enrollments/:id` | One enrollment, `404` if unknown |
+ | `GET /notifications?recipientId=…` | Notifications for one recipient, oldest first; `400` without `recipientId` |
+ 
+@@ -37,11 +37,13 @@ sequential (`enr-1`, `ntf-1`, …).
+ Two courses are seeded: Linear Algebra (2 seats) and Modern Poetry (1 seat).
+ 
+ 1. `stu-ada` enrolls in Modern Poetry: `confirmed`; Modern Poetry has 0 seats left.
+-2. `stu-bob` enrolls in Modern Poetry: `rejected` with reason `COURSE_FULL`.
++2. `stu-bob` enrolls in Modern Poetry: `waitlisted` with `waitlistPosition` 1 (the course is full;
++   later requests get 2, 3, …). A waitlisted request takes no seat; nobody is promoted, since
++   enrollments cannot be cancelled.
+ 3. `stu-ada` has one notification (`enrollment-confirmed`), `stu-bob` one
+-   (`enrollment-rejected`).
+-4. Enrolling again in a course you already hold is `rejected` with `ALREADY_ENROLLED` and does
+-   not take a seat.
++   (`enrollment-waitlisted`).
++4. Enrolling again in a course you already hold is `rejected` with `ALREADY_ENROLLED`, and asking
++   again while waitlisted is `rejected` with `ALREADY_WAITLISTED`; neither takes a seat or a place.
+ 
+ In the UI, choose a student ID and a course and press **Enroll**: the page shows the outcome,
+ the student's notifications and the updated seat counts.
+diff --git a/scripts/smoke.mjs b/scripts/smoke.mjs
+index 5e64165..2f2fb44 100644
+--- a/scripts/smoke.mjs
++++ b/scripts/smoke.mjs
+@@ -43,9 +43,9 @@ try {
+     console.log(`${method} ${path}${body ? " " + JSON.stringify(body) : ""}\n  → ${r.status} ${JSON.stringify(r.body)}`);
+   }
+   assert.equal(results[1].body.status, "confirmed");
+-  assert.deepEqual([results[2].body.status, results[2].body.reason], ["rejected", "COURSE_FULL"]);
++  assert.deepEqual([results[2].body.status, results[2].body.waitlistPosition], ["waitlisted", 1]);
+   assert.equal(results[3].body[0].kind, "enrollment-confirmed");
+-  assert.equal(results[4].body[0].kind, "enrollment-rejected");
++  assert.equal(results[4].body[0].kind, "enrollment-waitlisted");
+   assert.equal(results[5].body.find((c) => c.id === "crs-poetry").seatsLeft, 0);
+   console.log("smoke: ok");
+ } finally {
+diff --git a/server/src/enrollment/enrollment.repository.ts b/server/src/enrollment/enrollment.repository.ts
+index 8a8b0fb..a2d7116 100644
+--- a/server/src/enrollment/enrollment.repository.ts
++++ b/server/src/enrollment/enrollment.repository.ts
+@@ -22,4 +22,9 @@ export class EnrollmentRepository {
+   confirmedFor(courseId: string): Enrollment[] {
+     return this.rows.filter((e) => e.courseId === courseId && e.status === "confirmed");
+   }
++
++  /** Waitlisted requests for a course, oldest first. */
++  waitlistedFor(courseId: string): Enrollment[] {
++    return this.rows.filter((e) => e.courseId === courseId && e.status === "waitlisted");
++  }
+ }
+diff --git a/server/src/enrollment/enrollment.service.spec.ts b/server/src/enrollment/enrollment.service.spec.ts
+index 3509e1a..169e236 100644
+--- a/server/src/enrollment/enrollment.service.spec.ts
++++ b/server/src/enrollment/enrollment.service.spec.ts
+@@ -25,14 +25,23 @@ describe("EnrollmentService", () => {
+     expect(enrollment.courses().find((c) => c.id === "crs-poetry")?.seatsLeft).toBe(0);
+   });
+ 
+-  it("rejects an enrollment into a full course and notifies the student", async () => {
++  it("waitlists an enrollment into a full course in request order and notifies the student", async () => {
+     const { enrollment, notifications } = await setup();
+     enrollment.enroll({ studentId: "stu-ada", courseId: "crs-poetry" });
+     const e = enrollment.enroll({ studentId: "stu-bob", courseId: "crs-poetry" });
+-    expect(e).toMatchObject({ status: "rejected", reason: "COURSE_FULL" });
++    expect(e).toEqual({ id: "enr-2", studentId: "stu-bob", courseId: "crs-poetry", status: "waitlisted", waitlistPosition: 1 });
++    expect(enrollment.enroll({ studentId: "stu-cy", courseId: "crs-poetry" })).toMatchObject({ status: "waitlisted", waitlistPosition: 2 });
+     expect(notifications.forRecipient("stu-bob")).toEqual([
+-      expect.objectContaining({ kind: "enrollment-rejected", enrollmentId: e.id }),
++      expect.objectContaining({ kind: "enrollment-waitlisted", enrollmentId: e.id, message: "Modern Poetry is full; you are number 1 on the waitlist." }),
+     ]);
++    expect(enrollment.courses().find((c) => c.id === "crs-poetry")?.seatsLeft).toBe(0);
++  });
++
++  it("rejects a second request from a student who is already waitlisted", async () => {
++    const { enrollment } = await setup();
++    enrollment.enroll({ studentId: "stu-ada", courseId: "crs-poetry" });
++    enrollment.enroll({ studentId: "stu-bob", courseId: "crs-poetry" });
++    expect(enrollment.enroll({ studentId: "stu-bob", courseId: "crs-poetry" })).toMatchObject({ status: "rejected", reason: "ALREADY_WAITLISTED" });
+   });
+ 
+   it("rejects a repeat enrollment without taking a second seat", async () => {
+diff --git a/server/src/enrollment/enrollment.service.ts b/server/src/enrollment/enrollment.service.ts
+index 753840a..62dfc35 100644
+--- a/server/src/enrollment/enrollment.service.ts
++++ b/server/src/enrollment/enrollment.service.ts
+@@ -6,7 +6,8 @@ import type { CourseSummary, Enrollment, EnrollmentRequest, RejectionReason } fr
+ 
+ /**
+  * Enrollment rules. Every decision is recorded and announced to the student:
+- * a confirmed enrollment takes a seat; a full course or a repeat request is rejected.
++ * a confirmed enrollment takes a seat; a request for a full course joins its waitlist;
++ * a repeat request (already enrolled or already waitlisted) is rejected.
+  */
+ @Injectable()
+ export class EnrollmentService {
+@@ -25,18 +26,21 @@ export class EnrollmentService {
+     if (!course) throw new NotFoundException(`unknown course ${request.courseId}`);
+ 
+     const taken = this.enrollments.confirmedFor(course.id);
++    const waiting = this.enrollments.waitlistedFor(course.id);
+     const reason: RejectionReason | undefined = taken.some((e) => e.studentId === request.studentId)
+       ? "ALREADY_ENROLLED"
+-      : taken.length >= course.capacity
+-        ? "COURSE_FULL"
++      : waiting.some((e) => e.studentId === request.studentId)
++        ? "ALREADY_WAITLISTED"
+         : undefined;
++    const full = taken.length >= course.capacity;
+ 
+     const enrollment = this.enrollments.save({
+       id: this.enrollments.nextId(),
+       studentId: request.studentId,
+       courseId: course.id,
+-      status: reason ? "rejected" : "confirmed",
++      status: reason ? "rejected" : full ? "waitlisted" : "confirmed",
+       ...(reason ? { reason } : {}),
++      ...(!reason && full ? { waitlistPosition: waiting.length + 1 } : {}),
+     });
+ 
+     if (reason) {
+@@ -44,7 +48,14 @@ export class EnrollmentService {
+         enrollment.studentId,
+         "enrollment-rejected",
+         enrollment.id,
+-        reason === "COURSE_FULL" ? `${course.title} is full; your enrollment was not accepted.` : `You are already enrolled in ${course.title}.`,
++        reason === "ALREADY_ENROLLED" ? `You are already enrolled in ${course.title}.` : `You are already on the waitlist for ${course.title}.`,
++      );
++    } else if (full) {
++      this.notifications.notify(
++        enrollment.studentId,
++        "enrollment-waitlisted",
++        enrollment.id,
++        `${course.title} is full; you are number ${enrollment.waitlistPosition} on the waitlist.`,
+       );
+     } else {
+       this.notifications.notify(enrollment.studentId, "enrollment-confirmed", enrollment.id, `You are enrolled in ${course.title}.`);
+diff --git a/server/src/enrollment/enrollment.types.ts b/server/src/enrollment/enrollment.types.ts
+index c95c7df..136965d 100644
+--- a/server/src/enrollment/enrollment.types.ts
++++ b/server/src/enrollment/enrollment.types.ts
+@@ -8,9 +8,9 @@ export interface Course {
+ 
+ export type CourseSummary = Course & { seatsLeft: number };
+ 
+-export type EnrollmentStatus = "confirmed" | "rejected";
++export type EnrollmentStatus = "confirmed" | "waitlisted" | "rejected";
+ 
+-export type RejectionReason = "COURSE_FULL" | "ALREADY_ENROLLED";
++export type RejectionReason = "ALREADY_ENROLLED" | "ALREADY_WAITLISTED";
+ 
+ export interface Enrollment {
+   id: string;
+@@ -19,6 +19,8 @@ export interface Enrollment {
+   status: EnrollmentStatus;
+   /** Set when status is "rejected". */
+   reason?: RejectionReason;
++  /** 1-based place in the course's waitlist; set when status is "waitlisted". */
++  waitlistPosition?: number;
+ }
+ 
+ export interface EnrollmentRequest {
+diff --git a/server/src/notifications/notification.types.ts b/server/src/notifications/notification.types.ts
+index 099eb80..83c6e58 100644
+--- a/server/src/notifications/notification.types.ts
++++ b/server/src/notifications/notification.types.ts
+@@ -1,4 +1,4 @@
+-export type NotificationKind = "enrollment-confirmed" | "enrollment-rejected";
++export type NotificationKind = "enrollment-confirmed" | "enrollment-waitlisted" | "enrollment-rejected";
+ 
+ export interface Notification {
+   id: string;
+diff --git a/server/test/app.e2e-spec.ts b/server/test/app.e2e-spec.ts
+index f732136..5f12c2a 100644
+--- a/server/test/app.e2e-spec.ts
++++ b/server/test/app.e2e-spec.ts
+@@ -26,13 +26,13 @@ describe("Course Desk API (e2e)", () => {
+     ]);
+   });
+ 
+-  it("confirms, then rejects when full; each student is notified of their outcome", async () => {
++  it("confirms, then waitlists when full; each student is notified of their outcome", async () => {
+     const server = app.getHttpServer();
+     const first = await request(server).post("/api/enrollments").send({ studentId: "stu-ada", courseId: "crs-poetry" }).expect(201);
+     expect(first.body).toEqual({ id: "enr-1", studentId: "stu-ada", courseId: "crs-poetry", status: "confirmed" });
+ 
+     const second = await request(server).post("/api/enrollments").send({ studentId: "stu-bob", courseId: "crs-poetry" }).expect(201);
+-    expect(second.body).toEqual({ id: "enr-2", studentId: "stu-bob", courseId: "crs-poetry", status: "rejected", reason: "COURSE_FULL" });
++    expect(second.body).toEqual({ id: "enr-2", studentId: "stu-bob", courseId: "crs-poetry", status: "waitlisted", waitlistPosition: 1 });
+ 
+     await request(server).get("/api/enrollments/enr-2").expect(200, second.body);
+ 
+@@ -40,7 +40,7 @@ describe("Course Desk API (e2e)", () => {
+     expect(ada.body).toEqual([{ id: "ntf-1", recipientId: "stu-ada", kind: "enrollment-confirmed", enrollmentId: "enr-1", message: "You are enrolled in Modern Poetry." }]);
+     const bob = await request(server).get("/api/notifications").query({ recipientId: "stu-bob" }).expect(200);
+     expect(bob.body).toEqual([
+-      { id: "ntf-2", recipientId: "stu-bob", kind: "enrollment-rejected", enrollmentId: "enr-2", message: "Modern Poetry is full; your enrollment was not accepted." },
++      { id: "ntf-2", recipientId: "stu-bob", kind: "enrollment-waitlisted", enrollmentId: "enr-2", message: "Modern Poetry is full; you are number 1 on the waitlist." },
+     ]);
+   });
+ 
+diff --git a/web/src/App.test.tsx b/web/src/App.test.tsx
+index 0752268..fa5cc1f 100644
+--- a/web/src/App.test.tsx
++++ b/web/src/App.test.tsx
+@@ -15,14 +15,15 @@ function fakeApi(): CourseDeskApi {
+     courses: async () => [{ id: "crs-poetry", title: "Modern Poetry", capacity: 1, seatsLeft: 1 - confirmed() }],
+     enroll: async (studentId, courseId) => {
+       const full = confirmed() >= 1;
+-      const e: Enrollment = { id: `enr-${enrollments.length + 1}`, studentId, courseId, status: full ? "rejected" : "confirmed", ...(full ? { reason: "COURSE_FULL" as const } : {}) };
++      const waiting = enrollments.filter((x) => x.status === "waitlisted").length;
++      const e: Enrollment = { id: `enr-${enrollments.length + 1}`, studentId, courseId, status: full ? "waitlisted" : "confirmed", ...(full ? { waitlistPosition: waiting + 1 } : {}) };
+       enrollments.push(e);
+       notifications.push({
+         id: `ntf-${notifications.length + 1}`,
+         recipientId: studentId,
+-        kind: full ? "enrollment-rejected" : "enrollment-confirmed",
++        kind: full ? "enrollment-waitlisted" : "enrollment-confirmed",
+         enrollmentId: e.id,
+-        message: full ? "Modern Poetry is full; your enrollment was not accepted." : "You are enrolled in Modern Poetry.",
++        message: full ? "Modern Poetry is full; you are number 1 on the waitlist." : "You are enrolled in Modern Poetry.",
+       });
+       return e;
+     },
+@@ -31,7 +32,7 @@ function fakeApi(): CourseDeskApi {
+ }
+ 
+ describe("App", () => {
+-  it("shows the outcome and the student's notification after enrolling, then a rejection when full", async () => {
++  it("shows the outcome and the student's notification after enrolling, then a waitlist place when full", async () => {
+     render(<App api={fakeApi()} />);
+     await screen.findByRole("option", { name: "Modern Poetry (1 of 1 seats left)" });
+ 
+@@ -42,8 +43,8 @@ describe("App", () => {
+ 
+     fireEvent.change(screen.getByLabelText("Student ID"), { target: { value: "stu-bob" } });
+     fireEvent.click(screen.getByRole("button", { name: "Enroll" }));
+-    await screen.findByText("Enrollment enr-2: rejected (COURSE_FULL)");
+-    expect(await screen.findByText("Modern Poetry is full; your enrollment was not accepted.")).toBeTruthy();
++    await screen.findByText("Enrollment enr-2: waitlisted (#1)");
++    expect(await screen.findByText("Modern Poetry is full; you are number 1 on the waitlist.")).toBeTruthy();
+     expect(screen.getByRole("heading", { name: "Notifications for stu-bob" })).toBeTruthy();
+   });
+ });
+diff --git a/web/src/App.tsx b/web/src/App.tsx
+index 73b8f98..6c01a5a 100644
+--- a/web/src/App.tsx
++++ b/web/src/App.tsx
+@@ -35,6 +35,7 @@ export function App({ api }: { api: CourseDeskApi }) {
+         <p role="status">
+           Enrollment {last.id}: {last.status}
+           {last.reason ? ` (${last.reason})` : ""}
++          {last.waitlistPosition ? ` (#${last.waitlistPosition})` : ""}
+         </p>
+       )}
+       {error && <p role="alert">{error}</p>}
+diff --git a/web/src/api/client.ts b/web/src/api/client.ts
+index ff4747e..d6fd17f 100644
+--- a/web/src/api/client.ts
++++ b/web/src/api/client.ts
+@@ -10,14 +10,15 @@ export interface Enrollment {
+   id: string;
+   studentId: string;
+   courseId: string;
+-  status: "confirmed" | "rejected";
+-  reason?: "COURSE_FULL" | "ALREADY_ENROLLED";
++  status: "confirmed" | "waitlisted" | "rejected";
++  reason?: "ALREADY_ENROLLED" | "ALREADY_WAITLISTED";
++  waitlistPosition?: number;
+ }
+ 
+ export interface Notification {
+   id: string;
+   recipientId: string;
+-  kind: "enrollment-confirmed" | "enrollment-rejected";
++  kind: "enrollment-confirmed" | "enrollment-waitlisted" | "enrollment-rejected";
+   message: string;
+   enrollmentId: string;
+ }

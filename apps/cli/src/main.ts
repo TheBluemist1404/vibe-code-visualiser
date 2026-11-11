@@ -11,6 +11,7 @@ import { FileStore, ModelEngine, StoreError } from "../../../packages/core/src/i
 import { createQueryApi } from "../../../packages/query/src/index.ts";
 import {
   BindingError,
+  createEvidenceApi,
   disputeBinding,
   formatLocator,
   initProject,
@@ -53,18 +54,31 @@ const USAGE = `vcv <command> [options]
                                         Does each locator still resolve, and did the code or model change?
                                         Says nothing about whether the code does what the claim says.
 
+  evidence <path> overview [--states s,..] [--limit n] [--cursor c]
+  evidence <path> object <id> [--relations r,..] [--selector-kinds k,..] [--states s,..] [--limit n] [--cursor c]
+  evidence <path> binding <bindingId>
+  evidence <path> refresh [bindingId...] [--since <observationToken>]
+                                        Read-only source evidence for binding claims; print JSON. Every call
+                                        recomputes against the working tree; refresh rechecks all claims and
+                                        returns a token. --expected-revision <rev> guards any of them, and
+                                        --request '<json>' passes the request object as MCP would.
+
   Locators: <file>, <file>#symbol:Class.member, <file>#route:POST /path, <file>#test:Suite > case
   (paths are repository-relative POSIX; routes are controller-relative, without a global prefix)
 
   --as <principal>      Who is acting (default: local-user)
   --perm <list>         Comma list (default: propose,apply,approve,binding:record,binding:dispute);
-                        names without ":" mean model:<name>`;
+                        names without ":" mean model:<name>
+
+  VCV_HOST_PRINCIPAL / VCV_HOST_PERMISSIONS, when set, fix the identity and permissions (same
+  syntax) for a host that runs vcv on someone else's behalf, e.g. an agent wrapper. --as and
+  --perm are then refused.`;
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
   options: {
-    as: { type: "string", default: "local-user" },
-    perm: { type: "string", default: "propose,apply,approve,binding:record,binding:dispute" },
+    as: { type: "string" },
+    perm: { type: "string" },
     object: { type: "string" },
     relation: { type: "string" },
     locator: { type: "string" },
@@ -82,14 +96,31 @@ const { positionals, values } = parseArgs({
     depth: { type: "string" },
     direction: { type: "string" },
     json: { type: "boolean", default: false },
+    cursor: { type: "string" },
+    "expected-revision": { type: "string" },
+    relations: { type: "string" },
+    "selector-kinds": { type: "string" },
+    states: { type: "string" },
+    since: { type: "string" },
+    request: { type: "string" },
   },
 });
 const [cmd, a, b, ...rest] = positionals;
 const num = (v: string | undefined) => (v === undefined ? undefined : Number(v));
-const ctx: HostContext = {
-  principalId: values.as!,
-  permissions: values.perm!.split(",").map((p) => p.trim()).filter(Boolean).map((p) => (p.includes(":") ? p : `model:${p}`) as Permission),
-};
+/** A host-fixed identity (env) cannot be widened from the command line. */
+function hostContext(): HostContext {
+  const fixedAs = process.env.VCV_HOST_PRINCIPAL;
+  const fixedPerm = process.env.VCV_HOST_PERMISSIONS;
+  if ((fixedAs !== undefined && values.as !== undefined) || (fixedPerm !== undefined && values.perm !== undefined)) {
+    throw new InputError("identity and permissions are fixed by this host (VCV_HOST_PRINCIPAL / VCV_HOST_PERMISSIONS); --as and --perm are not accepted");
+  }
+  const perm = fixedPerm ?? values.perm ?? "propose,apply,approve,binding:record,binding:dispute";
+  return {
+    principalId: fixedAs ?? values.as ?? "local-user",
+    permissions: perm.split(",").map((p) => p.trim()).filter(Boolean).map((p) => (p.includes(":") ? p : `model:${p}`) as Permission),
+  };
+}
+let ctx: HostContext;
 
 function bindingHost(): BindingHost {
   const source = values.source;
@@ -227,6 +258,8 @@ function main(): number {
     }
     case "binding":
       return bindingCommand();
+    case "evidence":
+      return evidenceCommand();
     default:
       console.log(USAGE);
       return cmd ? 1 : 0;
@@ -317,7 +350,42 @@ function bindingCommand(): number {
   }
 }
 
+function evidenceCommand(): number {
+  const api = createEvidenceApi(need(a, "<path>"));
+  const list = (v: string | undefined) => (v === undefined ? undefined : v.split(",").map((x) => x.trim()).filter(Boolean));
+  let request: Record<string, unknown>;
+  if (values.request !== undefined) {
+    try {
+      request = JSON.parse(values.request);
+    } catch {
+      throw new InputError("--request must be a JSON object");
+    }
+  } else {
+    const opt = <T extends object>(o: T) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
+    const common = { expectedRevision: values["expected-revision"], limit: num(values.limit), cursor: values.cursor };
+    request =
+      b === "overview" ? opt({ ...common, states: list(values.states) })
+      : b === "object" ? opt({ ...common, id: rest[0], relations: list(values.relations), selectorKinds: list(values["selector-kinds"]), states: list(values.states) })
+      : b === "binding" ? opt({ expectedRevision: values["expected-revision"], bindingId: rest[0] })
+      : b === "refresh" ? opt({ ...common, bindingIds: rest.length ? rest : undefined, since: values.since })
+      : {};
+  }
+  const result =
+    b === "overview" ? api.getEvidenceOverview(request as never)
+    : b === "object" ? api.getObjectEvidence(request as never)
+    : b === "binding" ? api.getBindingEvidence(request as never)
+    : b === "refresh" ? api.refreshEvidence(request as never)
+    : undefined;
+  if (!result) {
+    console.log(USAGE);
+    return 1;
+  }
+  console.log(JSON.stringify(result, null, 2));
+  return result.ok ? 0 : 1;
+}
+
 try {
+  ctx = hostContext();
   process.exitCode = main();
 } catch (err) {
   // Store problems (e.g. CONFLICTED or DIVERGED after a Git merge) and unreadable inputs are

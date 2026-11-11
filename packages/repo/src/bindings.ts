@@ -25,6 +25,7 @@ import { pathProblem, resolveInside, selectorProblem } from "./locator.ts";
 import { fileFingerprintAt, resolveLocator } from "./resolver.ts";
 import type { Resolution } from "./resolver.ts";
 import { VCV_DIR, projectStatus, resolveProjectRoot } from "./project.ts";
+import type { ProjectStatus } from "./project.ts";
 
 export const BINDINGS_DIR = "bindings";
 /** Recorded in each claim; a claim fingerprinted with another algorithm is compared as "unknown". */
@@ -531,9 +532,11 @@ export type Verification = {
   approved: false;
 };
 
-/** Recompute a claim's state against the working tree and the model. Read-only. */
-export function verifyBinding(path: string, entry: ClaimEntry): Verification {
-  const status = projectStatus(path);
+/**
+ * Recompute a claim's state against the working tree and the model. Read-only. Pass `status`
+ * (from projectStatus) to verify several claims against one observation of the project.
+ */
+export function verifyBinding(path: string, entry: ClaimEntry, status: ProjectStatus = projectStatus(path)): Verification {
   const base = { bindingId: entry.bindingId, meaning: "unverified" as const, approved: false as const };
   const c = entry.claim;
   if (!c) {
@@ -567,7 +570,8 @@ export function verifyBinding(path: string, entry: ClaimEntry): Verification {
 
 /** verifyBinding for every claim in the checkout. Read-only. */
 export function verifyBindings(path: string): Verification[] {
-  return listBindings(path).map((e) => verifyBinding(path, e));
+  const status = projectStatus(path);
+  return listBindings(path).map((e) => verifyBinding(path, e, status));
 }
 
 function sourceFreshness(c: BindingClaim, r: Resolution): SourceFreshness {

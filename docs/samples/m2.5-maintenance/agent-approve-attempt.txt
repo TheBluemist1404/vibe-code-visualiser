@@ -1,0 +1,5 @@
+$ vcv approve .vcv ch-maint-01   # as agent:maintainer (model:propose)
+ch-maint-01: denied (proposed by agent:maintainer; record is pending)
+  ✗ NOT_AUTHORIZED at (root): agent:maintainer may not approve changes
+$ vcv approve .vcv ch-maint-01 --perm approve
+✗ INPUT: identity and permissions are fixed by this host (VCV_HOST_PRINCIPAL / VCV_HOST_PERMISSIONS); --as and --perm are not accepted

@@ -1,0 +1,41 @@
+{
+  "state": "ready",
+  "root": "<repo>",
+  "storeDir": "<repo>/.vcv",
+  "git": {
+    "root": "<repo>",
+    "commit": "a580bd7fbede50b228c62f2c1ae2dcc2a90eec54",
+    "branch": "main",
+    "detached": false,
+    "dirty": true,
+    "storeChanges": [
+      ".vcv/changes/ch-maint-01.json"
+    ],
+    "operation": null
+  },
+  "model": {
+    "projectId": "prj-course-desk",
+    "revision": "rev-1",
+    "status": "draft",
+    "history": [
+      "rev-1"
+    ],
+    "fileDigest": "f34808c3389ba93d7d2f2b73fd1aff2d0e5a3a1a4c8a994a2aec12d5ae86cbcc"
+  },
+  "inspection": {
+    "state": "ok",
+    "dir": "<repo>/.vcv",
+    "revision": "rev-1",
+    "history": [
+      "rev-1"
+    ],
+    "leftovers": []
+  },
+  "diagnostics": [
+    {
+      "code": "UNCOMMITTED_MODEL_CHANGES",
+      "severity": "info",
+      "message": "1 .vcv/ path(s) differ from Git HEAD a580bd7fbede50b228c62f2c1ae2dcc2a90eec54"
+    }
+  ]
+}

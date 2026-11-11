@@ -219,3 +219,33 @@ test("FileStore persists revisions and change records and reloads them", () => {
   assert.equal(reopened.record("ch-timeout-01")!.status, "applied");
   assert.deepEqual(readdirSync(join(dir, "revisions")).sort(), ["rev-1.yaml", `${reopened.current().project.modelRevision}.yaml`].sort());
 });
+
+test("rule and description edits: createRule, setRuleStatement and setDescription are typed, validated and pending for an agent", () => {
+  const e = engine();
+  const rule = e.current().rules.find((r) => r.ruleKind !== "permission")!;
+  const ops: ProposedModelChange["operations"] = [
+    { type: "setRuleStatement", ruleId: rule.id, statement: "A new statement." },
+    { type: "setDescription", objectId: rule.id, description: "Changed because the code changed." },
+    { type: "setDescription", objectId: "prj-lms", description: "Project text." },
+    { type: "createRule", rule: { id: "rule-new", kind: "rule", owner: rule.owner, name: "New rule", ruleKind: "policy", statement: "Something holds." } },
+  ];
+  const pending = e.propose(change(ops), mcpAgent);
+  assert.equal(pending.status, "pending", JSON.stringify(pending.diagnostics));
+  assert.equal(e.current().rules.find((r) => r.id === rule.id)!.statement, rule.statement, "pending changes nothing");
+  assert.equal(e.approve(pending.changeId!, mcpAgent).status, "denied");
+  const applied = e.approve(pending.changeId!, reviewer);
+  assert.equal(applied.status, "applied", JSON.stringify(applied.diagnostics));
+  const now = e.current();
+  const r = now.rules.find((x) => x.id === rule.id)!;
+  assert.equal(r.statement, "A new statement.");
+  assert.equal(r.description, "Changed because the code changed.");
+  assert.equal(now.project.description, "Project text.");
+  assert.ok(now.rules.some((x) => x.id === "rule-new"));
+
+  const next = now.project.modelRevision;
+  const bad = (op: ProposedModelChange["operations"][number]) => e.propose(change([op], { expectedRevision: next }), owner);
+  assert.equal(bad({ type: "setRuleStatement", ruleId: "rule-none", statement: "x" }).diagnostics[0]!.code, "TARGET_MISSING");
+  assert.equal(bad({ type: "setDescription", objectId: now.behaviors[0]!.states[0]!.id, description: "x" }).diagnostics[0]!.code, "NOT_DESCRIBABLE");
+  assert.equal(bad({ type: "createRule", rule: { ...(now.rules[0] as object), id: "rule-new" } as never }).diagnostics[0]!.code, "ID_IN_USE");
+  assert.equal(bad({ type: "setRuleStatement", ruleId: rule.id, statement: "" } as never).diagnostics[0]!.code, "SCHEMA");
+});

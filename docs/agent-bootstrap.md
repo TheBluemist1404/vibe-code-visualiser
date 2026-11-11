@@ -197,3 +197,9 @@ behaviors:
         toStateId: st-returned
         trigger: { kind: elapsed, duration: P3D, anchor: { dataId: dat-parcel, attributeId: att-deposited-at } }
 ```
+
+## Later: keeping the model in line with the code
+
+When the code changes after the model and claims exist, follow
+[agent-maintenance.md](agent-maintenance.md): read the evidence, inspect the change, and propose
+a typed model change for a person to approve.

@@ -1,10 +1,12 @@
-// MCP adapter over the read-only Semantic Query API (@vcv/query).
+// MCP adapter over the read-only Semantic Query API (@vcv/query) and, for a repository
+// checkout, the read-only source-evidence API (@vcv/repo evidence.ts).
 //
-// This file is transport only. Every tool forwards its raw arguments to one @vcv/query
-// operation and returns that operation's QueryResult unchanged. Request validation, limits,
-// revision checks, cursors, errors and diagnostics all come from @vcv/query, and the input
-// schemas advertised here are generated from the query package's own zod contracts, so the
-// adapter cannot drift from them. Nothing here knows or cares which client is calling.
+// This file is transport only. Every tool forwards its raw arguments to one query or evidence
+// operation and returns that operation's result unchanged. Request validation, limits,
+// revision checks, cursors, errors and diagnostics all come from those packages, and the input
+// schemas advertised here are generated from their own zod contracts, so the adapter cannot
+// drift from them (the CLI's `vcv evidence` calls the same functions). Nothing here knows or
+// cares which client is calling.
 //
 // It uses the SDK's low-level `Server` rather than `McpServer` on purpose: McpServer validates
 // arguments itself and answers bad input with its own error format, which would duplicate the
@@ -15,6 +17,8 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprot
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
 import { LIMITS, contextRequest, impactRequest, overviewRequest, searchRequest } from "../../../packages/query/src/index.ts";
 import type { QueryApi, QueryResult } from "../../../packages/query/src/index.ts";
+import { EVIDENCE_LIMITS, bindingEvidenceRequest, evidenceOverviewRequest, objectEvidenceRequest, refreshEvidenceRequest } from "../../../packages/repo/src/evidence.ts";
+import type { EvidenceApi, EvidenceResult } from "../../../packages/repo/src/evidence.ts";
 
 export const SERVER_NAME = "vcv";
 export const SERVER_VERSION = "0.1.0";
@@ -37,7 +41,13 @@ const IR_ONLY =
   "Reads the VCV model (declared intent, draft or approved: see context.snapshotStatus and diagnostics) only: the result has context.implementationChecked=false, and the repository's code must be inspected separately before claiming anything about real behavior.";
 const REVISION = "Pass expectedRevision (the modelRevision from an earlier result) to detect a model change between calls.";
 
-type ToolDef = { tool: Tool; call: (api: QueryApi, args: unknown) => QueryResult<unknown> };
+/** Shown in addition when the server runs on a repository checkout (--repo). */
+export const EVIDENCE_INSTRUCTIONS = `
+
+Source evidence (repository mode): binding claims say that some code implements, exposes, persists or tests a model object. They are made by an agent or a person; VCV only checks that the pointer resolves and whether the code or the model object changed since the claim. Each item keeps four things apart: claim (the claimant's interpretation, provenance and confidence), locator (does it resolve now), freshness (source/model/git, each with a cause) and approval (always approved: false). States: resolved, stale (code or model changed: look again), missing (renamed/moved/deleted), ambiguous, unchecked (outside the supported TypeScript subset), indeterminate (some evidence unknown, not a pass) and invalid (unreadable claim file). "resolved" is not "correct": inspect the code yourself. Every call recomputes against the working tree; vcv_refresh_evidence rechecks all claims and returns an observationToken to compare later. Nothing is inferred, written or proposed. Extra error codes: UNKNOWN_BINDING, PROJECT_NOT_READY, UNSAFE_PATH, STATE_CHANGED (retry).`;
+
+export type Apis = { query: QueryApi; evidence?: EvidenceApi };
+type ToolDef = { tool: Tool; call: (apis: Apis, args: unknown) => QueryResult<unknown> | EvidenceResult<unknown> };
 
 /** JSON Schema for a tool's input, generated from the query package's request contract. */
 function inputSchema(schema: z.ZodType): Tool["inputSchema"] {
@@ -57,7 +67,7 @@ const TOOLS: ToolDef[] = [
       inputSchema: inputSchema(overviewRequest),
       annotations: { ...annotations, title: "VCV project overview" },
     },
-    call: (api, args) => api.getProjectOverview(args as never),
+    call: ({ query }, args) => query.getProjectOverview(args as never),
   },
   {
     tool: {
@@ -68,7 +78,7 @@ const TOOLS: ToolDef[] = [
       inputSchema: inputSchema(searchRequest),
       annotations: { ...annotations, title: "Search VCV model objects" },
     },
-    call: (api, args) => api.searchObjects(args as never),
+    call: ({ query }, args) => query.searchObjects(args as never),
   },
   {
     tool: {
@@ -79,7 +89,7 @@ const TOOLS: ToolDef[] = [
       inputSchema: inputSchema(contextRequest),
       annotations: { ...annotations, title: "VCV object context" },
     },
-    call: (api, args) => api.getContext(args as never),
+    call: ({ query }, args) => query.getContext(args as never),
   },
   {
     tool: {
@@ -90,35 +100,90 @@ const TOOLS: ToolDef[] = [
       inputSchema: inputSchema(impactRequest),
       annotations: { ...annotations, title: "VCV structural impact" },
     },
-    call: (api, args) => api.analyzeImpact(args as never),
+    call: ({ query }, args) => query.analyzeImpact(args as never),
+  },
+];
+
+const EVIDENCE =
+  "Source evidence for binding claims (see the server instructions). Read-only and recomputed now against the working tree; meaning is never verified (context.meaning=\"unverified\") and no claim is approved. context.snapshotStatus is the model's own draft/approved status, unrelated to whether a pointer resolves.";
+const PAGED = `Paged: limit ≤ ${EVIDENCE_LIMITS.max} (default ${EVIDENCE_LIMITS.default}); follow nextCursor, which is bound to the request and to the current claim files.`;
+
+const EVIDENCE_TOOLS: ToolDef[] = [
+  {
+    tool: {
+      name: "vcv_get_evidence_overview",
+      title: "VCV evidence overview",
+      description: `Counts of binding claims by state (resolved, stale, missing, ambiguous, unchecked, indeterminate, invalid) plus disputed, the model objects claims point to that are no longer in the model, and one page of claims (ID, state, object, relation, locator) ordered by binding ID; filter with states. ${PAGED} ${REVISION} ${EVIDENCE}`,
+      inputSchema: inputSchema(evidenceOverviewRequest),
+      annotations: { ...annotations, title: "VCV evidence overview" },
+    },
+    call: ({ evidence }, args) => evidence!.getEvidenceOverview(args as never),
+  },
+  {
+    tool: {
+      name: "vcv_get_object_evidence",
+      title: "VCV evidence for a model object",
+      description: `Every binding claim about one model object (by ID), each with its claim (relation, locator, provenance, rationale, confidence, the revision and commit it was made at), locator resolution now, freshness (source, model, git with causes), dispute and approval. Filter with relations (implements, exposes, persists, tests), selectorKinds (file, symbol, route, test) and states. unreadableClaims counts claim files that could not be read and so may be about this object. ${PAGED} ${REVISION} ${EVIDENCE}`,
+      inputSchema: inputSchema(objectEvidenceRequest),
+      annotations: { ...annotations, title: "VCV evidence for a model object" },
+    },
+    call: ({ evidence }, args) => evidence!.getObjectEvidence(args as never),
+  },
+  {
+    tool: {
+      name: "vcv_get_binding_evidence",
+      title: "VCV evidence for one claim",
+      description: `One binding claim by binding ID: the claim as stored (with its file digest), the observed snapshot recorded with it, its current resolution and freshness, dispute and approval. UNKNOWN_BINDING if there is no such claim file. ${REVISION} ${EVIDENCE}`,
+      inputSchema: inputSchema(bindingEvidenceRequest),
+      annotations: { ...annotations, title: "VCV evidence for one claim" },
+    },
+    call: ({ evidence }, args) => evidence!.getBindingEvidence(args as never),
+  },
+  {
+    tool: {
+      name: "vcv_refresh_evidence",
+      title: "Recheck VCV evidence now",
+      description: `Explicitly recheck every claim (or the given bindingIds) against the current working tree and model, and return counts, one page of states and an observationToken. Pass an earlier token as since to learn whether any reported evidence changed (changedSince). Writes nothing (writes: "none"); there is no background watcher. ${PAGED} ${REVISION} ${EVIDENCE}`,
+      inputSchema: inputSchema(refreshEvidenceRequest),
+      // Not idempotent in result (the working tree may have changed), but never writes.
+      annotations: { ...annotations, idempotentHint: false, title: "Recheck VCV evidence now" },
+    },
+    call: ({ evidence }, args) => evidence!.refreshEvidence(args as never),
   },
 ];
 
 export const TOOL_NAMES = TOOLS.map((t) => t.tool.name);
+export const EVIDENCE_TOOL_NAMES = EVIDENCE_TOOLS.map((t) => t.tool.name);
 
 export type ServerOptions = {
   /** Where diagnostics go. Never stdout: on stdio transport stdout carries JSON-RPC only. */
   log?: (message: string) => void;
 };
 
-/** Build an MCP server whose tools answer from `api`. Connect it to any transport. */
-export function createVcvMcpServer(api: QueryApi, opts: ServerOptions = {}): Server {
+/**
+ * Build an MCP server whose tools answer from `api` (a QueryApi, or { query, evidence } for a
+ * repository checkout, which adds the evidence tools). Connect it to any transport.
+ */
+export function createVcvMcpServer(api: QueryApi | Apis, opts: ServerOptions = {}): Server {
+  const apis: Apis = "query" in api ? api : { query: api };
+  const tools = apis.evidence ? [...TOOLS, ...EVIDENCE_TOOLS] : TOOLS;
+  const names = tools.map((t) => t.tool.name);
   const log = opts.log ?? ((m: string) => process.stderr.write(`vcv-mcp: ${m}\n`));
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION, title: "Vibe Code Visualiser (read-only model queries)" },
-    { capabilities: { tools: {} }, instructions: SERVER_INSTRUCTIONS },
+    { capabilities: { tools: {} }, instructions: apis.evidence ? SERVER_INSTRUCTIONS + EVIDENCE_INSTRUCTIONS : SERVER_INSTRUCTIONS },
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: TOOLS.map((t) => t.tool) }));
+  server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: tools.map((t) => t.tool) }));
 
   server.setRequestHandler(CallToolRequestSchema, (req): CallToolResult => {
-    const def = TOOLS.find((t) => t.tool.name === req.params.name);
+    const def = tools.find((t) => t.tool.name === req.params.name);
     if (!def) {
       // Reported as a tool error, not a protocol error, so the agent can read it and recover.
-      return toolResult({ ok: false, error: { code: "INVALID_REQUEST", message: `unknown tool "${req.params.name}"; available: ${TOOL_NAMES.join(", ")}` } });
+      return toolResult({ ok: false, error: { code: "INVALID_REQUEST", message: `unknown tool "${req.params.name}"; available: ${names.join(", ")}` } });
     }
     try {
-      return toolResult(def.call(api, req.params.arguments ?? {}));
+      return toolResult(def.call(apis, req.params.arguments ?? {}));
     } catch (err) {
       // Queries do not throw for bad input; a throw means the store itself could not be read
       // (e.g. HEAD or a revision file is corrupt). Report it and keep serving.
@@ -131,7 +196,7 @@ export function createVcvMcpServer(api: QueryApi, opts: ServerOptions = {}): Ser
   return server;
 }
 
-type AdapterResult = QueryResult<unknown> | { ok: false; error: { code: "INVALID_REQUEST" | "STORE_ERROR"; message: string } };
+type AdapterResult = QueryResult<unknown> | EvidenceResult<unknown> | { ok: false; error: { code: "INVALID_REQUEST" | "STORE_ERROR"; message: string } };
 
 /** The QueryResult itself is the structured content; the text block carries the same JSON. */
 function toolResult(result: AdapterResult): CallToolResult {
