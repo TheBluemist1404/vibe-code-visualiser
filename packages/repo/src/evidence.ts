@@ -24,10 +24,10 @@ import type { BindingClaim, BindingRelation, Selector } from "@vcv/core";
 import { BindingError, FINGERPRINT_ALGORITHM, listBindings, readBinding, verifyBinding } from "./bindings.ts";
 import type { ClaimEntry, Verification } from "./bindings.ts";
 import { headCommit } from "./git.ts";
-import { formatLocator } from "./locator.ts";
+import { formatLocator, resolveInside } from "./locator.ts";
 import { projectStatus } from "./project.ts";
 import type { ProjectStatus } from "./project.ts";
-import { RESOLVER_ID } from "./resolver.ts";
+import { RESOLVER_ID, fileFingerprintAt } from "./resolver.ts";
 
 // ---- requests --------------------------------------------------------------------------
 
@@ -218,8 +218,8 @@ export type EvidenceApi = {
   refreshEvidence(req?: RefreshEvidenceRequest): EvidenceResult<EvidenceRefresh>;
 };
 
-/** Test seam: runs between reading the claims and the final consistency re-check. */
-export type EvidenceHooks = { afterRead?: () => void };
+/** Test seam: runs between verifying the claims and the final consistency re-check. */
+export type EvidenceHooks = { afterRead?: () => void; afterVerify?: (bindingId: string) => void };
 
 // ---- the API ---------------------------------------------------------------------------
 
@@ -286,7 +286,7 @@ type Observation = {
 
 /**
  * Read the claims and verify them against one project status, then check that the store, the
- * Git commit and the claim files are still what was read. A checkout landing mid-read is
+ * Git commit, the claim files and every bound source file are still what was read. A checkout landing mid-read is
  * reported as STATE_CHANGED instead of mixing two branches' evidence.
  */
 function observe(path: string, status: ProjectStatus, only: string | null, hooks: EvidenceHooks): Observation | { error: EvidenceError } {
@@ -303,11 +303,19 @@ function observe(path: string, status: ProjectStatus, only: string | null, hooks
     if (e instanceof BindingError && e.code === "UNSAFE_PATH") return { error: { code: "UNSAFE_PATH", message: e.message } };
     throw e;
   }
+  // The working tree is part of the observation too: fingerprint every bound source file before
+  // and after verification, so a dirty edit mid-read cannot mix two generations of the source.
+  const sources = [...new Set(entries.map((e) => e.claim?.locator.path).filter((p): p is string => !!p))].sort();
+  const sourcesBefore = sourceState(status.root, sources);
   const changed = { error: { code: "STATE_CHANGED" as const, message: "the model store, Git commit or claim files changed while evidence was read (a checkout or an edit?); nothing was mixed, retry the call" } };
   let verifications: Verification[];
   let model: ReturnType<typeof readHeadRevision>;
   try {
-    verifications = entries.map((e) => verifyBinding(path, e, status));
+    verifications = entries.map((e) => {
+      const v = verifyBinding(path, e, status);
+      hooks.afterVerify?.(e.bindingId);
+      return v;
+    });
     model = readHeadRevision(status.storeDir);
   } catch (e) {
     // The store was ready when the call started; failing to read it now means it moved.
@@ -318,12 +326,35 @@ function observe(path: string, status: ProjectStatus, only: string | null, hooks
 
   const again = only === null ? safeList(path) : safeOne(path, only);
   const sameClaims = again !== null && again.length === entries.length && again.every((e, i) => e.bindingId === entries[i]!.bindingId && e.digest === entries[i]!.digest);
-  if (storeFingerprint(status.storeDir) !== store || (status.git ? headCommit(status.root) : null) !== commit || !sameClaims) {
+  if (
+    storeFingerprint(status.storeDir) !== store ||
+    (status.git ? headCommit(status.root) : null) !== commit ||
+    !sameClaims ||
+    sourceState(status.root, sources) !== sourcesBefore
+  ) {
     return changed;
   }
   const objects = new Map<string, { kind: string; name: string }>();
   for (const e of buildIndex(model).byId.values()) objects.set(e.id, { kind: e.kind, name: e.name });
   return { status, verifications, entries, objects, ...(only !== null && entries.length === 0 ? { absent: only } : {}) };
+}
+
+/**
+ * One string describing every bound source file as it is now: its fingerprint, or why it cannot
+ * be read (missing, unsafe, case mismatch, a symlink out of the checkout). Uses the resolver's
+ * own path walk, so nothing outside the checkout is followed. Read-only.
+ */
+function sourceState(root: string, paths: readonly string[]): string {
+  return JSON.stringify(
+    paths.map((p) => {
+      try {
+        const where = resolveInside(root, p);
+        return where.ok ? (fileFingerprintAt(where.abs) ?? "unreadable") : where.reason;
+      } catch {
+        return "unreadable";
+      }
+    }),
+  );
 }
 
 function safeList(path: string): ClaimEntry[] | null {

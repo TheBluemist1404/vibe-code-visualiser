@@ -370,8 +370,10 @@ reference: [evidence.md](../evidence.md)):
   the same contracts, and a parity test compares the two. `@vcv/query` stays model-only: Git and
   source inspection never enter it.
 - **One observation per call.** The project status, the claims and their verification are read
-  once, then the store fingerprint, Git commit and claim digests are checked again; a change in
-  between is `STATE_CHANGED` (nothing mixed). `verifyBinding` takes the shared status for this.
+  once, then the store fingerprint, Git commit, claim digests and the fingerprint (or absence
+  reason) of every bound source file are checked again; a change in between, including an
+  uncommitted edit, is `STATE_CHANGED` (nothing mixed; review of PR #16). `verifyBinding` takes
+  the shared status for this.
 - **Four concerns, four sections** in each item: `claim` (interpretation, provenance,
   confidence), `locator` (existence now), `freshness` (source/model/git with causes) and
   `approval` (always `approved: false`). The model's own `snapshotStatus` is in the context,

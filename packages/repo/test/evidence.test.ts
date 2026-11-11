@@ -158,6 +158,47 @@ test("a branch checkout cannot fabricate freshness: mid-read changes are refused
   assert.equal(ev.freshness!.model.state, "unknown");
 });
 
+test("a dirty source edit during a read is refused, never mixed: multi-claim, deleted file, and unbound edits", () => {
+  const repo = baseline();
+  const tree = () => git(repo, "status", "--porcelain=v1");
+  // impl.cap-enroll and impl.rul-seat-limit bind the same method. Edit it between the two
+  // verifications: without the guard one would read resolved and the other stale.
+  let edited = false;
+  const between = createEvidenceApi(repo, {
+    afterVerify: (id) => {
+      if (id === "impl.cap-enroll" && !edited) {
+        edited = true;
+        edit(repo, SERVICE, "taken.length >= course.capacity", "taken.length > course.capacity");
+      }
+    },
+  });
+  const calls: (() => EvidenceResult<unknown>)[] = [() => between.getEvidenceOverview(), () => between.getObjectEvidence({ id: "cap-enroll" }), () => between.refreshEvidence()];
+  for (const call of calls) {
+    edited = false;
+    git(repo, "checkout", "-q", "--", SERVICE);
+    err(call(), "STATE_CHANGED");
+  }
+
+  // An uncommitted edit after all claims were verified, with HEAD, store and claims unchanged.
+  git(repo, "checkout", "-q", "--", SERVICE);
+  const after = createEvidenceApi(repo, { afterRead: () => edit(repo, SERVICE, "taken.length >= course.capacity", "taken.length > course.capacity") });
+  err(after.getBindingEvidence({ bindingId: "impl.rul-seat-limit" }), "STATE_CHANGED");
+  // The next call observes the edited tree coherently: both claims on the method are stale.
+  const now = ok(createEvidenceApi(repo).getEvidenceOverview());
+  assert.deepEqual(now.bindings.filter((b) => b.locator?.startsWith(SERVICE)).map((b) => b.state), ["stale", "stale"]);
+
+  // A bound file removed mid-read.
+  git(repo, "checkout", "-q", "--", SERVICE);
+  const gone = createEvidenceApi(repo, { afterRead: () => renameSync(join(repo, SPEC), join(repo, `${SPEC}.moved`)) });
+  err(gone.getEvidenceOverview(), "STATE_CHANGED");
+  renameSync(join(repo, `${SPEC}.moved`), join(repo, SPEC));
+
+  // An edit to a file no claim binds is not part of the observation; nothing is refused.
+  const unrelated = createEvidenceApi(repo, { afterRead: () => writeFileSync(join(repo, "README.md"), read(join(repo, "README.md")) + "\nmore\n") });
+  assert.equal(ok(unrelated.getEvidenceOverview()).counts.resolved, 4);
+  assert.match(tree(), /README\.md/);
+});
+
 test("deterministic output and pagination: cursors are bound to the request and the claim set", () => {
   const repo = baseline();
   const api = createEvidenceApi(repo);

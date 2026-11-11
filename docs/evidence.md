@@ -31,9 +31,12 @@ Every operation takes `expectedRevision`; the paged ones take `limit` (1–200, 
 The CLI prints the result as JSON and exits 0 for `ok: true`, 1 otherwise.
 
 Each call is one observation: the project status, every claim and its verification are read
-once, then the model store, the Git commit and the claim files are checked again. If any
-changed in between (a checkout during the read), the call fails with `STATE_CHANGED` instead of
-mixing two branches' evidence.
+once, then the model store, the Git commit, the claim files and every bound source file are
+checked again. If any changed in between (a checkout, or an uncommitted edit of a bound file
+during the read), the call fails with `STATE_CHANGED` instead of mixing two generations of
+evidence. Source files are fingerprinted through the resolver's own checkout-bounded path walk
+(a missing, moved or unsafe file counts as its reason), and a file no claim binds is not part of
+the observation.
 
 ## An evidence item
 
