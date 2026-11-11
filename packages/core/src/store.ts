@@ -29,6 +29,7 @@ import {
   rmSync,
   writeSync,
 } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { dumpModel, loadModel, persistedIdProblem } from "@vcv/ir";
 import type { Model } from "@vcv/ir";
@@ -280,6 +281,14 @@ export class FileStore implements ModelStore {
    * no writer active.
    */
   recover(): RecoveryReport {
+    return this.recoverFor(this.head);
+  }
+
+  /**
+   * Check and repair the directory against `head`. All refusals (conflict markers, divergence,
+   * missing or unverifiable revisions) are raised before anything is moved or rewritten.
+   */
+  private recoverFor(head: Head): RecoveryReport {
     const report: RecoveryReport = { removedTempFiles: [], orphanedRevisions: [], orphanedChangeRecords: [], repairedChangeRecords: [] };
     mkdirSync(join(this.dir, "orphaned"), { recursive: true });
     mkdirSync(join(this.dir, "changes"), { recursive: true });
@@ -298,21 +307,21 @@ export class FileStore implements ModelStore {
     //    child of HEAD) is moved aside. Anything else came from another line of history, for
     //    example a Git merge resolved to one side's HEAD; moving it would silently drop that
     //    branch's model, so refuse and let a person decide (ADR 0007).
-    const committed = new Set(this.head.history);
+    const committed = new Set(head.history);
     const conflicted = conflictedFiles(this.dir);
     if (conflicted.length) throw conflictError(conflicted);
-    const unlisted = unlistedRevisions(this.dir, this.head);
+    const unlisted = unlistedRevisions(this.dir, head);
     const foreign = unlisted.filter((u) => u.kind === "foreign");
     if (foreign.length) throw divergedError(foreign);
-    for (const u of unlisted) {
-      renameSync(join(this.dir, "revisions", u.file), join(this.dir, "orphaned", `revision.${u.file}`));
-      report.orphanedRevisions.push(u.id);
-    }
-    for (const rev of this.head.history) {
+    for (const rev of head.history) {
       if (!existsSync(join(this.dir, "revisions", `${rev}.yaml`))) {
         throw new StoreError("CORRUPT", `HEAD lists revision ${rev} but its file is missing`);
       }
-      readRevisionFile(this.dir, rev, this.head.history); // parses and verifies branch-safe digests
+      readRevisionFile(this.dir, rev, head.history); // parses and verifies branch-safe digests
+    }
+    for (const u of unlisted) {
+      renameSync(join(this.dir, "revisions", u.file), join(this.dir, "orphaned", `revision.${u.file}`));
+      report.orphanedRevisions.push(u.id);
     }
 
     // 3. An "applied" record must point at a committed revision.
@@ -326,7 +335,7 @@ export class FileStore implements ModelStore {
     }
 
     // 4. The last commit's record is derivable from HEAD; rewrite it if step 3 of commit was lost.
-    const last = this.head.lastCommit;
+    const last = head.lastCommit;
     if (last) {
       const onDisk = this.getChange(last.changeId);
       if (onDisk?.status !== "applied" || onDisk.resultingRevision !== last.resultingRevision) {
@@ -342,11 +351,15 @@ export class FileStore implements ModelStore {
   }
 
   /** Adopt HEAD as it is on disk now, re-running the open-time checks if it moved. */
+  //
+  // The new HEAD is adopted only after its checks pass. If they fail, the store keeps the last
+  // validated line, so every later read compares against it again and fails again, and commit()
+  // refuses with HEAD_CHANGED: a rejected checkout is never served or written over.
   private sync(): void {
     const disk = readHeadFile(this.dir);
     if (sameLine(disk, this.head)) return;
+    this.recoverFor(disk);
     this.head = disk;
-    this.recover();
   }
 
   private changePath(id: string): string {
@@ -371,7 +384,7 @@ export class FileStore implements ModelStore {
  */
 export class FileStoreReader {
   private readonly dir: string;
-  private cached?: { revision: string; model: Model };
+  private cached?: { key: string; model: Model };
 
   constructor(dir: string) {
     this.dir = dir;
@@ -382,8 +395,12 @@ export class FileStoreReader {
   /** The committed revision HEAD names right now. */
   current(): Model {
     const head = readHeadFile(this.dir);
-    if (this.cached?.revision !== head.revision) {
-      this.cached = { revision: head.revision, model: readRevisionFile(this.dir, head.revision, head.history) };
+    // Cache by what is on disk, not by ID alone: the initial revision and legacy IDs (rev-1) are
+    // not content-addressed, so two branches can hold different models under the same ID. The
+    // key covers HEAD's whole line and the revision file's bytes, so a checkout always misses.
+    const key = revisionCacheKey(this.dir, head);
+    if (this.cached?.key !== key) {
+      this.cached = { key, model: readRevisionFile(this.dir, head.revision, head.history) };
     }
     // Callers get their own copy, as with MemoryStore, so nothing can alter the cached revision.
     return structuredClone(this.cached.model);
@@ -562,6 +579,27 @@ export function inspectStore(dir: string): StoreInspection {
   const leftovers = unlisted.filter((u) => u.kind === "leftover");
   const base = { dir, revision: head.revision, history: [...head.history], leftovers };
   return foreign.length ? { state: "diverged", ...base, foreign } : { state: "ok", ...base };
+}
+
+/** SHA-256 of a revision file's bytes, or null if it cannot be read. Used to tell same-ID revisions apart. */
+export function revisionFileDigest(dir: string, rev: string): string | null {
+  if (persistedIdProblem(rev)) return null;
+  try {
+    return createHash("sha256").update(readFileSync(join(dir, "revisions", `${rev}.yaml`))).digest("hex");
+  } catch {
+    return null;
+  }
+}
+
+function revisionCacheKey(dir: string, head: Head): string {
+  if (persistedIdProblem(head.revision)) return "invalid"; // readRevisionFile reports it
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(join(dir, "revisions", `${head.revision}.yaml`));
+  } catch {
+    return `missing\0${head.history.join("\0")}`; // readRevisionFile reports it
+  }
+  return `${createHash("sha256").update(bytes).digest("hex")}\0${head.history.join("\0")}`;
 }
 
 const sameLine = (a: Head, b: Head) => a.revision === b.revision && a.history.length === b.history.length && a.history.every((r, i) => b.history[i] === r);

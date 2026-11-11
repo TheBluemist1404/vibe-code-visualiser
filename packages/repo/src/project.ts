@@ -8,7 +8,7 @@
 import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { Model } from "@vcv/ir";
-import { FileStore, FileStoreReader, StoreError, inspectStore } from "@vcv/core";
+import { FileStore, FileStoreReader, StoreError, inspectStore, revisionFileDigest } from "@vcv/core";
 import type { StoreInspection } from "@vcv/core";
 import { findWorkTreeRoot, observeGit } from "./git.ts";
 import type { GitObservation } from "./git.ts";
@@ -48,7 +48,14 @@ export type ProjectStatus = {
   /** Git state of the checkout, or null when the directory is not a Git working tree. */
   git: GitObservation | null;
   /** Current model revision and its history, when HEAD could be read. */
-  model: { projectId: string; revision: string; status: string; history: string[] } | null;
+  model: {
+    projectId: string;
+    revision: string;
+    status: string;
+    history: string[];
+    /** SHA-256 of the current revision file. Tells apart same-ID revisions on different branches (initial and legacy IDs are not content-addressed). */
+    fileDigest: string | null;
+  } | null;
   inspection: StoreInspection;
   diagnostics: ProjectDiagnostic[];
 };
@@ -110,7 +117,13 @@ export function projectStatus(path: string): ProjectStatus {
     case "ok": {
       state = inspection.state === "ok" ? "ready" : "diverged";
       const m = new FileStoreReader(storeDir).current();
-      model = { projectId: m.project.id, revision: inspection.revision, status: m.project.status, history: inspection.history };
+      model = {
+        projectId: m.project.id,
+        revision: inspection.revision,
+        status: m.project.status,
+        history: inspection.history,
+        fileDigest: revisionFileDigest(storeDir, inspection.revision),
+      };
       if (inspection.state === "diverged") {
         diagnostics.push({
           code: "DIVERGED",
@@ -182,11 +195,18 @@ export class RepositoryProject {
     return {
       status,
       previous,
-      modelLine: compareLines(previous.model?.history ?? null, status.model?.history ?? null),
+      modelLine: lineChange(previous, status),
       gitCommitChanged: (previous.git?.commit ?? null) !== (status.git?.commit ?? null),
       branchChanged: (previous.git?.branch ?? null) !== (status.git?.branch ?? null),
     };
   }
+}
+
+function lineChange(previous: ProjectStatus, now: ProjectStatus): ModelLineChange {
+  const change = compareLines(previous.model?.history ?? null, now.model?.history ?? null);
+  // Same IDs, different bytes: e.g. two branches that each initialized their own rev-1.
+  if (change === "unchanged" && previous.model && now.model && previous.model.fileDigest !== now.model.fileDigest) return "switched";
+  return change;
 }
 
 export function compareLines(before: readonly string[] | null, after: readonly string[] | null): ModelLineChange {

@@ -277,3 +277,37 @@ test("P1: commit refuses with HEAD_CHANGED if HEAD moves between validation and 
   assert.equal(readFileSync(join(root, "HEAD"), "utf8"), head);
   assert.ok(!existsSync(join(root, "changes", "ch-race.json")));
 });
+
+// Review on PR #8, round 3.
+test("P1: once an open writer has rejected a diverged checkout, every later read and write keeps rejecting it", () => {
+  const { root, a, b, revA, revB } = divergedPair();
+  const store = new FileStore(a);
+  const e = new ModelEngine(store);
+  assert.equal(e.current().project.modelRevision, revA);
+  // The checkout changes to a diverged state: HEAD at the common ancestor, both branch children present.
+  cpSync(join(root, "base", "HEAD"), join(a, "HEAD"));
+  cpSync(join(b, "revisions", `${revB}.yaml`), join(a, "revisions", `${revB}.yaml`));
+  cpSync(join(b, "changes"), join(a, "changes"), { recursive: true });
+  const head = readFileSync(join(a, "HEAD"), "utf8");
+  const revisions = readdirSync(join(a, "revisions")).sort();
+
+  assert.throws(() => e.current(), storeErr("DIVERGED"), "first read");
+  assert.throws(() => e.current(), storeErr("DIVERGED"), "second read must not serve the rejected HEAD");
+  assert.throws(() => store.revisions(), storeErr("DIVERGED"));
+  assert.throws(() => e.propose(renamePending("ch-after-reject", "rev-1"), owner), storeErr("DIVERGED"));
+  assert.equal(readFileSync(join(a, "HEAD"), "utf8"), head, "HEAD untouched");
+  assert.deepEqual(readdirSync(join(a, "revisions")).sort(), revisions, "no foreign revision moved");
+  assert.ok(!existsSync(join(a, "orphaned")) || readdirSync(join(a, "orphaned")).length === 0);
+  assert.ok(!existsSync(join(a, "changes", "ch-after-reject.json")));
+});
+
+test("P2: FileStoreReader notices a different model under the same revision ID", () => {
+  const dir = join(tmp(), "store");
+  FileStore.init(dir, baseModel());
+  const reader = new FileStoreReader(dir);
+  assert.equal(reader.current().project.name, "LMS");
+  const other = baseModel();
+  other.project.name = "Another LMS";
+  writeFileSync(join(dir, "revisions", "rev-1.yaml"), dumpModel(other)); // what a checkout of another branch's rev-1 does
+  assert.equal(reader.current().project.name, "Another LMS");
+});

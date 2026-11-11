@@ -5,7 +5,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
-import { loadModel, parseYaml } from "@vcv/ir";
+import { dumpModel, loadModel, parseYaml } from "@vcv/ir";
 import type { Model } from "@vcv/ir";
 import { FileStore, ModelEngine, StoreError } from "@vcv/core";
 import type { HostContext, ProposedModelChange } from "@vcv/core";
@@ -264,6 +264,56 @@ test("a writer left open across `git checkout` cannot overwrite the checked-out 
   const ok = e.propose(rename("ch-on-b", revB, "Waiting (B2)"), owner);
   assert.equal(ok.status, "applied");
   assert.deepEqual(projectStatus(repo).model!.history.slice(0, 2), ["rev-1", revB]);
+});
+
+test("a long-lived reader follows a branch whose initial rev-1 is a different model (PR #8 review, round 3)", () => {
+  const repo = repoWithProject();
+  git(repo, "checkout", "-q", "-b", "other-init");
+  // Another branch initialized its own project: same ID rev-1, different content.
+  const other = baseModel();
+  other.project.name = "LMS (other branch)";
+  writeFileSync(join(repo, VCV_DIR, "revisions", "rev-1.yaml"), dumpModel(other));
+  commitAll(repo, "re-init model");
+  git(repo, "checkout", "-q", "main");
+
+  const p = RepositoryProject.open(repo);
+  const q = createQueryApi(p.reader);
+  const name = () => {
+    const r = q.getProjectOverview();
+    assert.ok(r.ok);
+    return r.data.project.name;
+  };
+  assert.equal(name(), "LMS");
+  git(repo, "checkout", "-q", "other-init");
+  assert.equal(name(), "LMS (other branch)", "the reader does not serve the cached model of the previous branch");
+  const r = p.refresh();
+  assert.equal(r.modelLine, "switched", "same revision IDs, different content");
+  git(repo, "checkout", "-q", "main");
+  assert.equal(name(), "LMS");
+});
+
+test("a writer that rejected a diverged checkout keeps rejecting it on later calls (real Git, round 3)", () => {
+  const repo = repoWithProject();
+  git(repo, "checkout", "-q", "-b", "feature-a");
+  const revA = engineFor(repo).propose(rename("ch-a", "rev-1", "Waiting (A)"), owner).record!.resultingRevision!;
+  commitAll(repo, "model: A");
+  git(repo, "checkout", "-q", "main");
+  git(repo, "checkout", "-q", "-b", "feature-b");
+  engineFor(repo).propose(rename("ch-b", "rev-1", "Waiting (B)"), owner);
+  commitAll(repo, "model: B");
+  // A merge commit whose .vcv/HEAD was resolved to the common ancestor.
+  git(repo, "checkout", "-q", "-b", "bad-merge");
+  assert.equal(tryGit(repo, "merge", "-q", "feature-a"), false);
+  writeFileSync(join(repo, VCV_DIR, "HEAD"), git(repo, "show", `main:${VCV_DIR}/HEAD`) + "\n");
+  commitAll(repo, "merge, model reset to ancestor");
+  git(repo, "checkout", "-q", "feature-a");
+
+  const e = new ModelEngine(new FileStore(join(repo, VCV_DIR))); // opened on a healthy branch
+  assert.equal(e.current().project.modelRevision, revA);
+  git(repo, "checkout", "-q", "bad-merge");
+  for (let i = 0; i < 2; i++) assert.throws(() => e.current(), (err: unknown) => err instanceof StoreError && err.code === "DIVERGED");
+  assert.throws(() => e.propose(rename("ch-x", "rev-1", "x"), owner), (err: unknown) => err instanceof StoreError && err.code === "DIVERGED");
+  assert.equal(git(repo, "status", "--porcelain"), "", "HEAD, revisions and records untouched");
 });
 
 test("model history survives restart and an ordinary checkout round trip", () => {
