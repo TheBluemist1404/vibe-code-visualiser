@@ -87,22 +87,31 @@ Writers use `FileStore` on `.vcv/`, still single writer (ADR 0003); UI and MCP m
 concurrently, and MCP stays read-only. A single writer is not enough in a checkout, though:
 `git checkout`/`pull` replace `.vcv/HEAD` under a writer that stays open. So:
 
-- **Read policy.** Every `FileStore` read (`current`, `revision`, `revisions`) first compares HEAD
-  on disk with the line it holds. If it moved, the writer adopts the new HEAD and re-runs the
-  open-time checks (conflict, divergence, digest verification). The engine therefore validates
-  a change against the checked-out line, and a change based on the old line fails with
-  `STALE_REVISION`. A moved HEAD is adopted only after those checks pass; if they fail, the
-  writer keeps the last validated line, so every later read fails the same way and every
-  write is refused (`HEAD_CHANGED`) until the checkout is healthy again.
-- **Reader cache.** `FileStoreReader` caches the parsed current revision keyed by HEAD's whole
-  line plus the SHA-256 of the revision file's bytes, not by revision ID: the initial revision and
-  legacy IDs are not content-addressed, so two branches can hold different models named
-  `rev-1`. `projectStatus` exposes the same file digest, and `refresh()` reports such a swap as
-  `switched`.
-- **Write guard.** `commit()` re-reads HEAD immediately before writing and refuses with
-  `HEAD_CHANGED`, writing nothing, if it differs from the line the change was validated
-  against. This closes the window between validation and write. It is a check-then-rename, not
-  a lock: a checkout landing inside the few milliseconds of the write itself is not prevented.
+- **What "moved" means.** A store fingerprint covers HEAD's bytes, the current revision file's
+  bytes, and the name, size and mtime of every file in `revisions/` and `changes/`. A merge
+  resolved to the open writer's *own* HEAD changes no HEAD byte but adds foreign revisions and
+  records, so comparing HEAD's line alone is not enough.
+- **Read policy (writer).** Every `FileStore` read (`current`, `revision`, `revisions`) first
+  compares the fingerprint with the one last validated. If it changed, the writer re-runs the
+  open-time checks (conflict, divergence, digest verification) against HEAD on disk, and adopts
+  it only if they pass. The engine therefore validates a change against the checked-out line
+  (a change based on the old line fails with `STALE_REVISION`). If the checks fail, the writer
+  keeps the last validated state, so every later read fails the same way and every write is
+  refused until a person resolves the checkout.
+- **Read policy (reader).** `FileStoreReader` runs the same checks, read-only (`inspectStore`),
+  whenever the fingerprint changes, so a long-lived reader (MCP, `RepositoryProject`) refuses a
+  conflicted, diverged or corrupt checkout exactly as a fresh open would. It still never writes
+  or recovers.
+- **Reader cache.** The parsed current revision is cached by HEAD's whole line plus the SHA-256
+  of the revision file's bytes, not by revision ID: the initial revision and legacy IDs are not
+  content-addressed, so two branches can hold different models named `rev-1`. `projectStatus`
+  exposes the same file digest, and `refresh()` reports such a swap as `switched`.
+- **Write guard.** `commit()` re-checks immediately before its first write: `HEAD_CHANGED` if
+  HEAD's line moved, `STORE_CHANGED` if any other fingerprinted file changed (including a
+  same-ID revision swap) since validation. Nothing is written in either case. The writer's own
+  writes update the validated fingerprint. This is check-then-rename, not a lock: a checkout
+  landing inside the few milliseconds of the write itself is not prevented, and a change to a
+  change record that keeps its size and mtime is not detected.
 
 ## 3. Branch-safe revision identity (implemented)
 
