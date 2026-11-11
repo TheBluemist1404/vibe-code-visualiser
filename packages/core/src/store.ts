@@ -36,7 +36,7 @@ import { dumpModel, loadModel, persistedIdProblem } from "@vcv/ir";
 import type { Model } from "@vcv/ir";
 import type { AuditEvent, ChangeRecord } from "./engine.ts";
 import { nextRevision } from "./engine.ts";
-import { isChildRevision, parseRevisionId } from "./revisions.ts";
+import { canonicalJson, isChildRevision, parseRevisionId } from "./revisions.ts";
 
 export type StoreErrorCode =
   | "INVALID_ID"
@@ -70,6 +70,9 @@ export class StoreError extends Error {
  */
 export type StoreSnapshot = { model: Model; history: string[]; token: string };
 
+/** Preconditions for a non-committing record write (ADR 0007 §2). */
+export type ChangeGuard = { token: string; previous: ChangeRecord | null };
+
 export interface ModelStore {
   current(): Model;
   snapshot(): StoreSnapshot;
@@ -82,8 +85,12 @@ export interface ModelStore {
    */
   commit(model: Model, record: ChangeRecord, token?: string): void;
   getChange(changeId: string): ChangeRecord | undefined;
-  /** Persist a non-committing record state (pending, rejected). */
-  putChange(record: ChangeRecord): void;
+  /**
+   * Persist a non-committing record state (pending, rejected). With a guard, refuse
+   * (STORE_CHANGED, nothing written) unless the store is still in the snapshot's state and the
+   * record on disk is exactly `previous` (null: no record with that ID exists).
+   */
+  putChange(record: ChangeRecord, guard?: ChangeGuard): void;
   appendAudit(event: AuditEvent): void;
   audit(): AuditEvent[];
 }
@@ -152,8 +159,14 @@ export class MemoryStore implements ModelStore {
     const r = this.changes.get(id);
     return r && structuredClone(r);
   }
-  putChange(record: ChangeRecord): void {
+  putChange(record: ChangeRecord, guard?: ChangeGuard): void {
     assertPersistedId("change id", record.changeId);
+    if (guard) {
+      const onDisk = this.changes.get(record.changeId);
+      if (guard.token !== this.order.join("\0") || !sameRecord(onDisk ?? null, guard.previous)) {
+        throw new StoreError("STORE_CHANGED", `change ${record.changeId} or the store changed since validation; nothing was written`);
+      }
+    }
     this.changes.set(record.changeId, structuredClone(record));
   }
   appendAudit(event: AuditEvent): void {
@@ -284,10 +297,29 @@ export class FileStore implements ModelStore {
     }
   }
 
-  putChange(record: ChangeRecord): void {
+  putChange(record: ChangeRecord, guard?: ChangeGuard): void {
     if (record.status === "applied") throw new StoreError("BAD_COMMIT", "applied records are written only by commit()");
+    const path = this.changePath(record.changeId);
     const before = storeFingerprint(this.dir);
-    durableWrite(this.changePath(record.changeId), JSON.stringify(record, null, 2) + "\n");
+    if (guard) {
+      // A Git checkout after validation could put another branch's record under this ID; never
+      // overwrite it, and never write into a store state other than the one validated against.
+      let onDisk: ChangeRecord | null = null;
+      if (existsSync(path)) {
+        try {
+          onDisk = JSON.parse(readFileSync(path, "utf8")) as ChangeRecord;
+        } catch {
+          onDisk = { changeId: "\0unreadable" } as ChangeRecord;
+        }
+      }
+      if (before !== this.validated || guard.token !== before || !sameRecord(onDisk, guard.previous)) {
+        throw new StoreError(
+          "STORE_CHANGED",
+          `change ${record.changeId} or other store files changed on disk since validation (for example a Git checkout); nothing was written. Re-read and retry.`,
+        );
+      }
+    }
+    durableWrite(path, JSON.stringify(record, null, 2) + "\n");
     // Only bless our own write if nothing else had changed; otherwise the next read re-checks.
     if (before === this.validated) this.validated = storeFingerprint(this.dir);
   }
@@ -732,6 +764,8 @@ function revisionCacheKey(dir: string, head: Head): string {
   }
   return `${createHash("sha256").update(bytes).digest("hex")}\0${head.history.join("\0")}`;
 }
+
+const sameRecord = (a: ChangeRecord | null, b: ChangeRecord | null) => (a === null || b === null ? a === b : canonicalJson(a) === canonicalJson(b));
 
 const sameLine = (a: Head, b: Head) => a.revision === b.revision && a.history.length === b.history.length && a.history.every((r, i) => b.history[i] === r);
 

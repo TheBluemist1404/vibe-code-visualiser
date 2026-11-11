@@ -386,6 +386,40 @@ test("a git checkout landing between the engine's dry-run and its commit is refu
   assert.equal(git(repo, "status", "--porcelain"), "", "feature-b's HEAD, revisions and records untouched");
 });
 
+test("a proposal record is never written into another branch after a checkout (PR #8 review, round 6)", () => {
+  const repo = repoWithProject();
+  git(repo, "checkout", "-q", "-b", "feature-b");
+  const agent: HostContext = { principalId: "agent:b", permissions: ["model:propose"] };
+  assert.equal(engineFor(repo).propose(rename("ch-x", "rev-1", "Waiting (B, pending)"), agent).status, "pending");
+  commitAll(repo, "pending proposal ch-x on B");
+  git(repo, "checkout", "-q", "main");
+
+  const inner = new FileStore(join(repo, VCV_DIR));
+  let fired = false;
+  const racing: ModelStore = new Proxy(inner, {
+    get(target, prop, receiver) {
+      const v = Reflect.get(target, prop, receiver);
+      if (prop !== "snapshot" || typeof v !== "function") return typeof v === "function" ? v.bind(target) : v;
+      return () => {
+        const snap = v.call(target);
+        if (!fired) {
+          fired = true;
+          git(repo, "checkout", "-q", "feature-b");
+        }
+        return snap;
+      };
+    },
+  });
+  // An invalid change with the colliding ID, validated on main, would be saved as "rejected".
+  const r = new ModelEngine(racing).propose(
+    { changeId: "ch-x", projectId: "prj-lms", expectedRevision: "rev-1", operations: [{ type: "removeObject", objectId: "st-rejected" }] },
+    owner,
+  );
+  assert.equal(r.status, "rejected");
+  assert.equal(r.diagnostics[0]!.code, "STORE_CHANGED");
+  assert.equal(git(repo, "status", "--porcelain"), "", "B's HEAD and its pending ch-x record are byte-identical");
+});
+
 test("model history survives restart and an ordinary checkout round trip", () => {
   const repo = repoWithProject();
   const e = engineFor(repo);

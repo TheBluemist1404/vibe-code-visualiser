@@ -17,7 +17,7 @@ import {
   parseRevisionId,
   revisionDigest,
 } from "../src/index.ts";
-import { assertRev, baseModel, owner, renamePending, timeoutChange } from "./helpers.ts";
+import { assertRev, baseModel, mcpAgent, owner, renamePending, reviewer, timeoutChange } from "./helpers.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "vcv-rev-"));
 const storeErr = (code: string) => (err: unknown) => err instanceof StoreError && err.code === code;
@@ -355,7 +355,7 @@ test("commit refuses with STORE_CHANGED if a same-ID revision file is swapped af
 });
 
 // Review on PR #8, round 5: the store moves between the engine's dry-run and the commit.
-import type { ChangeRecord, ModelStore, StoreSnapshot } from "../src/index.ts";
+import type { ChangeGuard, ChangeRecord, ModelStore, StoreSnapshot } from "../src/index.ts";
 
 /** A FileStore whose snapshot() runs a hook right after it is taken (deterministic race). */
 class RacingStore implements ModelStore {
@@ -377,7 +377,7 @@ class RacingStore implements ModelStore {
   revisions() { return this.inner.revisions(); }
   commit(m: Parameters<FileStore["commit"]>[0], r: ChangeRecord, t?: string) { this.inner.commit(m, r, t); }
   getChange(id: string) { return this.inner.getChange(id); }
-  putChange(r: ChangeRecord) { this.inner.putChange(r); }
+  putChange(r: ChangeRecord, g?: ChangeGuard) { this.inner.putChange(r, g); }
   appendAudit(e: Parameters<FileStore["appendAudit"]>[0]) { this.inner.appendAudit(e); }
   audit() { return this.inner.audit(); }
 }
@@ -445,4 +445,51 @@ test("round 5: a same-ID legacy base swapped after the snapshot is refused; a wr
   wrong.project.modelRevision = branchSafeRevisionId(model, "rev-0", 2); // digest of another parent
   assert.throws(() => store.commit(wrong, { ...record, resultingRevision: wrong.project.modelRevision }, fresh.token), storeErr("BAD_COMMIT"));
   assert.deepEqual(store.revisions(), ["rev-1"]);
+});
+
+// Review on PR #8, round 6: non-committing record writes across a branch switch.
+for (const kind of ["invalid (rejected)", "valid but needs approval (pending)"] as const) {
+  test(`round 6: a ${kind} proposal never overwrites another branch's record with the same change ID`, () => {
+    const root = tmp();
+    const base = join(root, "base");
+    FileStore.init(base, baseModel());
+    const b = join(root, "b");
+    cpSync(base, b, { recursive: true });
+    // Branch B holds a legitimate pending proposal "ch-x".
+    assert.equal(new ModelEngine(new FileStore(b)).propose(renamePending("ch-x"), mcpAgent).status, "pending");
+    const bRecord = readFileSync(join(b, "changes", "ch-x.json"), "utf8");
+    const bHead = readFileSync(join(b, "HEAD"), "utf8");
+
+    const a = join(root, "a"); // branch A: no ch-x
+    cpSync(base, a, { recursive: true });
+    const e = new ModelEngine(new RacingStore(new FileStore(a), () => checkoutLine(a, b)));
+    const change =
+      kind === "invalid (rejected)"
+        ? { ...renamePending("ch-x"), operations: [{ type: "removeObject" as const, objectId: "st-rejected" }] }
+        : { ...renamePending("ch-x"), operations: [{ type: "renameObject" as const, objectId: "mod-notifications", name: "Notify" }] };
+    const r = e.propose(change, kind === "invalid (rejected)" ? owner : mcpAgent);
+
+    assert.equal(r.status, "rejected");
+    assert.equal(r.diagnostics[0]!.code, "STORE_CHANGED");
+    assert.equal(r.record, undefined, "nothing persisted");
+    assert.equal(readFileSync(join(a, "changes", "ch-x.json"), "utf8"), bRecord, "B's pending proposal is byte-identical");
+    assert.equal(readFileSync(join(a, "HEAD"), "utf8"), bHead);
+    assert.equal(e.audit().at(-1)!.codes[0], "STORE_CHANGED", "the attempt is audited locally");
+  });
+}
+
+test("round 6: a rejected approval does not overwrite a record that changed on disk", () => {
+  const dir = join(tmp(), "store");
+  FileStore.init(dir, baseModel());
+  const e0 = new ModelEngine(new FileStore(dir));
+  assert.equal(e0.propose(renamePending("ch-y"), mcpAgent).status, "pending");
+  // Make it fail revalidation: the model moves on first.
+  assert.equal(e0.propose({ ...renamePending("ch-z"), operations: [{ type: "renameObject", objectId: "mod-notifications", name: "Notify" }] }, owner).status, "applied");
+  // Right after the approver's snapshot, the record is replaced (another checkout's ch-y).
+  const replaced = readFileSync(join(dir, "changes", "ch-y.json"), "utf8").replace('"agent:mcp-session-1"', '"agent:other-branch"');
+  const e = new ModelEngine(new RacingStore(new FileStore(dir), () => writeFileSync(join(dir, "changes", "ch-y.json"), replaced)));
+  const r = e.approve("ch-y", reviewer);
+  assert.equal(r.status, "rejected");
+  assert.equal(r.diagnostics[0]!.code, "STORE_CHANGED");
+  assert.equal(readFileSync(join(dir, "changes", "ch-y.json"), "utf8"), replaced);
 });

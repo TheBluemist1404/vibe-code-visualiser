@@ -5,7 +5,7 @@ import type { Diagnostic, Model } from "@vcv/ir";
 import { applyOperations, proposedChangeSchema } from "./operations.ts";
 import type { ProposedModelChange } from "./operations.ts";
 import { StoreError } from "./store.ts";
-import type { ModelStore, StoreSnapshot } from "./store.ts";
+import type { ChangeGuard, ModelStore, StoreSnapshot } from "./store.ts";
 import { branchSafeRevisionId } from "./revisions.ts";
 
 /** Supplied by the trusted host (session, OAuth token, local user), never by the caller's payload. */
@@ -135,13 +135,16 @@ export class ModelEngine {
     // retargeted onto a different line.
     const snap = this.store.snapshot();
     const check = this.dryRun(change, snap.model);
-    if (check.errors.length) return this.log("propose", ctx, this.save({ ...record, status: "rejected", validationResults: check.errors }));
+    // Every record write is guarded by the same snapshot: a new record may only be created where
+    // none exists, in the store state it was validated against.
+    const fresh = { token: snap.token, previous: null };
+    if (check.errors.length) return this.log("propose", ctx, this.save({ ...record, status: "rejected", validationResults: check.errors }, fresh));
     record.validationResults = check.warnings;
 
     const needsApproval =
       !ctx.permissions.includes("model:apply") ||
       (change.operations.some((o) => o.type === "approveDraft") && !ctx.permissions.includes("model:approve"));
-    if (needsApproval) return this.log("propose", ctx, this.save(record));
+    if (needsApproval) return this.log("propose", ctx, this.save(record, fresh));
     return this.log("propose", ctx, this.commit(record, check.model!, snap));
   }
 
@@ -170,7 +173,7 @@ export class ModelEngine {
     const snap = this.store.snapshot();
     const check = this.dryRun(record.change, snap.model);
     if (check.errors.length) {
-      return this.log("approve", ctx, this.save({ ...record, approverId: ctx.principalId, status: "rejected", validationResults: check.errors }));
+      return this.log("approve", ctx, this.save({ ...record, approverId: ctx.principalId, status: "rejected", validationResults: check.errors }, { token: snap.token, previous: record }));
     }
     return this.log("approve", ctx, this.commit({ ...record, approverId: ctx.principalId, validationResults: check.warnings }, check.model!, snap));
   }
@@ -214,8 +217,16 @@ export class ModelEngine {
     return { status: "applied", changeId: done.changeId, diagnostics: done.validationResults, record: done };
   }
 
-  private save(record: ChangeRecord): Outcome {
-    this.store.putChange(record);
+  private save(record: ChangeRecord, guard: ChangeGuard): Outcome {
+    try {
+      this.store.putChange(record, guard);
+    } catch (e) {
+      // The store moved since validation: persist nothing (the attempt is still audited).
+      if (e instanceof StoreError && e.code === "STORE_CHANGED") {
+        return { status: "rejected", changeId: record.changeId, diagnostics: [diag(e.code, "", e.message)] };
+      }
+      throw e;
+    }
     return { status: record.status, changeId: record.changeId, diagnostics: record.validationResults, record };
   }
 
