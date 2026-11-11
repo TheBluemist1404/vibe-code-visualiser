@@ -19,12 +19,22 @@ tools. So the reviewer's identity must not come from anything that agent can set
 | `--as` / `--perm` flags                       | yes                         | no, refused                   |
 | `VCV_HOST_PRINCIPAL` / `VCV_HOST_PERMISSIONS` | yes                         | no, refused                   |
 | a principal ID written in a change record    | yes (edit the file)         | no, only reported             |
-| `.vcv/reviewers.json` in the working tree     | yes                         | only with `--trust-working-tree`, flagged as unprotected |
-| `.vcv/reviewers.json` at a protected Git ref  | only by a reviewed push     | yes (default `HEAD`; use the base branch in CI) |
+| `.vcv/reviewers.json` in the working tree, a file inside the checkout, or `HEAD` / the checked-out branch / a commit only it contains | yes (commit it on the feature branch) | refused (`UNPROTECTED_TRUST`); only `--trust-working-tree`, an explicit unsafe development mode |
+| `.vcv/reviewers.json` at a base ref outside the candidate branch (`--trust-ref origin/main`) | only by a push the hosting service lets through | yes, required explicitly (no default) |
+| a trust file outside the checkout (`--trust <file>`) | only if the agent can write there | yes, required explicitly |
 | an Ed25519 private key kept outside the checkout and any agent sandbox | no, unless it is leaked | yes, this is the identity |
 
 The boundary is therefore **a private key the agent cannot read**, matched against a **trust
-list read from a ref the agent cannot push to**. Everything else is reported, never trusted.
+list read from an anchor outside the candidate branch**. Everything else is reported, never
+trusted.
+
+A Git ref only pins a commit. Git cannot prove that a branch is protected: that is the hosting
+service's setting, and the person who picks `--trust-ref` vouches for it. VCV refuses the
+anchors it can recognise as the candidate (`HEAD`, `@`, the checked-out branch under any
+spelling, a commit no other ref contains, any file whose resolved path, parent symlinks
+followed, is inside the checkout) and reports every other anchor as "pinned at <commit>;
+branch protection is asserted, not verified". Prefer a remote-tracking ref of the protected
+branch (`origin/main`), fetched just before.
 
 What VCV cannot prove, and says so in every integrity report (`limits`):
 
@@ -64,9 +74,13 @@ reviewer's shell.
 vcv proposal preview <checkout> chg-cancel-enrollment     # shows proposalDigest
 vcv review approve <checkout> chg-cancel-enrollment \
     --digest <proposalDigest> --key ~/.config/vcv/hoang.pem \
-    [--trust-ref <ref> (default HEAD) | --trust <file> | --trust-working-tree] [--json]
+    (--trust-ref origin/main | --trust <file outside the checkout> | --trust-working-tree)
 ```
 
+- A trust anchor is required; there is no default. An anchor in the candidate branch is refused
+  before anything is applied (`UNPROTECTED_TRUST`). `--trust-working-tree` is an explicit
+  **unsafe development mode**: the change is applied and signed, the command says it is not a
+  trusted approval, and a strict integrity check rejects it.
 - It refuses to run under `VCV_HOST_PRINCIPAL` / `VCV_HOST_PERMISSIONS` or with `--as` /
   `--perm` (exit 2): those mark an agent host.
 - `--digest` binds the decision to the content the reviewer saw. If the proposal differs (the
@@ -75,9 +89,34 @@ vcv review approve <checkout> chg-cancel-enrollment \
 - The key must be in the trust list (`UNTRUSTED_KEY` otherwise). The usual engine rules still
   apply: `SELF_APPROVAL` (a trusted key whose ID is the proposer's), `NOT_PENDING` (replay),
   `STALE_REVISION`, `UNKNOWN_CHANGE`.
+- Before anything is committed it checks that the attestation can be written:
+  `.vcv/approvals/` must be a plain, writable directory (or absent), and no attestation for this
+  change may exist yet (`UNSAFE_PATH`, `ATTESTATION_EXISTS`; nothing is approved).
 - On success the change is applied as the next revision (`.vcv/HEAD` moves) and VCV writes a
-  signed attestation to `.vcv/approvals/<changeId>.json`. Commit it with the change record and
-  the new revision, alongside the code in the same PR.
+  signed attestation to `.vcv/approvals/<changeId>.json`, created exclusively (an existing file
+  is never replaced). Commit it with the change record and the new revision, alongside the code
+  in the same PR.
+
+### If the attestation write fails: `vcv review finalize`
+
+The model commit and the attestation are two writes. If the second fails after the first (disk
+full, a crash, a directory changed in between), the command fails with
+`ATTESTATION_NOT_WRITTEN` and prints the recovery command. The change is now applied, so
+`approve` cannot be repeated (`NOT_PENDING`), and a strict integrity check fails until the
+attestation exists. To finish it:
+
+```sh
+vcv review finalize <checkout> <changeId> --digest <proposalDigest> --key <key-file> --trust-ref origin/main
+```
+
+It signs and writes only the attestation (the model and the record are untouched), and only
+when: the change is applied and its revision is in the current history; the key is trusted by
+an anchor outside the candidate branch; the key's principal is the approver the record names
+(`NOT_APPROVER` otherwise) and not the proposer; and the digest matches (`DIGEST_MISMATCH`).
+It is idempotent: the same reviewer's valid attestation is reported as already present, and a
+different existing file is never overwritten (`ATTESTATION_EXISTS`). It never applies a
+pending change (`NOT_APPLIED`). Signing with `finalize` means the approver vouches for that
+applied content, so preview it first.
 
 The attestation signs `"vcv-approval-v1\0" + canonicalJson(body)`, where the body holds the
 change ID, project ID, proposal digest, proposer, approver, base and resulting revision, the
@@ -113,11 +152,18 @@ otherwise. For each revision in `.vcv/HEAD`'s history it reports:
 
 With `--base`, the base's model history must be a prefix of the checkout's
 (`BASE_HISTORY_REWRITTEN`, `BASE_REVISION_CHANGED` otherwise), so a PR cannot quietly replace
-history that main already has. An `invalid` attestation is always an error. A revision
+history that main already has. The base's evidence must survive too: every attestation the
+base has, and every change record the base already settled (applied or rejected), must be
+byte-identical here (`BASE_EVIDENCE_REMOVED`, `BASE_EVIDENCE_CHANGED`, always errors), so a
+branch cannot quietly delete the proof of an earlier approval. Pending base records may still
+be decided on the branch, and legacy unattested base revisions are not required to gain a
+signature. An `invalid` attestation is always an error. A revision
 introduced without a valid attestation is a warning by default and an error with
 `--require-attestation`. Other checks: `HEAD_WITHOUT_LAST_COMMIT`, `HEAD_RECORD_MISMATCH`,
 `ORPHAN_APPLIED_RECORD`, `STRAY_ATTESTATION`, and `TRUST_FROM_CHECKOUT` when the trust list
-comes from the working tree.
+comes from the candidate (working tree, a file inside the checkout, `HEAD` or the checked-out
+branch): a warning by default, an error with `--require-attestation`, so a strict check never
+passes on self-controlled trust.
 
 ### In CI
 
@@ -131,8 +177,9 @@ Read the base and the trust list from the protected branch, never from the PR's 
 ```
 
 Protect `main` so that changes to `.vcv/reviewers.json` need a human review. A PR that adds the
-agent's own key to `reviewers.json` can then sign locally (with `--trust-working-tree`), but CI
-reports that key as `untrusted-key` and fails.
+agent's own key to `reviewers.json` cannot use it to approve (its branch is not an anchor);
+signing in unsafe development mode is possible, but CI reports that key as `untrusted-key` and
+fails.
 
 ## What this does not do
 

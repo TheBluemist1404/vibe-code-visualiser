@@ -22,9 +22,9 @@ import type { ChangeRecord } from "@vcv/core";
 import type { Model } from "@vcv/ir";
 import { readdirSync, lstatSync } from "node:fs";
 import { join } from "node:path";
-import { APPROVALS_DIR, ApprovalError, keyFingerprint, loadTrust, readAttestation, signatureValid } from "./approval.ts";
+import { APPROVALS_DIR, ApprovalError, MAX_ATTESTATION_BYTES, keyFingerprint, loadTrust, readAttestation, signatureValid } from "./approval.ts";
 import type { LoadedTrust, TrustSource } from "./approval.ts";
-import { fileAtCommit, resolveCommit } from "./git.ts";
+import { fileAtCommit, filesAtCommit, resolveCommit } from "./git.ts";
 import { VCV_DIR, projectStatus } from "./project.ts";
 
 export type IntegrityProblem = { code: string; severity: "error" | "warning"; message: string; revision?: string; changeId?: string };
@@ -59,7 +59,7 @@ export type IntegrityReport = {
   revision: string | null;
   revisions: RevisionCheck[];
   problems: IntegrityProblem[];
-  trust: { source: string; reviewers: number; protectedFromCheckout: boolean } | null;
+  trust: { source: string; reviewers: number; protectedFromCheckout: boolean; anchor: string } | null;
   base: { ref: string; commit: string; revision: string | null; history: string[] } | null;
   requireAttestation: boolean;
   /** What this check cannot establish. Always read with the result. */
@@ -77,7 +77,7 @@ export type IntegrityOptions = {
 
 const LIMITS = [
   "An attestation proves that the holder of a trusted reviewer key signed this exact change; it does not prove which person held the key, or that the key was not shared or stolen.",
-  "Trust is only as strong as its source. A trust list in the checkout under review can be changed by that same change; in CI, read it from the protected base branch (--trust-ref) and protect who may change it there.",
+  "Trust is only as strong as its source. A trust list in the checkout under review can be changed by that same change; in CI, read it from the protected base branch (--trust-ref) and protect who may change it there. Git pins the commit the list was read from; it cannot prove that the branch is protected.",
   "The initial revision has no recorded derivation: who created it, and from what, is not provable from the repository.",
   "Derivation replays the recorded typed operations; it says nothing about whether the source code implements the model (that is M4's reconciliation).",
   "The local audit log (.vcv/audit.jsonl) is not shared through Git and is not evidence here.",
@@ -128,7 +128,10 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
   if (opts.trust) {
     try {
       trust = loadTrust(status.root, opts.trust);
-      if (!trust.protectedFromCheckout) warn("TRUST_FROM_CHECKOUT", `the trust list (${trust.source}) is part of the checkout under review, which can change it; use --trust-ref <protected base> or a file outside the checkout`);
+      if (!trust.protectedFromCheckout) {
+        // A strict check cannot accept trust the change under review controls.
+        (requireAttestation ? err : warn)("TRUST_FROM_CHECKOUT", `the trust list (${trust.source}) cannot establish trusted approval: ${trust.unprotectedReason}; use --trust-ref <protected base> or a file outside the checkout`);
+      }
     } catch (e) {
       err(e instanceof ApprovalError ? e.code : "INVALID_TRUST", (e as Error).message);
     }
@@ -164,6 +167,7 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
             err("BASE_REVISION_CHANGED", `revision ${rev} differs from the base's copy at ${opts.base}; committed revisions are never rewritten`, { revision: rev });
           }
         }
+        baseEvidence(status.root, storeDir, commit, opts.base, err);
       }
     }
   }
@@ -262,9 +266,40 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
     projectId,
     revision,
     revisions,
-    trust: trust ? { source: trust.source, reviewers: trust.list.reviewers.length, protectedFromCheckout: trust.protectedFromCheckout } : null,
+    trust: trust ? { source: trust.source, reviewers: trust.list.reviewers.length, protectedFromCheckout: trust.protectedFromCheckout, anchor: trust.anchor } : null,
     base,
   });
+}
+
+/**
+ * The base's settled evidence must survive unchanged: every attestation, and every change record
+ * the base already settled (applied or rejected). A pending record may still be decided on the
+ * branch, so it may change. Legacy unattested base revisions are not required to gain one.
+ */
+function baseEvidence(root: string, storeDir: string, commit: string, ref: string, err: (code: string, message: string, extra?: Partial<IntegrityProblem>) => void) {
+  const check = (sub: string, max: number, settledOnly: boolean) => {
+    for (const rel of filesAtCommit(root, commit, `${VCV_DIR}/${sub}`)) {
+      if (!rel.endsWith(".json")) continue;
+      const name = rel.slice(VCV_DIR.length + 1);
+      const changeId = rel.slice(rel.lastIndexOf("/") + 1, -".json".length);
+      const theirs = fileAtCommit(root, commit, rel, max);
+      if (!theirs) continue; // oversized on the base: the base itself is not readable evidence
+      if (settledOnly) {
+        let st: unknown;
+        try {
+          st = (JSON.parse(theirs.toString("utf8")) as { status?: unknown }).status;
+        } catch {
+          st = "unreadable";
+        }
+        if (st === "pending") continue;
+      }
+      const ours = readStoreFile(storeDir, name, max);
+      if (ours.kind === "absent") err("BASE_EVIDENCE_REMOVED", `${rel} exists at ${ref} but was removed here; the base's ${sub === APPROVALS_DIR ? "approval attestations" : "settled change records"} are never removed`, { changeId });
+      else if (ours.kind !== "file" || !theirs.equals(ours.bytes)) err("BASE_EVIDENCE_CHANGED", `${rel} differs from its copy at ${ref}; the base's ${sub === APPROVALS_DIR ? "approval attestations" : "settled change records"} are never rewritten`, { changeId });
+    }
+  };
+  check(APPROVALS_DIR, MAX_ATTESTATION_BYTES, false);
+  check("changes", STORE_FILE_LIMITS.change, true);
 }
 
 function listDir(dir: string): string[] {

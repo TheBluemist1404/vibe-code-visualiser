@@ -21,13 +21,13 @@
 // (content digest, base and resulting revision). It does not prove which person held the key.
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
 import type { KeyObject } from "node:crypto";
-import { closeSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, openSync, readSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { accessSync, closeSync, constants as fsConstants, fsyncSync, fstatSync, linkSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import { persistedIdProblem } from "@vcv/ir";
-import { FileStore, ModelEngine, canonicalJson, durableWrite, proposalDigest, readStoreFile } from "@vcv/core";
+import { FileStore, FileStoreReader, ModelEngine, canonicalJson, durableWrite, listChangeRecords, proposalDigest, readStoreFile } from "@vcv/core";
 import type { ChangeRecord, Outcome } from "@vcv/core";
-import { fileAtCommit, resolveCommit } from "./git.ts";
+import { currentBranchRef, fileAtCommit, fullRefName, refsContaining, resolveCommit } from "./git.ts";
 import { VCV_DIR, projectStatus } from "./project.ts";
 
 export const REVIEWERS_FILE = "reviewers.json";
@@ -54,7 +54,14 @@ export type TrustEntry = TrustList["reviewers"][number];
 /** Where a trust list comes from. Only a source the reviewed change cannot alter makes an attestation meaningful. */
 export type TrustSource = { kind: "file"; path: string } | { kind: "git-ref"; ref: string } | { kind: "working-tree" };
 
-export type LoadedTrust = { list: TrustList; source: string; commit?: string; protectedFromCheckout: boolean };
+/**
+ * A loaded trust list and where it came from. `protectedFromCheckout` is false when the list is
+ * part of what the change under review can alter (the working tree, a file inside the checkout,
+ * or a ref that is the checked-out branch or only reachable from it); `unprotectedReason` says
+ * why. True never means "branch protection verified": Git cannot prove that. It means the list
+ * comes from an anchor outside the candidate branch that the caller chose and vouches for.
+ */
+export type LoadedTrust = { list: TrustList; source: string; commit?: string; protectedFromCheckout: boolean; unprotectedReason?: string; anchor: string };
 
 export class ApprovalError extends Error {
   readonly code: string;
@@ -101,23 +108,87 @@ function parseTrust(bytes: Buffer, where: string): TrustList {
   return r.data;
 }
 
+/** Whether `file` (resolved against the cwd, parent symlinks followed) lies inside `root`. */
+function insideCheckout(root: string, file: string): boolean {
+  const real = (p: string) => {
+    try {
+      return realpathSync(p);
+    } catch {
+      return resolve(p);
+    }
+  };
+  const abs = resolve(file);
+  const rel = relative(real(root), join(real(dirname(abs)), basename(abs)));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
+}
+
+/**
+ * Why a trust ref is part of the candidate branch (and so cannot anchor trust), or null. A ref
+ * that names HEAD or the checked-out branch, or a commit only that branch contains, is
+ * something the change under review can rewrite.
+ */
+function candidateRefReason(root: string, ref: string, commit: string): string | null {
+  if (/^(HEAD|@)([~^@:]|$)/.test(ref)) return `${ref} names the checked-out HEAD`;
+  const cur = currentBranchRef(root);
+  if (cur) {
+    const short = cur.replace(/^refs\/heads\//, "");
+    const name = ref.split(/[~^]/)[0]!;
+    if (fullRefName(root, name) === cur || name === short || name === cur) return `${ref} is the checked-out branch (${short})`;
+  }
+  const others = refsContaining(root, commit).filter((r) => r !== cur);
+  if (others.length === 0) return `${ref} (${commit.slice(0, 12)}) is only reachable from the checked-out branch`;
+  return null;
+}
+
+function anchorKind(root: string, ref: string): string {
+  const full = fullRefName(root, ref.split(/[~^]/)[0]!);
+  if (full?.startsWith("refs/remotes/")) return "remote-tracking branch";
+  if (full?.startsWith("refs/tags/")) return "tag";
+  if (full?.startsWith("refs/heads/")) return "local branch";
+  return "commit";
+}
+
+const UNVERIFIED = "branch protection is asserted by whoever chose this anchor, not verified by Git";
+
 /** Load a trust list. Throws ApprovalError when it is missing or invalid. */
 export function loadTrust(root: string, source: TrustSource): LoadedTrust {
   switch (source.kind) {
-    case "file":
-      return { list: parseTrust(readPlainFile(source.path, MAX_TRUST_BYTES, "trust list"), source.path), source: `file ${source.path}`, protectedFromCheckout: !source.path.startsWith(root + "/") };
+    case "file": {
+      const inside = insideCheckout(root, source.path);
+      return {
+        list: parseTrust(readPlainFile(source.path, MAX_TRUST_BYTES, "trust list"), source.path),
+        source: `file ${resolve(source.path)}`,
+        protectedFromCheckout: !inside,
+        ...(inside ? { unprotectedReason: `${source.path} is inside the checkout under review` } : {}),
+        anchor: inside ? "file inside the checkout (unprotected)" : "file outside the checkout; its integrity is the caller's responsibility",
+      };
+    }
     case "git-ref": {
       const commit = resolveCommit(root, source.ref);
       if (!commit) throw new ApprovalError("UNKNOWN_REF", `${source.ref} is not a commit in this repository`);
       const bytes = fileAtCommit(root, commit, `${VCV_DIR}/${REVIEWERS_FILE}`, MAX_TRUST_BYTES);
       if (!bytes) throw new ApprovalError("NO_TRUST_LIST", `${source.ref} (${commit.slice(0, 12)}) has no ${VCV_DIR}/${REVIEWERS_FILE}`);
-      return { list: parseTrust(bytes, `${VCV_DIR}/${REVIEWERS_FILE} at ${source.ref}`), source: `${VCV_DIR}/${REVIEWERS_FILE} at ${source.ref} (${commit.slice(0, 12)})`, commit, protectedFromCheckout: true };
+      const why = candidateRefReason(root, source.ref, commit);
+      return {
+        list: parseTrust(bytes, `${VCV_DIR}/${REVIEWERS_FILE} at ${source.ref}`),
+        source: `${VCV_DIR}/${REVIEWERS_FILE} at ${source.ref} (${commit.slice(0, 12)})`,
+        commit,
+        protectedFromCheckout: !why,
+        ...(why ? { unprotectedReason: why } : {}),
+        anchor: why ? `candidate branch (unprotected): ${why}` : `${anchorKind(root, source.ref)} ${source.ref} pinned at ${commit.slice(0, 12)}; ${UNVERIFIED}`,
+      };
     }
     case "working-tree": {
       const f = readStoreFile(join(root, VCV_DIR), REVIEWERS_FILE, MAX_TRUST_BYTES);
       if (f.kind === "absent") throw new ApprovalError("NO_TRUST_LIST", `${VCV_DIR}/${REVIEWERS_FILE} does not exist`);
       if (f.kind === "unsafe") throw new ApprovalError("UNSAFE_PATH", f.problem);
-      return { list: parseTrust(f.bytes, `${VCV_DIR}/${REVIEWERS_FILE}`), source: `${VCV_DIR}/${REVIEWERS_FILE} in the working tree`, protectedFromCheckout: false };
+      return {
+        list: parseTrust(f.bytes, `${VCV_DIR}/${REVIEWERS_FILE}`),
+        source: `${VCV_DIR}/${REVIEWERS_FILE} in the working tree`,
+        protectedFromCheckout: false,
+        unprotectedReason: "the working tree is the checkout under review",
+        anchor: "working tree (unsafe development mode)",
+      };
     }
   }
 }
@@ -230,38 +301,95 @@ export type ReviewApproveInput = {
   /** The proposalDigest the reviewer saw in `vcv proposal preview`. Required. */
   expectedDigest: string;
   keyFile: string;
+  /** Required: there is no default anchor. */
   trust: TrustSource;
+  /**
+   * Unsafe development mode: accept a trust list the change under review can alter (the
+   * working tree, a file in the checkout, the checked-out branch). The approval is still
+   * applied and signed, but it is not a trusted approval and a strict integrity check rejects it.
+   */
+  allowUnprotectedTrust?: boolean;
   now?: () => Date;
+  /** Test hook: runs after the model commit, before the attestation is written. */
+  afterCommit?: () => void;
 };
 
 export type ReviewApproveResult = {
   outcome: Outcome;
-  reviewer: { id: string; keyFingerprint: string; trustSource: string };
-  attestation?: { file: string; attestation: Attestation };
+  reviewer: { id: string; keyFingerprint: string; trustSource: string; trustAnchor: string; protectedTrust: boolean };
+  attestation?: { file: string; attestation: Attestation; alreadyPresent?: boolean };
 };
 
-/**
- * The trusted reviewer invocation. Identity and permission come only from the key and the trust
- * list; the engine then rechecks everything (pending, authorized, not self-approval, digest,
- * still valid on the current revision) and commits through FileStore. On success a signed
- * attestation is written next to the change record. Throws ApprovalError for key/trust problems.
- */
-export function reviewApprove(path: string, input: ReviewApproveInput): ReviewApproveResult {
-  const status = projectStatus(path);
-  if (status.state !== "ready") throw new ApprovalError("PROJECT_NOT_READY", `the VCV project is ${status.state}`);
-  if (!/^[0-9a-f]{64}$/.test(input.expectedDigest)) throw new ApprovalError("INVALID_DIGEST", "--digest must be the 64-hex proposalDigest shown by vcv proposal preview");
-  const trust = loadTrust(status.root, input.trust);
+type Reviewer = { entry: TrustEntry; key: KeyObject; pub: string; info: ReviewApproveResult["reviewer"] };
+
+function reviewerFor(root: string, input: Pick<ReviewApproveInput, "keyFile" | "trust" | "allowUnprotectedTrust">): Reviewer {
+  const trust = loadTrust(root, input.trust);
+  if (!trust.protectedFromCheckout && !input.allowUnprotectedTrust) {
+    throw new ApprovalError("UNPROTECTED_TRUST", `the trust list (${trust.source}) cannot anchor an approval: ${trust.unprotectedReason}. Pass --trust-ref <protected base, e.g. origin/main> or --trust <file outside the checkout>`);
+  }
   const key = loadPrivateKey(input.keyFile);
   const pub = encodePublic(createPublicKey(key));
   const entry = trust.list.reviewers.find((r) => r.publicKey === pub);
   if (!entry) throw new ApprovalError("UNTRUSTED_KEY", `the key ${keyFingerprint(pub)} is not in the trust list (${trust.source})`);
-  const reviewer = { id: entry.id, keyFingerprint: keyFingerprint(pub), trustSource: trust.source };
+  if (!entry.permissions.includes("model:approve")) throw new ApprovalError("UNTRUSTED_KEY", `${entry.id} is listed without model:approve in ${trust.source}`);
+  return { entry, key, pub, info: { id: entry.id, keyFingerprint: keyFingerprint(pub), trustSource: trust.source, trustAnchor: trust.anchor, protectedTrust: trust.protectedFromCheckout } };
+}
 
-  const engine = new ModelEngine(new FileStore(status.storeDir), { now: input.now });
-  const outcome = engine.approve(input.changeId, { principalId: entry.id, permissions: entry.permissions }, { expectedDigest: input.expectedDigest });
-  if (outcome.status !== "applied" || !outcome.record) return { outcome, reviewer };
+/** Refuse before committing anything if the attestation could not be written afterwards. */
+function preflightAttestation(storeDir: string, changeId: string): void {
+  if (persistedIdProblem(changeId)) return; // the engine refuses it
+  const dir = join(storeDir, APPROVALS_DIR);
+  const st = lstatOrNull(dir);
+  if (st && (st.isSymbolicLink() || !st.isDirectory())) throw new ApprovalError("UNSAFE_PATH", `${VCV_DIR}/${APPROVALS_DIR}/ is ${st.isSymbolicLink() ? "a symlink" : "not a directory"}; nothing was approved`);
+  if (!st) mkdirSync(dir);
+  try {
+    accessSync(dir, fsConstants.W_OK);
+  } catch {
+    throw new ApprovalError("UNSAFE_PATH", `${VCV_DIR}/${APPROVALS_DIR}/ is not writable; nothing was approved`);
+  }
+  // Only a pending change will be committed; for anything else the engine's own refusal applies.
+  const pending = listChangeRecords(storeDir).some((e) => e.record?.changeId === changeId && e.record.status === "pending");
+  if (pending && lstatOrNull(join(dir, `${changeId}.json`))) {
+    throw new ApprovalError("ATTESTATION_EXISTS", `${VCV_DIR}/${APPROVALS_DIR}/${changeId}.json already exists; it is never overwritten. Nothing was approved`);
+  }
+}
 
-  const r: ChangeRecord = outcome.record;
+function lstatOrNull(p: string) {
+  try {
+    return lstatSync(p);
+  } catch {
+    return null;
+  }
+}
+
+/** Write a new file durably, failing if it already exists (never replaces an attestation). */
+function writeNew(path: string, text: string): void {
+  const tmp = `${path}.tmp-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+  const fd = openSync(tmp, "wx", 0o644);
+  try {
+    writeSync(fd, text);
+    fsyncSync(fd);
+  } finally {
+    closeSync(fd);
+  }
+  try {
+    linkSync(tmp, path); // atomic and exclusive: EEXIST if an attestation appeared meanwhile
+  } finally {
+    unlinkSync(tmp);
+  }
+  try {
+    const dfd = openSync(dirname(path), "r");
+    try {
+      fsyncSync(dfd);
+    } finally {
+      closeSync(dfd);
+    }
+  } catch {
+    // directory fsync unsupported; link is still atomic
+  }
+}
+
+function signFor(r: ChangeRecord, who: Reviewer, now?: () => Date): Attestation {
   const body: Omit<Attestation, "signature"> = {
     format: 1,
     changeId: r.changeId,
@@ -271,24 +399,89 @@ export function reviewApprove(path: string, input: ReviewApproveInput): ReviewAp
     approverId: r.approverId!,
     baseRevision: r.baseRevision,
     resultingRevision: r.resultingRevision!,
-    publicKey: pub,
-    keyFingerprint: reviewer.keyFingerprint,
-    signedAt: (input.now?.() ?? new Date()).toISOString(),
+    publicKey: who.pub,
+    keyFingerprint: who.info.keyFingerprint,
+    signedAt: (now?.() ?? new Date()).toISOString(),
   };
-  const attestation: Attestation = { ...body, signature: sign(null, payloadOf(body), key).toString("base64") };
-  const dirStat = (() => {
-    try {
-      return lstatSync(join(status.storeDir, APPROVALS_DIR));
-    } catch {
-      return null;
-    }
-  })();
-  if (dirStat && (dirStat.isSymbolicLink() || !dirStat.isDirectory())) {
-    // The change is applied; only the attestation could not be written. Say so plainly.
-    throw new ApprovalError("UNSAFE_PATH", `${VCV_DIR}/${APPROVALS_DIR}/ is not a plain directory; change ${r.changeId} was applied as ${r.resultingRevision} but its attestation was not written`);
-  }
-  mkdirSync(join(status.storeDir, APPROVALS_DIR), { recursive: true });
+  return { ...body, signature: sign(null, payloadOf(body), who.key).toString("base64") };
+}
+
+function writeAttestation(storeDir: string, r: ChangeRecord, a: Attestation): string {
   const rel = `${APPROVALS_DIR}/${r.changeId}.json`;
-  durableWrite(join(status.storeDir, rel), JSON.stringify(attestation, null, 2) + "\n");
-  return { outcome, reviewer, attestation: { file: `${VCV_DIR}/${rel}`, attestation } };
+  const dir = join(storeDir, APPROVALS_DIR);
+  const st = lstatOrNull(dir);
+  if (st && (st.isSymbolicLink() || !st.isDirectory())) throw new Error(`${VCV_DIR}/${APPROVALS_DIR}/ is not a plain directory`);
+  if (!st) mkdirSync(dir);
+  writeNew(join(storeDir, rel), JSON.stringify(a, null, 2) + "\n");
+  return `${VCV_DIR}/${rel}`;
+}
+
+const finalizeHint = (r: ChangeRecord) =>
+  `change ${r.changeId} was applied as ${r.resultingRevision}, but its attestation was not written; after fixing the cause, the approver can write it with: vcv review finalize <path> ${r.changeId} --digest ${proposalDigest(r.change)} --key <key> --trust-ref <protected base>`;
+
+/**
+ * The trusted reviewer invocation. Identity and permission come only from the key and the trust
+ * list, which must come from an anchor outside the candidate branch. The attestation
+ * destination is checked before anything is committed; the engine then rechecks everything
+ * (pending, authorized, not self-approval, digest, still valid on the current revision) and
+ * commits through FileStore, and the signed attestation is written next to the change record.
+ * If that last write fails, ApprovalError ATTESTATION_NOT_WRITTEN says how to finish it with
+ * `reviewFinalize`. Throws ApprovalError for key/trust/destination problems.
+ */
+export function reviewApprove(path: string, input: ReviewApproveInput): ReviewApproveResult {
+  const status = projectStatus(path);
+  if (status.state !== "ready") throw new ApprovalError("PROJECT_NOT_READY", `the VCV project is ${status.state}`);
+  if (!/^[0-9a-f]{64}$/.test(input.expectedDigest)) throw new ApprovalError("INVALID_DIGEST", "--digest must be the 64-hex proposalDigest shown by vcv proposal preview");
+  const who = reviewerFor(status.root, input);
+  preflightAttestation(status.storeDir, input.changeId);
+
+  const engine = new ModelEngine(new FileStore(status.storeDir), { now: input.now });
+  const outcome = engine.approve(input.changeId, { principalId: who.entry.id, permissions: who.entry.permissions }, { expectedDigest: input.expectedDigest });
+  if (outcome.status !== "applied" || !outcome.record) return { outcome, reviewer: who.info };
+
+  const r: ChangeRecord = outcome.record;
+  try {
+    input.afterCommit?.();
+    const attestation = signFor(r, who, input.now);
+    return { outcome, reviewer: who.info, attestation: { file: writeAttestation(status.storeDir, r, attestation), attestation } };
+  } catch (e) {
+    throw new ApprovalError("ATTESTATION_NOT_WRITTEN", `${(e as Error).message}. ${finalizeHint(r)}`);
+  }
+}
+
+export type ReviewFinalizeInput = Omit<ReviewApproveInput, "afterCommit">;
+
+/**
+ * Write the missing attestation for a change that is already applied (the recovery path when
+ * `reviewApprove` committed but could not write it). Only the approver the record names, with a
+ * trusted key, for the digest they reviewed, and only if the change produced a revision in the
+ * current history. Idempotent: an identical valid attestation by the same key is reported as
+ * already present; a different existing one is never replaced (ATTESTATION_EXISTS). Writes only
+ * the attestation; the model and the record are not touched.
+ */
+export function reviewFinalize(path: string, input: ReviewFinalizeInput): ReviewApproveResult {
+  const status = projectStatus(path);
+  if (status.state !== "ready") throw new ApprovalError("PROJECT_NOT_READY", `the VCV project is ${status.state}`);
+  if (!/^[0-9a-f]{64}$/.test(input.expectedDigest)) throw new ApprovalError("INVALID_DIGEST", "--digest must be the 64-hex proposalDigest shown by vcv proposal preview");
+  if (persistedIdProblem(input.changeId)) throw new ApprovalError("UNKNOWN_CHANGE", `no change ${input.changeId}`);
+  const who = reviewerFor(status.root, input);
+  const r = listChangeRecords(status.storeDir).find((e) => e.record?.changeId === input.changeId)?.record;
+  if (!r) throw new ApprovalError("UNKNOWN_CHANGE", `no change ${input.changeId}`);
+  if (r.status !== "applied" || !r.resultingRevision) throw new ApprovalError("NOT_APPLIED", `change ${r.changeId} is ${r.status}; use vcv review approve for a pending change`);
+  if (r.approverId !== who.entry.id) throw new ApprovalError("NOT_APPROVER", `change ${r.changeId} records ${r.approverId ? `approver ${r.approverId}` : "no separate approver"}; only that approver can attest it, and ${who.entry.id} is not it`);
+  if (r.approverId === r.proposerId) throw new ApprovalError("SELF_APPROVAL", `change ${r.changeId} was approved by its own proposer`);
+  const digest = proposalDigest(r.change);
+  if (digest !== input.expectedDigest) throw new ApprovalError("DIGEST_MISMATCH", `the change's content digest is ${digest}, not the reviewed ${input.expectedDigest}; preview it again`);
+  if (!new FileStoreReader(status.storeDir).revisions().includes(r.resultingRevision)) throw new ApprovalError("NOT_IN_HISTORY", `${r.resultingRevision} is not in this checkout's model history`);
+
+  const existing = readAttestation(status.storeDir, r.changeId);
+  if (existing) {
+    const a = existing.attestation;
+    const same = a && a.publicKey === who.pub && signatureValid(a) && a.proposalDigest === digest && a.approverId === r.approverId && a.proposerId === r.proposerId && a.baseRevision === r.baseRevision && a.resultingRevision === r.resultingRevision && a.projectId === r.projectId;
+    if (same) return { outcome: { status: "applied", changeId: r.changeId, record: r, diagnostics: [] }, reviewer: who.info, attestation: { file: `${VCV_DIR}/${APPROVALS_DIR}/${r.changeId}.json`, attestation: a, alreadyPresent: true } };
+    throw new ApprovalError("ATTESTATION_EXISTS", `${VCV_DIR}/${APPROVALS_DIR}/${r.changeId}.json already exists and is not this reviewer's valid attestation of this change; it is never overwritten (${existing.problem ?? "different content"})`);
+  }
+  preflightAttestation(status.storeDir, r.changeId);
+  const attestation = signFor(r, who, input.now);
+  return { outcome: { status: "applied", changeId: r.changeId, record: r, diagnostics: [] }, reviewer: who.info, attestation: { file: writeAttestation(status.storeDir, r, attestation), attestation } };
 }

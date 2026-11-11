@@ -123,18 +123,28 @@ test("review approve: refused under an agent host or with --as/--perm; a trusted
   assert.equal(run(agentEnv, "proposal", "submit", repo, file).status, 0);
   const digest = JSON.parse(vcv("proposal", "preview", repo, "chg-a", "--json").stdout).data.proposal.proposalDigest as string;
 
-  const asAgent = run(agentEnv, "review", "approve", repo, "chg-a", "--digest", digest, "--key", key);
+  const asAgent = run(agentEnv, "review", "approve", repo, "chg-a", "--digest", digest, "--key", key, "--trust-ref", "main");
   assert.equal(asAgent.status, 2);
   assert.match(asAgent.stderr, /refuses to run under VCV_HOST_PRINCIPAL/);
-  assert.equal(vcv("review", "approve", repo, "chg-a", "--digest", digest, "--key", key, "--as", "user:hoang").status, 2);
-  const wrong = vcv("review", "approve", repo, "chg-a", "--digest", "0".repeat(64), "--key", key);
+  assert.equal(vcv("review", "approve", repo, "chg-a", "--digest", digest, "--key", key, "--trust-ref", "main", "--as", "user:hoang").status, 2);
+  const noAnchor = vcv("review", "approve", repo, "chg-a", "--digest", digest, "--key", key);
+  assert.equal(noAnchor.status, 2);
+  assert.match(noAnchor.stderr, /✗ INPUT: a trust anchor is required/);
+  const candidate = vcv("review", "approve", repo, "chg-a", "--digest", digest, "--key", key, "--trust-ref", "HEAD");
+  assert.equal(candidate.status, 2);
+  assert.match(candidate.stderr, /✗ UNPROTECTED_TRUST: .*HEAD names the checked-out HEAD/);
+  const wrong = vcv("review", "approve", repo, "chg-a", "--digest", "0".repeat(64), "--key", key, "--trust-ref", "main");
   assert.equal(wrong.status, 1);
   assert.match(wrong.stdout, /✗ DIGEST_MISMATCH/);
 
-  const ok = vcv("review", "approve", repo, "chg-a", "--digest", digest, "--key", key);
+  const ok = vcv("review", "approve", repo, "chg-a", "--digest", digest, "--key", key, "--trust-ref", "main");
   assert.equal(ok.status, 0, ok.stderr + ok.stdout);
   assert.match(ok.stdout, /chg-a: applied → rev-2-[0-9a-f]{12} \(proposed by agent:coder, approved by user:hoang/);
   assert.match(ok.stdout, /attestation: \.vcv\/approvals\/chg-a\.json/);
+  assert.match(ok.stdout, /trust anchor: local branch main pinned at [0-9a-f]{12}; branch protection is asserted/);
+  const again = vcv("review", "finalize", repo, "chg-a", "--digest", digest, "--key", key, "--trust-ref", "main");
+  assert.equal(again.status, 0, again.stderr);
+  assert.match(again.stdout, /already present; unchanged/);
 
   const check = vcv("integrity", repo, "--base", "main", "--trust-ref", "main", "--require-attestation");
   assert.equal(check.status, 0, check.stdout);
@@ -142,6 +152,9 @@ test("review approve: refused under an agent host or with --as/--perm; a trusted
   assert.match(check.stdout, /approval attested \(signed by user:hoang/);
   const json = JSON.parse(vcv("integrity", repo, "--base", "main", "--json").stdout);
   assert.equal(json.ok, true);
+  const selfTrust = vcv("integrity", repo, "--base", "main", "--trust-working-tree", "--require-attestation");
+  assert.equal(selfTrust.status, 1, "strict mode rejects trust from the checkout");
+  assert.match(selfTrust.stdout, /✗ TRUST_FROM_CHECKOUT/);
 
   const att = join(repo, ".vcv/approvals/chg-a.json");
   writeFileSync(att, readFileSync(att, "utf8").replace('"user:hoang"', '"user:mallory"'));

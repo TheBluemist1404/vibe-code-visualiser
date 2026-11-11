@@ -16,6 +16,7 @@ import {
   checkIntegrity,
   createReviewerKey,
   reviewApprove,
+  reviewFinalize,
   PROPOSAL_LIMITS,
   createEvidenceApi,
   listProposals,
@@ -67,11 +68,16 @@ const USAGE = `vcv <command> [options]
                                         keep it outside the repository and any agent sandbox). Prints the
                                         public trust-list entry; --add appends it to <path>/.vcv/reviewers.json
   review approve <path> <changeId> --digest <proposalDigest> --key <key-file>
-              [--trust-ref <ref> (default HEAD) | --trust <file> | --trust-working-tree]
+              (--trust-ref <protected base, e.g. origin/main> | --trust <file outside the checkout>
+               | --trust-working-tree (UNSAFE development mode))
                                         The trusted reviewer step: identity and permission come from the key's
                                         entry in the trust list, never from --as/--perm/VCV_HOST_* (refused here).
+                                        The trust anchor is required and must be outside the candidate branch.
                                         Approves exactly the reviewed content and writes a signed attestation.
-  integrity <path> [--base <ref>] [--trust-ref <ref> | --trust <file>] [--require-attestation] [--json]
+  review finalize <path> <changeId> --digest <proposalDigest> --key <key-file> (--trust-ref <ref> | --trust <file>)
+                                        Write the missing attestation of an applied change, if approve committed
+                                        but could not write it. Only the recorded approver; never overwrites.
+  integrity <path> [--base <ref>] [--trust-ref <ref> | --trust <file> | --trust-working-tree] [--require-attestation] [--json]
                                         Read-only check of the .vcv/ history: every revision derived by its
                                         applied change's typed operations, records consistent, base history
                                         unchanged, approvals attested by trusted keys. Exit 1 on any error.
@@ -535,23 +541,29 @@ function reviewCommand(): number {
     if (values.add !== undefined) console.log(`added to ${addTrustedReviewer(values.add, entry)}; commit it`);
     return 0;
   }
-  if (a !== "approve") {
+  if (a !== "approve" && a !== "finalize") {
     console.log(USAGE);
     return 1;
   }
-  refuseAssertedIdentity("vcv review approve");
+  refuseAssertedIdentity(`vcv review ${a}`);
   const path = need(b, "<path>");
-  const r = reviewApprove(path, { changeId: need(rest[0], "<changeId>"), expectedDigest: need(values.digest, "--digest"), keyFile: need(values.key, "--key"), trust: trustSource("HEAD")! });
+  const trust = trustSource(null);
+  if (!trust) throw new InputError("a trust anchor is required: --trust-ref <protected base, e.g. origin/main> or --trust <file outside the checkout> (--trust-working-tree is an unsafe development mode)");
+  const unsafe = trust.kind === "working-tree";
+  if (unsafe) console.log("! UNSAFE development mode: the trust list comes from the checkout under review; this is not a trusted approval and a strict integrity check rejects it");
+  const input = { changeId: need(rest[0], "<changeId>"), expectedDigest: need(values.digest, "--digest"), keyFile: need(values.key, "--key"), trust, allowUnprotectedTrust: unsafe };
+  const r = a === "approve" ? reviewApprove(path, input) : reviewFinalize(path, input);
   console.log(`reviewer: ${r.reviewer.id} (key ${r.reviewer.keyFingerprint}, trusted per ${r.reviewer.trustSource})`);
+  console.log(`  trust anchor: ${r.reviewer.trustAnchor}`);
   const code = printOutcome(r.outcome);
-  if (r.attestation) console.log(`  attestation: ${r.attestation.file} (commit it with the change record and the new revision)`);
+  if (r.attestation) console.log(`  attestation: ${r.attestation.file}${r.attestation.alreadyPresent ? " (already present; unchanged)" : " (commit it with the change record and the new revision)"}`);
   return code;
 }
 
 function printIntegrity(r: IntegrityReport) {
   console.log(`integrity: ${r.ok ? "ok" : "FAILED"}${r.projectId ? ` (${r.projectId} at ${r.revision})` : ""}`);
   if (r.base) console.log(`  base:  ${r.base.ref} ${r.base.commit.slice(0, 12)} at ${r.base.revision ?? "(no .vcv/)"}`);
-  console.log(`  trust: ${r.trust ? `${r.trust.source}, ${r.trust.reviewers} reviewer(s)` : "none"}`);
+  console.log(`  trust: ${r.trust ? `${r.trust.source}, ${r.trust.reviewers} reviewer(s); ${r.trust.anchor}` : "none"}`);
   for (const c of r.revisions) {
     console.log(`  ${c.seq}. ${c.revision}${c.introduced ? " (new)" : ""}: ${c.derivation}${c.changeId ? ` by ${c.changeId}` : ""}; approval ${c.approval.state}${c.approval.detail ? ` (${c.approval.detail})` : ""}`);
   }

@@ -78,10 +78,24 @@ what a proposal changes before deciding.
   change records are all writable by a shell agent in the same checkout. `vcv review approve`
   refuses the first two outright and derives the approver from the trust-list entry whose
   Ed25519 public key matches the reviewer's private key. `node:crypto` only; no new dependency.
-- **Trust comes from a ref, by default.** `.vcv/reviewers.json` is read from a Git ref
-  (`--trust-ref`, default `HEAD` locally, the base branch in CI) or a file outside the checkout.
-  The working tree is accepted only with `--trust-working-tree` and is reported as unprotected
-  (`TRUST_FROM_CHECKOUT`), because a PR can edit its own trust list.
+- **Trust needs an explicit anchor outside the candidate branch** (review round 1).
+  `.vcv/reviewers.json` is read from `--trust-ref <base>` or `--trust <file outside the
+  checkout>`; there is no default. `HEAD`, `@`, the checked-out branch, a commit only it
+  contains, and any file whose resolved path (parent symlinks followed) is in the checkout are
+  refused for approval (`UNPROTECTED_TRUST`) and are an error for a strict integrity check
+  (`TRUST_FROM_CHECKOUT`). A ref is reported as a pinned commit with protection *asserted by the
+  caller*: Git cannot verify branch protection. `--trust-working-tree` remains as an explicit
+  unsafe development mode that cannot produce a trusted approval.
+- **Preflight, exclusive write, explicit repair** (review round 1). The attestation destination
+  is checked before the model commit; the file is created exclusively (link, never rename over).
+  If the write still fails after the commit, `ATTESTATION_NOT_WRITTEN` names `vcv review
+  finalize`, which lets only the recorded approver, with a trusted key and the reviewed digest,
+  write the missing attestation for an applied change in the current history; idempotent, never
+  overwriting. A two-file transaction was considered and rejected: it would change FileStore's
+  commit protocol for one file, and recovery is still needed after a crash.
+- **The base's evidence is preserved** (review round 1). With `--base`, every base attestation
+  and every settled (applied/rejected) base change record must be byte-identical in the checkout,
+  so a branch cannot delete the proof of an earlier approval while integrity passes.
 - **Approval binds to `proposalDigest`.** `ModelEngine.approve` takes `expectedDigest`; a
   mismatch is a refusal (`DIGEST_MISMATCH`) that leaves the record pending and is audited, so a
   proposal re-submitted or edited after preview cannot ride on an earlier review. The digest
@@ -112,7 +126,7 @@ what a proposal changes before deciding.
 - Unchanged: `vcv propose` / `vcv approve`, the store format, change records, revision IDs.
 - M3.2 new: `packages/repo/src/approval.ts` (`createReviewerKey`, `addTrustedReviewer`,
   `loadTrust`, `reviewApprove`, `readAttestation`), `packages/repo/src/integrity.ts`
-  (`checkIntegrity`), `ApproveOptions.expectedDigest` in the engine, `resolveCommit` /
-  `fileAtCommit` git helpers, CLI `vcv reviewer init`, `vcv review approve`, `vcv integrity`.
+  (`checkIntegrity`), `reviewFinalize`, `ApproveOptions.expectedDigest` in the engine, `resolveCommit` /
+  `fileAtCommit` git helpers, CLI `vcv reviewer init`, `vcv review approve|finalize`, `vcv integrity`.
   New store files: `.vcv/reviewers.json`, `.vcv/approvals/`. Unchanged: change records,
   revision IDs, `vcv approve`.

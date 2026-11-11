@@ -130,3 +130,26 @@ export function fileAtCommit(root: string, commit: string, rel: string, max: num
     return null;
   }
 }
+
+/** The checked-out branch's full ref name (`refs/heads/x`), or null when HEAD is detached. */
+export function currentBranchRef(root: string): string | null {
+  return git(root, ["symbolic-ref", "-q", "HEAD"])?.trim() || null;
+}
+
+/** The full ref name a ref expression names (`main` → `refs/heads/main`), or null for a commit expression. */
+export function fullRefName(root: string, ref: string): string | null {
+  if (!ref || ref.startsWith("-") || /[\0\s]/.test(ref)) return null;
+  return git(root, ["rev-parse", "--symbolic-full-name", ref])?.trim() || null;
+}
+
+/** Full names of all refs (branches, remote-tracking branches, tags) whose history contains `commit`. */
+export function refsContaining(root: string, commit: string): string[] {
+  if (!/^[0-9a-f]{40,64}$/.test(commit)) return [];
+  return (git(root, ["for-each-ref", "--format=%(refname)", "--contains", commit]) ?? "").split("\n").filter(Boolean);
+}
+
+/** Repository-relative paths of the files under `dir` at a commit (recursive), sorted. */
+export function filesAtCommit(root: string, commit: string, dir: string): string[] {
+  if (!/^[0-9a-f]{40,64}$/.test(commit) || dir.startsWith("-") || dir.includes("\0")) return [];
+  return (git(root, ["ls-tree", "-r", "-z", "--name-only", commit, "--", dir]) ?? "").split("\0").filter(Boolean).sort();
+}
