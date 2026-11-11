@@ -4,7 +4,8 @@ import { hasErrors, persistedIdProblem, validateModel } from "@vcv/ir";
 import type { Diagnostic, Model } from "@vcv/ir";
 import { applyOperations, proposedChangeSchema } from "./operations.ts";
 import type { ProposedModelChange } from "./operations.ts";
-import type { ModelStore } from "./store.ts";
+import { StoreError } from "./store.ts";
+import type { ModelStore, StoreSnapshot } from "./store.ts";
 import { branchSafeRevisionId } from "./revisions.ts";
 
 /** Supplied by the trusted host (session, OAuth token, local user), never by the caller's payload. */
@@ -129,7 +130,11 @@ export class ModelEngine {
       validationResults: [],
       change,
     };
-    const check = this.dryRun(change, this.store.current());
+    // Validate and commit against one snapshot: the store refuses the commit if anything moved
+    // in between (a Git checkout, a merge, another writer), so a validated model is never
+    // retargeted onto a different line.
+    const snap = this.store.snapshot();
+    const check = this.dryRun(change, snap.model);
     if (check.errors.length) return this.log("propose", ctx, this.save({ ...record, status: "rejected", validationResults: check.errors }));
     record.validationResults = check.warnings;
 
@@ -137,7 +142,7 @@ export class ModelEngine {
       !ctx.permissions.includes("model:apply") ||
       (change.operations.some((o) => o.type === "approveDraft") && !ctx.permissions.includes("model:approve"));
     if (needsApproval) return this.log("propose", ctx, this.save(record));
-    return this.log("propose", ctx, this.commit(record, check.model!));
+    return this.log("propose", ctx, this.commit(record, check.model!, snap));
   }
 
   /**
@@ -162,11 +167,12 @@ export class ModelEngine {
     if (ctx.principalId === record.proposerId && !this.policy.allowSelfApproval) {
       return this.log("approve", ctx, { status: "denied", changeId, diagnostics: [diag("SELF_APPROVAL", "", "a proposer cannot approve their own change")], record });
     }
-    const check = this.dryRun(record.change, this.store.current());
+    const snap = this.store.snapshot();
+    const check = this.dryRun(record.change, snap.model);
     if (check.errors.length) {
       return this.log("approve", ctx, this.save({ ...record, approverId: ctx.principalId, status: "rejected", validationResults: check.errors }));
     }
-    return this.log("approve", ctx, this.commit({ ...record, approverId: ctx.principalId, validationResults: check.warnings }, check.model!));
+    return this.log("approve", ctx, this.commit({ ...record, approverId: ctx.principalId, validationResults: check.warnings }, check.model!, snap));
   }
 
   private dryRun(change: ProposedModelChange, current: Model): { model?: Model; errors: Diagnostic[]; warnings: Diagnostic[] } {
@@ -187,15 +193,24 @@ export class ModelEngine {
       : { model: applied.model, errors: [], warnings: results };
   }
 
-  private commit(record: ChangeRecord, model: Model): Outcome {
+  private commit(record: ChangeRecord, model: Model, snap: StoreSnapshot): Outcome {
     // Branch-safe identity (ADR 0007): the parent is the revision the change was validated
     // against, and the digest covers the new content, so two Git branches never mint the same ID
     // for different models.
     const parent = model.project.modelRevision;
-    const next = branchSafeRevisionId(model, parent, this.store.revisions().length + 1);
+    const next = branchSafeRevisionId(model, parent, snap.history.length + 1);
     model.project.modelRevision = next;
     const done: ChangeRecord = { ...record, status: "applied", resultingRevision: next };
-    this.store.commit(model, done);
+    try {
+      this.store.commit(model, done, snap.token);
+    } catch (e) {
+      // The store moved after validation. Nothing was written and no record is created or
+      // changed (a pending proposal stays pending); the caller re-reads and retries.
+      if (e instanceof StoreError && (e.code === "HEAD_CHANGED" || e.code === "STORE_CHANGED")) {
+        return { status: "rejected", changeId: record.changeId, diagnostics: [diag(e.code, "", e.message)] };
+      }
+      throw e;
+    }
     return { status: "applied", changeId: done.changeId, diagnostics: done.validationResults, record: done };
   }
 

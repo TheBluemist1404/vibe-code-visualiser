@@ -353,3 +353,96 @@ test("commit refuses with STORE_CHANGED if a same-ID revision file is swapped af
   assert.equal(readFileSync(join(dir, "HEAD"), "utf8"), head);
   assert.ok(!existsSync(join(dir, "revisions", `${id}.yaml`)));
 });
+
+// Review on PR #8, round 5: the store moves between the engine's dry-run and the commit.
+import type { ChangeRecord, ModelStore, StoreSnapshot } from "../src/index.ts";
+
+/** A FileStore whose snapshot() runs a hook right after it is taken (deterministic race). */
+class RacingStore implements ModelStore {
+  readonly inner: FileStore;
+  private hook?: () => void;
+  constructor(inner: FileStore, hook: () => void) {
+    this.inner = inner;
+    this.hook = hook;
+  }
+  snapshot(): StoreSnapshot {
+    const s = this.inner.snapshot();
+    const h = this.hook;
+    this.hook = undefined;
+    h?.();
+    return s;
+  }
+  current() { return this.inner.current(); }
+  revision(rev: string) { return this.inner.revision(rev); }
+  revisions() { return this.inner.revisions(); }
+  commit(m: Parameters<FileStore["commit"]>[0], r: ChangeRecord, t?: string) { this.inner.commit(m, r, t); }
+  getChange(id: string) { return this.inner.getChange(id); }
+  putChange(r: ChangeRecord) { this.inner.putChange(r); }
+  appendAudit(e: Parameters<FileStore["appendAudit"]>[0]) { this.inner.appendAudit(e); }
+  audit() { return this.inner.audit(); }
+}
+
+/** Replace `dir`'s store files with `other`'s, as a `git checkout` of another branch would. */
+function checkoutLine(dir: string, other: string) {
+  cpSync(join(other, "revisions"), join(dir, "revisions"), { recursive: true });
+  cpSync(join(other, "changes"), join(dir, "changes"), { recursive: true });
+  cpSync(join(other, "HEAD"), join(dir, "HEAD"));
+}
+
+test("round 5: a checkout between dry-run and commit is refused; nothing is written", () => {
+  const { root, b } = divergedPair();
+  const dir = join(root, "racing");
+  cpSync(join(root, "base"), dir, { recursive: true });
+  const e = new ModelEngine(new RacingStore(new FileStore(dir), () => checkoutLine(dir, b)));
+  const r = e.propose(timeoutChange(), owner); // validated against rev-1, then the checkout lands
+  assert.equal(r.status, "rejected");
+  assert.ok(["HEAD_CHANGED", "STORE_CHANGED"].includes(r.diagnostics[0]!.code), r.diagnostics[0]!.code);
+  assert.equal(readFileSync(join(dir, "HEAD"), "utf8"), readFileSync(join(b, "HEAD"), "utf8"), "B's HEAD intact");
+  assert.deepEqual(readdirSync(join(dir, "revisions")).sort(), readdirSync(join(b, "revisions")).sort(), "no revision written");
+  assert.ok(!existsSync(join(dir, "changes", "ch-timeout-01.json")), "no record claims the change");
+  // A retry re-reads, and is now (correctly) stale against B's line.
+  assert.equal(e.propose(timeoutChange(), owner).diagnostics[0]!.code, "STALE_REVISION");
+});
+
+test("round 5: the store refuses a model validated on another line even after it adopted the new HEAD", () => {
+  const { root, b, revB } = divergedPair();
+  const dir = join(root, "adopted");
+  cpSync(join(root, "base"), dir, { recursive: true });
+  const store = new FileStore(dir);
+  const snap = store.snapshot(); // at rev-1
+  const model = structuredClone(snap.model);
+  model.project.name = "LMS next";
+  const id = branchSafeRevisionId(model, "rev-1", 2);
+  model.project.modelRevision = id;
+  const record = { changeId: "ch-late", projectId: "prj-lms", proposerId: "user:hoang", status: "applied" as const, baseRevision: "rev-1", resultingRevision: id, validationResults: [], change: renamePending("ch-late") };
+  checkoutLine(dir, b);
+  assert.deepEqual(store.revisions(), ["rev-1", revB], "the store auto-synced to B (the reviewer's path)");
+  const head = readFileSync(join(dir, "HEAD"), "utf8");
+  assert.throws(() => store.commit(model, record, snap.token), storeErr("HEAD_CHANGED"), "token from rev-1");
+  assert.throws(() => store.commit(model, record), storeErr("HEAD_CHANGED"), "even without a token: baseRevision is not HEAD");
+  assert.equal(readFileSync(join(dir, "HEAD"), "utf8"), head);
+  assert.ok(!existsSync(join(dir, "revisions", `${id}.yaml`)));
+});
+
+test("round 5: a same-ID legacy base swapped after the snapshot is refused; a wrong-parent digest is refused", () => {
+  const dir = join(tmp(), "store");
+  FileStore.init(dir, baseModel());
+  const store = new FileStore(dir);
+  const snap = store.snapshot();
+  const model = structuredClone(snap.model);
+  model.project.name = "LMS next";
+  const id = branchSafeRevisionId(model, "rev-1", 2);
+  model.project.modelRevision = id;
+  const record = { changeId: "ch-legacy", projectId: "prj-lms", proposerId: "user:hoang", status: "applied" as const, baseRevision: "rev-1", resultingRevision: id, validationResults: [], change: renamePending("ch-legacy") };
+  const other = baseModel();
+  other.project.name = "Another branch's rev-1";
+  writeFileSync(join(dir, "revisions", "rev-1.yaml"), dumpModel(other));
+  store.revisions(); // adopts the swapped (valid, same-line) state
+  assert.throws(() => store.commit(model, record, snap.token), storeErr("STORE_CHANGED"));
+
+  const fresh = store.snapshot();
+  const wrong = structuredClone(model);
+  wrong.project.modelRevision = branchSafeRevisionId(model, "rev-0", 2); // digest of another parent
+  assert.throws(() => store.commit(wrong, { ...record, resultingRevision: wrong.project.modelRevision }, fresh.token), storeErr("BAD_COMMIT"));
+  assert.deepEqual(store.revisions(), ["rev-1"]);
+});

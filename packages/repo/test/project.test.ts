@@ -8,7 +8,7 @@ import { join, relative } from "node:path";
 import { dumpModel, loadModel, parseYaml } from "@vcv/ir";
 import type { Model } from "@vcv/ir";
 import { FileStore, ModelEngine, StoreError } from "@vcv/core";
-import type { HostContext, ProposedModelChange } from "@vcv/core";
+import type { HostContext, ModelStore, ProposedModelChange } from "@vcv/core";
 import { createQueryApi } from "@vcv/query";
 import { RepositoryProject, ProjectError, VCV_DIR, compareLines, initProject, projectStatus } from "../src/index.ts";
 
@@ -354,6 +354,36 @@ test("an open writer and reader survive a merge resolved to their own unchanged 
   git(repo, "commit", "-q", "-m", "keep B's model line");
   assert.equal(p.reader.current().project.modelRevision, revB);
   assert.equal(e.propose(rename("ch-c", revB, "Waiting (C)"), owner).status, "applied");
+});
+
+test("a git checkout landing between the engine's dry-run and its commit is refused (PR #8 review, round 5)", () => {
+  const repo = repoWithProject();
+  git(repo, "checkout", "-q", "-b", "feature-b");
+  engineFor(repo).propose(rename("ch-b", "rev-1", "Waiting (B)"), owner);
+  commitAll(repo, "model: B");
+  git(repo, "checkout", "-q", "main");
+
+  const inner = new FileStore(join(repo, VCV_DIR));
+  let fired = false;
+  // Delegate everything; run the checkout once, right after the engine took its snapshot.
+  const racing: ModelStore = new Proxy(inner, {
+    get(target, prop, receiver) {
+      const v = Reflect.get(target, prop, receiver);
+      if (prop !== "snapshot" || typeof v !== "function") return typeof v === "function" ? v.bind(target) : v;
+      return () => {
+        const snap = v.call(target);
+        if (!fired) {
+          fired = true;
+          git(repo, "checkout", "-q", "feature-b");
+        }
+        return snap;
+      };
+    },
+  });
+  const r = new ModelEngine(racing).propose(rename("ch-main", "rev-1", "Waiting (main)"), owner);
+  assert.equal(r.status, "rejected");
+  assert.ok(["HEAD_CHANGED", "STORE_CHANGED"].includes(r.diagnostics[0]!.code));
+  assert.equal(git(repo, "status", "--porcelain"), "", "feature-b's HEAD, revisions and records untouched");
 });
 
 test("model history survives restart and an ordinary checkout round trip", () => {

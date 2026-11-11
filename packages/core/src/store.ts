@@ -63,13 +63,24 @@ export class StoreError extends Error {
   }
 }
 
+/**
+ * One consistent read of the store: the current model, the history it heads and an opaque token
+ * for exactly this state. The engine validates a change against a snapshot and commits with its
+ * token, so the store can refuse if anything moved in between (ADR 0007 §2).
+ */
+export type StoreSnapshot = { model: Model; history: string[]; token: string };
+
 export interface ModelStore {
   current(): Model;
+  snapshot(): StoreSnapshot;
   revision(rev: string): Model | undefined;
   /** Committed revisions, oldest first. */
   revisions(): string[];
-  /** Atomically make `model` the current revision, recording the applied change. */
-  commit(model: Model, record: ChangeRecord): void;
+  /**
+   * Atomically make `model` the current revision, recording the applied change. With `token`
+   * (from snapshot()), refuse unless the store is still in exactly that state.
+   */
+  commit(model: Model, record: ChangeRecord, token?: string): void;
   getChange(changeId: string): ChangeRecord | undefined;
   /** Persist a non-committing record state (pending, rejected). */
   putChange(record: ChangeRecord): void;
@@ -90,6 +101,15 @@ function assertCommittable(model: Model, record: ChangeRecord, history: readonly
     throw new StoreError("BAD_COMMIT", `commit needs an applied record whose resultingRevision is ${rev}`);
   }
   if (history.includes(rev)) throw new StoreError("REVISION_EXISTS", `revision ${rev} already exists`);
+  // The model must have been derived from the revision the store holds now: never append a model
+  // validated against another line (or an earlier state) to this one.
+  const head = history.at(-1)!;
+  if (record.baseRevision !== head) {
+    throw new StoreError("HEAD_CHANGED", `change ${record.changeId} was validated against ${record.baseRevision}, but the store is now at ${head}; nothing was written`);
+  }
+  if (parseRevisionId(rev).scheme === "branch-safe" && !isChildRevision(rev, model, head, history.length + 1)) {
+    throw new StoreError("BAD_COMMIT", `${rev} is not the digest of this model as revision ${history.length + 1} after ${head}; nothing was written`);
+  }
 }
 
 // ---------------------------------------------------------------------------------------
@@ -115,7 +135,13 @@ export class MemoryStore implements ModelStore {
   revisions(): string[] {
     return [...this.order];
   }
-  commit(model: Model, record: ChangeRecord): void {
+  snapshot(): StoreSnapshot {
+    return { model: this.current(), history: this.revisions(), token: this.order.join("\0") };
+  }
+  commit(model: Model, record: ChangeRecord, token?: string): void {
+    if (token !== undefined && token !== this.order.join("\0")) {
+      throw new StoreError("HEAD_CHANGED", "the store moved since the snapshot this change was validated against; nothing was written");
+    }
     assertCommittable(model, record, this.order);
     this.revs.set(model.project.modelRevision, structuredClone(model));
     this.order.push(model.project.modelRevision);
@@ -212,7 +238,12 @@ export class FileStore implements ModelStore {
     return [...this.head.history];
   }
 
-  commit(model: Model, record: ChangeRecord): void {
+  snapshot(): StoreSnapshot {
+    this.sync();
+    return { model: readRevisionFile(this.dir, this.head.revision, this.head.history), history: [...this.head.history], token: this.validated };
+  }
+
+  commit(model: Model, record: ChangeRecord, token?: string): void {
     // Write guard: the change was validated against this.head. If HEAD on disk moved since then
     // (checkout, pull, another process), writing would replace that line's HEAD. Refuse before
     // touching any file.
@@ -225,13 +256,14 @@ export class FileStore implements ModelStore {
         `HEAD moved from ${this.head.revision} to ${disk.revision} on disk since this change was validated (Git checkout, pull or another writer); nothing was written. Re-read the model and retry.`,
       );
     }
-    if (storeFingerprint(this.dir) !== this.validated) {
+    assertCommittable(model, record, this.head.history);
+    const fp = storeFingerprint(this.dir);
+    if (fp !== this.validated || (token !== undefined && token !== fp)) {
       throw new StoreError(
         "STORE_CHANGED",
         "model store files changed on disk since this change was validated (for example a Git merge or checkout); nothing was written. Re-read the model and retry.",
       );
     }
-    assertCommittable(model, record, this.head.history);
     const rev = model.project.modelRevision;
     const next: Head = { format: 1, revision: rev, history: [...this.head.history, rev], lastCommit: record };
 
