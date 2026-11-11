@@ -2,8 +2,10 @@
 
 Status: **proposed for review** (2026-11-11; revised after review on PR #8 for the agent-first
 operating model agreed on 2026-11-11). Design contract for M2 (Issue #6). Sections 1–3
-are implemented in the M2.1 PR; sections 4–6 are the contract the M2.2–M2.5 slices will build
-on and are not implemented yet. Items marked *(proposed)* are implementation choices the issue
+are implemented in the M2.1 PR. Sections 4–6 are implemented for claims and deterministic
+verification in M2.4 (Issue #13); the decisions settled there are listed under "M2.4 decisions"
+at the end of section 5, and the user-facing description is [docs/bindings.md](../bindings.md).
+Rename hints, a query surface for claims and the revalidation workflow remain M2.5. Items marked *(proposed)* are implementation choices the issue
 asks to keep open until this ADR is reviewed.
 
 ## Context
@@ -42,11 +44,11 @@ subdirectories. Fixed name and location, so every clone agrees without configura
   HEAD                    shared   commit point (ADR 0003), unchanged format 1
   revisions/<rev>.yaml    shared   immutable revisions
   changes/<id>.json       shared   proposal records
-  bindings/               shared   binding claims (M2.4, section 5)
+  bindings/<id>.json      shared   binding claims, one file each (M2.4, section 5)
   .gitignore              shared   written by `vcv project init`
   audit.jsonl             local    attempt log (ADR 0004), per checkout   (proposed)
   orphaned/               local    recovery leftovers
-  cache/                  local    locator-resolution cache (M2.3)
+  cache/                  local    reserved for a locator-resolution cache (none yet)
 ```
 
 Shared files contain **no absolute paths** and no machine- or user-specific data beyond what
@@ -202,7 +204,7 @@ has no parent and is exempt.
 
 *(proposed)* encoding: `rev-<seq>-<12 hex>`; digest input and `vcv-revision-v1` domain tag.
 
-## 4. Source locators (contract for M2.4, proposed)
+## 4. Source locators (implemented in M2.4)
 
 A locator is what an agent (or person) writes to say *where* an artifact is; VCV only checks
 that it resolves. It is not produced by VCV analysis.
@@ -212,8 +214,8 @@ type SourceLocator = {
   path: string;                 // repository-relative POSIX, normalized; no "..", no leading "/", no "\\"
   selector:
     | { kind: "file" }
-    | { kind: "symbol"; name: string; declaration?: "class" | "function" | "method" | "const" | "interface" | "type" }
-    | { kind: "route"; method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE"; route: string; handler?: string }
+    | { kind: "symbol"; name: string; declaration?: "class" | "function" | "method" | "property" | "accessor" | "const" | "interface" | "type" | "enum" }
+    | { kind: "route"; method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "HEAD" | "OPTIONS" | "ALL"; route: string; handler?: string }
     | { kind: "test"; name: string };      // describe/it title path, " > " separated
 };
 ```
@@ -222,9 +224,12 @@ Serialized for people as `path#symbol:EnrollmentService.reject`,
 `path#route:POST /enrollments/:id/reject`, `path#test:Enrollment > rejects`. `symbol.name` is the
 dotted container path (`Class.method`). Paths are compared case-sensitively; a locator whose
 path differs only by case from a file on disk is reported, not matched (case-insensitive
-filesystems).
+filesystems). Paths must already be normalized (no `.`, `//` or trailing `/`), must not enter
+`.git/`, `.vcv/` or `node_modules/`, and must not leave the checkout through a symlink. A route is
+the `@Controller` path joined with the method decorator's path; a global prefix, versioning or
+`RouterModule` is not applied.
 
-## 5. Bindings: three separate concerns (contract for M2.4/M2.5, proposed)
+## 5. Bindings: three separate concerns (implemented in M2.4; see "M2.4 decisions")
 
 The existing `Binding` in `packages/core/src/bindings.ts` is extended, not replaced. A binding
 keeps three things apart that must never be read as each other:
@@ -297,7 +302,59 @@ recording a corrected claim is the agent's job. Nothing is rebound silently.
 **Branch changes** need no special case: claims are files in `.vcv/bindings/`, so they switch
 with the checkout, and verification is recomputed against the new working tree.
 
-## 6. Locator resolution and optional analyzers (contract for M2.3, proposed)
+### M2.4 decisions
+
+Settled in the M2.4 PR, where they differ from or refine the proposal above:
+
+- **Claim format.** The stored claim is `format: 1` and groups what was inspected under
+  `observed: { commit, workingTree, fingerprint: { algorithm, file, selector? } }`.
+  `workingTree` is `clean | modified | untracked | no-git` for the bound file, which is more
+  useful than one boolean. `fingerprint.algorithm` (`vcv-fp-1`) lets a later scheme compare an
+  old claim as `unknown` instead of `changed`. There are no timestamps; Git records when.
+  Files are serialized with a fixed key order, so the same claim is always the same bytes.
+- **Binding ID.** Optional on create; the default is `<relation>.<object slug>.<8 hex of the
+  canonical locator>`, so the same claim made on two branches is the same file. It is minted
+  once and **kept on reassert** (the proposal derived it from the locator, which would have made
+  "reassert after a rename" a different binding).
+- **Recording is a guarded write, not a model change.** Claims are not ChangeRecords and do not
+  go through `ModelEngine` propose/approve: they never alter intent, and a pending state for
+  routine mappings would be the "universal manual mapping step" this ADR rules out. The host
+  grants `binding:record` (add, reassert, remove) and `binding:dispute`. Routing consequential
+  claims to the approval gate is left for when a policy needs it.
+- **Checkout safety.** Each write passes the claim it expects on disk (none, or its SHA-256
+  digest). The write takes one snapshot (store fingerprint, Git commit, claim digest), validates
+  against it, and re-checks all three plus the bound source file's bytes immediately before the
+  rename (`BINDING_EXISTS`, `BINDING_CHANGED`, `NOT_FOUND`, `STATE_CHANGED`; nothing written).
+  The model store's own fingerprint and guards are unchanged: a binding write does not
+  invalidate a model writer's snapshot, and a model commit does not need to know about claims.
+- **Unchecked claims.** Recording is refused unless the locator resolves to exactly one
+  artifact. A claim the resolver cannot check is refused too, unless the caller explicitly
+  allows it; it then always verifies as `unchecked`.
+- **Selector fingerprint.** SHA-256 over the declaration's syntax tokens (leaf tokens of the
+  parse tree, JSDoc nodes skipped, JSX text whitespace collapsed). Comments and formatting do not
+  count; decorators do. Overload signatures belong to their single implementation, and a
+  get/set pair is one accessor.
+- **Freshness.** Verification reports `source` and `model` freshness separately, each with a
+  cause, plus Git context (`commitMoved`, file state) that never makes a claim stale by itself.
+  An edit elsewhere in the bound file is reported (`fileChanged: true`) but leaves the claim
+  `resolved`. Model change is decided by comparing the bound object's canonical JSON at the
+  claim's revision and at the current one; `assessBinding`/`Binding` are deprecated.
+- **Complete evidence for `resolved`** (review of PR #14). `resolved` requires a unique locator
+  and both freshness axes known `unchanged`. Known change wins (`stale`); otherwise any unknown
+  axis (project not ready, claim revision outside this checkout's history, unknown fingerprint
+  scheme) gives `indeterminate`, which `vcv binding verify` does not count as a pass.
+- **Read boundary** (review of PR #14). Claim reads follow the same filesystem boundary as
+  writes: `.vcv/` and `bindings/` must be plain directories, and an entry is read only if it is a
+  regular, non-symlink file of at most 64 KiB (`O_NOFOLLOW`, re-checked with `fstat`). Other
+  entries are `invalid` with an `unsafe:<kind>` digest, never dereferenced. Source files are
+  size-checked before parsing, and whole-file fingerprints are streamed.
+- **Parser.** The TypeScript 6 compiler API, pinned exactly in `@vcv/repo`, syntax only. The
+  repository's TypeScript 7 has no stable in-process JS API.
+- **Not yet.** No resolver cache, no audit entries for claim writes (Git is the record), no rename
+  hints, and claims do not affect project status (a broken claim file is `invalid` in
+  verification; the model is still served).
+
+## 6. Locator resolution and optional analyzers (resolver implemented in M2.4; no cache or inventory tool yet)
 
 VCV needs exactly one source capability: **resolving and fingerprinting the locators in
 section 4** for supported files, deterministically. That resolver is part of the evidence
@@ -306,7 +363,8 @@ meaning.
 
 - Resolver coverage *(proposed)*: `.ts`/`.tsx`; top-level and class-member declarations;
   NestJS `@Controller` + `@Get/@Post/...` routes; `describe`/`it`/`test` titles in
-  `*.test.ts(x)`/`*.spec.ts(x)`. Parser: the TypeScript compiler API (already a dev dependency).
+  `*.test.ts(x)`/`*.spec.ts(x)`. Parser: the TypeScript 6 compiler API, pinned in `@vcv/repo`
+  (implemented; also `.mts`/`.cts`, interface members, enums, and `HEAD`/`OPTIONS`/`ALL` routes).
   Anything else is `unchecked`, never guessed (computed routes, dynamic imports, aliased
   decorators).
 - Results are a rebuildable, git-ignored cache under `.vcv/cache/`, keyed by file content hash;
@@ -322,6 +380,8 @@ meaning.
 ## Consequences
 
 - New package `@vcv/repo` (Git observation + project loading) depends on `@vcv/core`; Core
-  stays free of Git and process spawning. The locator resolver (M2.3) belongs there too.
-- CLI: `vcv project status [path] [--json]`, `vcv project init <path> <model.yaml>`.
+  stays free of Git and process spawning. The locator resolver and the claim store (M2.4) live
+  there too; Core only defines the claim and locator types.
+- CLI: `vcv project status [path] [--json]`, `vcv project init <path> <model.yaml>`,
+  `vcv binding add|reassert|remove|dispute|list|verify` (M2.4).
 - Tests that asserted the literal `rev-2` now assert the `rev-2-<digest>` shape.

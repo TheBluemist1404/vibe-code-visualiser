@@ -76,6 +76,23 @@ export function parsePorcelainZ(text: string): string[] {
   return out;
 }
 
+/** The commit HEAD points at, or null (no commits, or not a Git checkout). Cheaper than observeGit. */
+export function headCommit(root: string): string | null {
+  return git(root, ["rev-parse", "--verify", "-q", "HEAD"])?.trim() || null;
+}
+
+/**
+ * How one repository-relative file compares with Git HEAD: unchanged, edited (staged or not),
+ * or not tracked (new or ignored). "no-git" outside a working tree. Read-only.
+ */
+export function fileWorkingState(root: string, rel: string): "clean" | "modified" | "untracked" | "no-git" {
+  if (!findWorkTreeRoot(root)) return "no-git";
+  const tracked = git(root, ["ls-files", "-z", "--", rel]);
+  if (!tracked) return "untracked";
+  const status = git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", rel]) ?? "";
+  return status === "" ? "clean" : "modified";
+}
+
 function gitOperation(root: string): GitOperation | null {
   const marker = (name: string) => {
     const p = git(root, ["rev-parse", "--git-path", name])?.trim();

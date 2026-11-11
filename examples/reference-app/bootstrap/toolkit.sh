@@ -19,7 +19,11 @@ mkdir -p "$dest/bin"
 cd "$vcv_home"
 [ -d node_modules ] || { echo "toolkit: run npm ci in $vcv_home first" >&2; exit 1; }
 paths=(package.json node_modules apps/cli/package.json apps/cli/src)
-for p in packages/*; do paths+=("$p/package.json" "$p/src"); done
+for p in packages/*; do
+  paths+=("$p/package.json" "$p/src")
+  # A package-local dependency (e.g. @vcv/repo's pinned TypeScript parser) is not hoisted.
+  [ -d "$p/node_modules" ] && paths+=("$p/node_modules")
+done
 # node_modules/@vcv/mcp would dangle (apps/mcp is not copied); everything else is real.
 tar -cf - --exclude=node_modules/@vcv/mcp --exclude=node_modules/.cache "${paths[@]}" | tar -C "$dest" -xf -
 cp docs/agent-bootstrap.md "$dest/AGENT_GUIDE.md"

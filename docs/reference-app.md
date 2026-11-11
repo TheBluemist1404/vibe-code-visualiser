@@ -81,3 +81,14 @@ The recorded run and its independent scoring against `ORACLE.md` are in
 `packages/repo/test/bootstrap.test.ts` keeps the guide and prompt free of fixture vocabulary,
 checks the toolkit's contents, and replays the recorded draft through `vcv project init` on a
 fresh checkout. That test needs neither `claude` nor network access.
+
+## Binding claims (M2.4)
+
+`examples/reference-app/bindings/demo.sh <dir>` materializes Course Desk, creates `.vcv/` from
+the M2.3 agent draft, and walks through binding claims with the public CLI: an agent records
+claims to `EnrollmentService.enroll`, a route and a test; a missing symbol, an unsafe path and an
+unsupported selector are refused; renaming the method makes the claim `missing` (and the
+controller that calls it `stale`); a person reasserts it with `--expect`; and `.vcv/HEAD` never
+moves. The recorded output is [samples/m2.4-bindings/demo.txt](samples/m2.4-bindings/demo.txt).
+`packages/repo/test/bindings.test.ts` runs the demo, the planned controlled changes C1–C3 from
+`ORACLE.md`, and the cross-branch and path-safety scenarios. See [bindings.md](bindings.md).
