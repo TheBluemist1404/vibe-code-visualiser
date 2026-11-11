@@ -106,9 +106,16 @@ concurrently, and MCP stays read-only. A single writer is not enough in a checko
   of the revision file's bytes, not by revision ID: the initial revision and legacy IDs are not
   content-addressed, so two branches can hold different models named `rev-1`. `projectStatus`
   exposes the same file digest, and `refresh()` reports such a swap as `switched`.
+- **One snapshot per change.** The engine takes a single `snapshot()` (model, history,
+  fingerprint token), validates the change against it, derives the new revision ID from it and
+  commits with its token. It never re-reads the store in between, so a checkout landing after
+  validation cannot retarget an already validated model. Independently of the engine, the store
+  refuses a commit whose `record.baseRevision` is not its current HEAD (`HEAD_CHANGED`) or whose
+  branch-safe ID does not verify as the model's digest after that HEAD (`BAD_COMMIT`). A refused
+  commit becomes a `rejected` outcome with that code; no record is created or changed.
 - **Write guard.** `commit()` re-checks immediately before its first write: `HEAD_CHANGED` if
-  HEAD's line moved, `STORE_CHANGED` if any other fingerprinted file changed (including a
-  same-ID revision swap) since validation. Nothing is written in either case. The writer's own
+  HEAD's line moved, `STORE_CHANGED` if any fingerprinted file differs from the snapshot token
+  (including a same-ID revision swap that the store has since adopted). Nothing is written in either case. The writer's own
   writes update the validated fingerprint. This is check-then-rename, not a lock: a checkout
   landing inside the few milliseconds of the write itself is not prevented, and a change to a
   change record that keeps its size and mtime is not detected.
