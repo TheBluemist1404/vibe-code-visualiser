@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { loadModel } from "@vcv/ir";
 import type { Model } from "@vcv/ir";
 import { FileStore, MemoryStore, ModelEngine } from "@vcv/core";
-import { createQueryApi } from "../src/index.ts";
+import { LIMITS, createQueryApi } from "../src/index.ts";
 import type { QueryResult } from "../src/index.ts";
 
 const FIXTURE = join(import.meta.dirname, "../../../examples/enrollment/model.rev-1.yaml");
@@ -183,6 +183,8 @@ test("unknown IDs and invalid queries return structured errors", () => {
     ["bad kind", q.searchObjects({ text: "x", kinds: ["table" as never] })],
     ["limit too large", q.searchObjects({ text: "enrollment", limit: 1000 })],
     ["no seeds", q.analyzeImpact({ ids: [] })],
+    ["too many kinds", q.searchObjects({ text: "x", kinds: Array(LIMITS.search.maxKinds + 1).fill("module") })],
+    ["too many relations", q.getContext({ id: "mod-enrollment", relations: Array(LIMITS.context.maxRelations + 1).fill("consumes") })],
     ["not an object", q.searchObjects(null as never)],
   ];
   for (const [label, r] of cases) {

@@ -67,8 +67,8 @@ const id = z.string().min(1).max(256);
 
 export const LIMITS = {
   overview: { defaultModules: 50, maxModules: 200, listItems: 25 },
-  search: { default: 20, max: 100 },
-  context: { defaultDepth: 1, maxDepth: 2, defaultNodes: 25, maxNodes: 200, defaultEdges: 100, maxEdges: 1000, defaultNested: 25, maxNested: 200 },
+  search: { default: 20, max: 100, maxKinds: KINDS.length },
+  context: { maxRelations: RELATIONS.length, defaultDepth: 1, maxDepth: 2, defaultNodes: 25, maxNodes: 200, defaultEdges: 100, maxEdges: 1000, defaultNested: 25, maxNested: 200 },
   impact: { maxSeeds: 20, defaultDepth: 3, maxDepth: 5, defaultResults: 50, maxResults: 200 },
 } as const;
 
@@ -84,7 +84,8 @@ export const searchRequest = z
   .object({
     ...revision,
     text: z.string().trim().min(1).max(200),
-    kinds: z.array(z.enum(KINDS)).min(1).optional(),
+    /** At most one entry per kind; a longer list can only repeat entries. */
+    kinds: z.array(z.enum(KINDS)).min(1).max(LIMITS.search.maxKinds).optional(),
     limit: z.number().int().min(1).max(LIMITS.search.max).default(LIMITS.search.default),
     cursor: z.string().optional(),
   })
@@ -96,7 +97,8 @@ export const contextRequest = z
     id,
     depth: z.number().int().min(1).max(LIMITS.context.maxDepth).default(LIMITS.context.defaultDepth),
     direction: z.enum(["incoming", "outgoing", "both"]).default("both"),
-    relations: z.array(z.enum(RELATIONS)).min(1).optional(),
+    /** At most one entry per relation; a longer list can only repeat entries. */
+    relations: z.array(z.enum(RELATIONS)).min(1).max(LIMITS.context.maxRelations).optional(),
     maxNodes: z.number().int().min(1).max(LIMITS.context.maxNodes).default(LIMITS.context.defaultNodes),
     maxEdges: z.number().int().min(1).max(LIMITS.context.maxEdges).default(LIMITS.context.defaultEdges),
     /** Cap on every array inside the focus record (states, transitions, attributes, refs). */

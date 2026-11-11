@@ -7,7 +7,7 @@
     "apps/*"
   ],
   "scripts": {
-    "test": "node --test --experimental-strip-types \"packages/*/test/*.test.ts\"",
+    "test": "node --test --experimental-strip-types \"packages/*/test/*.test.ts\" \"apps/*/test/*.test.ts\"",
     "typecheck": "tsc -p tsconfig.json",
     "vcv": "node --experimental-strip-types apps/cli/src/main.ts"
   },

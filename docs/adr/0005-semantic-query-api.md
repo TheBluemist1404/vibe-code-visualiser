@@ -12,8 +12,8 @@ and returns four functions:
 | Operation | Request (zod-validated, strict) | Returns |
 |---|---|---|
 | `getProjectOverview` | `expectedRevision?`, `moduleLimit` (≤200, default 50), `cursor?` | project, one page of module summaries (purpose, dependsOn, consumes, exposed contracts each capped at 25 with full `counts`, owned counts), `modulesTotal`, `truncated`, `nextCursor`, inventory, validation counts |
-| `searchObjects` | `text`, `kinds?`, `limit` (≤100, default 20), `cursor?` | hits with score and matched fields, `total`, `truncated`, `nextCursor` |
-| `getContext` | `id`, `depth` (1–2), `direction`, `relations?`, `maxNodes` (≤200, default 25), `maxEdges` (≤1000, default 100), `maxNestedItems` (≤200, default 25) | focus object with a bounded copy of its record and `truncatedFields`, nodes with distance, every qualifying edge between returned nodes (capped), `edgesTotal`, `truncated` |
+| `searchObjects` | `text`, `kinds?` (≤11, one per kind), `limit` (≤100, default 20), `cursor?` | hits with score and matched fields, `total`, `truncated`, `nextCursor` |
+| `getContext` | `id`, `depth` (1–2), `direction`, `relations?` (≤19, one per relation), `maxNodes` (≤200, default 25), `maxEdges` (≤1000, default 100), `maxNestedItems` (≤200, default 25) | focus object with a bounded copy of its record and `truncatedFields`, nodes with distance, every qualifying edge between returned nodes (capped), `edgesTotal`, `truncated` |
 | `analyzeImpact` | `ids` (1–20), `maxDepth` (≤5, default 3), `maxResults` (≤200, default 50) | candidates with distance, `via`, one shortest dependency path and a plain-text reason |
 
 Every result is `{ ok: true, context, data, diagnostics }` or `{ ok: false, context?, error }`

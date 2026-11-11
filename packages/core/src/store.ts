@@ -177,10 +177,7 @@ export class FileStore implements ModelStore {
 
   revision(rev: string): Model | undefined {
     if (!this.head.history.includes(rev)) return undefined; // uncommitted files do not exist
-    const p = join(this.dir, "revisions", `${rev}.yaml`);
-    const r = loadModel(readFileSync(p, "utf8"));
-    if (!r.model) throw new StoreError("CORRUPT", `committed revision ${rev} is unreadable: ${r.diagnostics.map((d) => d.message).join("; ")}`);
-    return r.model;
+    return readRevisionFile(this.dir, rev);
   }
 
   revisions(): string[] {
@@ -304,16 +301,7 @@ export class FileStore implements ModelStore {
   }
 
   private readHead(): Head {
-    let head: Head;
-    try {
-      head = JSON.parse(readFileSync(join(this.dir, "HEAD"), "utf8")) as Head;
-    } catch {
-      throw new StoreError("CORRUPT", "HEAD is unreadable");
-    }
-    if (head.format !== 1 || !Array.isArray(head.history) || head.history.at(-1) !== head.revision) {
-      throw new StoreError("CORRUPT", "HEAD is not a valid format-1 head");
-    }
-    return head;
+    return readHeadFile(this.dir);
   }
 
   private changePath(id: string): string {
@@ -324,6 +312,67 @@ export class FileStore implements ModelStore {
   private write(step: "revision" | "head" | "change", path: string, text: string) {
     durableWrite(path, text, (phase) => this.opts.beforeStep?.(`${step}.${phase}`));
   }
+}
+
+/**
+ * A read-only view of a FileStore directory for query adapters (MCP, future UI readers).
+ *
+ * Unlike FileStore it never writes: it does not run recovery, create directories or touch the
+ * audit log. Each current() re-reads HEAD, so a long-lived reader sees revisions committed by
+ * another process (for example `vcv approve`) on its next call. That is safe without recovery
+ * because a revision file is written before HEAD names it and is never rewritten, and HEAD
+ * itself is replaced by an atomic rename; leftovers of an interrupted commit are not listed in
+ * HEAD and so are never read.
+ */
+export class FileStoreReader {
+  private readonly dir: string;
+  private cached?: { revision: string; model: Model };
+
+  constructor(dir: string) {
+    this.dir = dir;
+    if (!existsSync(join(dir, "HEAD"))) throw new StoreError("NOT_INITIALIZED", `${dir} is not an initialized model store (run init first)`);
+    this.current(); // fail at open, not on the first query, if HEAD or the current revision is unreadable
+  }
+
+  /** The committed revision HEAD names right now. */
+  current(): Model {
+    const head = readHeadFile(this.dir);
+    if (this.cached?.revision !== head.revision) {
+      this.cached = { revision: head.revision, model: readRevisionFile(this.dir, head.revision) };
+    }
+    // Callers get their own copy, as with MemoryStore, so nothing can alter the cached revision.
+    return structuredClone(this.cached.model);
+  }
+
+  revisions(): string[] {
+    return [...readHeadFile(this.dir).history];
+  }
+}
+
+function readHeadFile(dir: string): Head {
+  let head: Head;
+  try {
+    head = JSON.parse(readFileSync(join(dir, "HEAD"), "utf8")) as Head;
+  } catch {
+    throw new StoreError("CORRUPT", "HEAD is unreadable");
+  }
+  if (head.format !== 1 || !Array.isArray(head.history) || head.history.at(-1) !== head.revision) {
+    throw new StoreError("CORRUPT", "HEAD is not a valid format-1 head");
+  }
+  return head;
+}
+
+function readRevisionFile(dir: string, rev: string): Model {
+  if (persistedIdProblem(rev)) throw new StoreError("CORRUPT", `HEAD lists an invalid revision ID "${rev}"`);
+  let text: string;
+  try {
+    text = readFileSync(join(dir, "revisions", `${rev}.yaml`), "utf8");
+  } catch {
+    throw new StoreError("CORRUPT", `committed revision ${rev} is missing`);
+  }
+  const r = loadModel(text);
+  if (!r.model) throw new StoreError("CORRUPT", `committed revision ${rev} is unreadable: ${r.diagnostics.map((d) => d.message).join("; ")}`);
+  return r.model;
 }
 
 /** Write via temp file, fsync, rename, then fsync the directory where the OS allows it. */
