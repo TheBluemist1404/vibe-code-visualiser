@@ -4,7 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { z } from "zod";
@@ -12,6 +12,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { loadModel, parseYaml } from "../../../packages/ir/src/index.ts";
+import type { Model } from "../../../packages/ir/src/index.ts";
 import { FileStore, ModelEngine } from "../../../packages/core/src/index.ts";
 import { contextRequest, impactRequest, overviewRequest, searchRequest } from "../../../packages/query/src/index.ts";
 import type { ImpactAnalysis, ObjectContext, ProjectOverview, QueryResult, SearchResults } from "../../../packages/query/src/index.ts";
@@ -21,9 +22,11 @@ const MAIN = join(ROOT, "apps/mcp/src/main.ts");
 const FIXTURES = join(ROOT, "examples/enrollment");
 const TOOLS = ["vcv_analyze_impact", "vcv_get_context", "vcv_get_project_overview", "vcv_search_objects"];
 
-function newStore(): string {
+function newStore(edit?: (m: Model) => void): string {
   const dir = join(mkdtempSync(join(tmpdir(), "vcv-mcp-")), "store");
-  FileStore.init(dir, loadModel(readFileSync(join(FIXTURES, "model.rev-1.yaml"), "utf8")).model!);
+  const model = loadModel(readFileSync(join(FIXTURES, "model.rev-1.yaml"), "utf8")).model!;
+  edit?.(model);
+  FileStore.init(dir, model);
   return dir;
 }
 
@@ -72,6 +75,9 @@ test("the server advertises the four read-only tools, their query-contract schem
     const instructions = s.client.getInstructions() ?? "";
     assert.match(instructions, /implementationChecked: false/);
     assert.match(instructions, /expectedRevision/);
+    assert.match(instructions, /draft or approved/);
+    assert.match(instructions, /context\.snapshotStatus/);
+    assert.match(instructions, /Do not present a draft as approved intent/);
     assert.match(instructions, /overview[\s\S]*search[\s\S]*context[\s\S]*impact[\s\S]*source and tests/i);
 
     const { tools } = await s.client.listTools();
@@ -92,6 +98,7 @@ test("the server advertises the four read-only tools, their query-contract schem
       assert.equal(t.annotations?.destructiveHint, false);
       assert.match(t.description ?? "", /implementationChecked=false/);
       assert.match(t.description ?? "", /expectedRevision/);
+      assert.match(t.description ?? "", /draft or approved: see context\.snapshotStatus and diagnostics/);
     }
     assert.match(tools.find((t) => t.name === "vcv_search_objects")!.description!, /bounded/i);
     assert.match(s.stderr(), /serving prj-lms .* \(now at rev-1, read-only\)/);
@@ -197,6 +204,50 @@ test("bad queries return structured tool errors and the server keeps serving", a
 
     // Still alive and answering normally after all of that.
     assert.ok((await s.call("vcv_get_project_overview")).ok);
+  } finally {
+    await s.close();
+  }
+});
+
+test("a draft store is served as a draft, with unresolved references as diagnostics, not resolved facts", async () => {
+  const s = await connect(
+    newStore((m) => {
+      m.project.status = "draft";
+      m.modules[1]!.dependsOn = [{ unresolved: "Identity" }];
+    }),
+  );
+  try {
+    const overview = await s.call<ProjectOverview>("vcv_get_project_overview");
+    assert.ok(overview.ok);
+    assert.equal(overview.context.snapshotStatus, "draft");
+    assert.deepEqual(overview.data.validation, { errors: 0, warnings: 1 });
+    assert.deepEqual(overview.data.modules.find((m) => m.id === "mod-notifications")!.dependsOn, [{ unresolved: "Identity" }]);
+
+    const ctx = await s.call<ObjectContext>("vcv_get_context", { id: "mod-notifications", direction: "outgoing" });
+    assert.ok(ctx.ok);
+    assert.equal(ctx.context.snapshotStatus, "draft");
+    assert.ok(ctx.data.edges.some((e) => e.relation === "dependsOn" && typeof e.to !== "string" && e.to.unresolved === "Identity"));
+    assert.ok(!ctx.data.nodes.some((n) => n.id === "Identity"), "an unresolved name is never a node");
+    assert.deepEqual(ctx.diagnostics.map((d) => d.code), ["UNRESOLVED_REF"]);
+  } finally {
+    await s.close();
+  }
+});
+
+test("a store that becomes unreadable mid-session gives STORE_ERROR and the server recovers when it is fixed", async () => {
+  const dir = newStore();
+  const s = await connect(dir);
+  try {
+    const head = readFileSync(join(dir, "HEAD"), "utf8");
+    writeFileSync(join(dir, "HEAD"), "{ torn");
+    const broken = await s.call("vcv_get_project_overview");
+    assert.ok(!broken.ok);
+    assert.equal(broken.error.code, "STORE_ERROR");
+    assert.match(broken.error.message, /HEAD is unreadable/);
+    assert.match(s.stderr(), /vcv_get_project_overview failed: HEAD is unreadable/);
+
+    writeFileSync(join(dir, "HEAD"), head);
+    assert.ok((await s.call("vcv_get_project_overview")).ok, "still serving once the store is readable again");
   } finally {
     await s.close();
   }

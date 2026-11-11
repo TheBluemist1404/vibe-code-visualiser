@@ -2,7 +2,7 @@
 
 A thin [MCP](https://modelcontextprotocol.io) adapter over VCV's Semantic Query API
 (`@vcv/query`). It lets any MCP-compatible coding agent (Claude Code, Codex, others) read the
-approved architecture model of **one** local model store. Single user, local, stdio only.
+versioned declared model (draft or approved) of **one** local model store. Single user, local, stdio only.
 
 It is transport only: each tool forwards its arguments to one `@vcv/query` operation and
 returns that operation's result unchanged. Validation, limits, revision checks, cursors, errors
@@ -30,6 +30,10 @@ All four are annotated `readOnlyHint: true`. Every result is the `QueryResult` J
 { "ok": false, "context": { /* when a snapshot was read */ },
   "error": { "code": "UNKNOWN_ID", "message": "...", "details": [ /* for INVALID_REQUEST */ ] } }
 ```
+
+`snapshotStatus` is `draft` or `approved`. A draft may hold unresolved references, which appear
+as edge targets `{ "unresolved": "..." }` and as `UNRESOLVED_REF` diagnostics; agents are told
+to check it rather than treat a draft as agreed intent.
 
 Error codes are the query package's `INVALID_REQUEST`, `UNKNOWN_ID`, `REVISION_MISMATCH`,
 `INVALID_CURSOR`, plus the adapter's `STORE_ERROR` (the store could not be read) and
@@ -89,7 +93,7 @@ copy a template section into your repository yourself; VCV never edits instructi
 
 Both describe the same workflow:
 
-1. `vcv_get_project_overview`, note `context.modelRevision`
+1. `vcv_get_project_overview`, note `context.modelRevision` and `context.snapshotStatus`
 2. `vcv_search_objects` to find the objects in question
 3. `vcv_get_context` on their IDs
 4. `vcv_analyze_impact` when a change is being considered

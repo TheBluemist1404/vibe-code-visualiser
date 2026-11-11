@@ -22,7 +22,7 @@ export const SERVER_VERSION = "0.1.0";
 /** Shown to every client at initialize; mirrors templates/AGENTS.md in short form. */
 export const SERVER_INSTRUCTIONS = `VCV (Vibe Code Visualiser) read-only model queries.
 
-These tools read the project's approved architecture model (the VCV IR): modules, capabilities, data, rules, events, contracts and behaviors, with stable IDs. They describe declared INTENT, not the code. Every result carries context.implementationChecked: false; nothing has been compared with source code, tests or runtime behavior. Never present a query result as proof that the repository implements it.
+These tools read the project's versioned declared model (the VCV IR, draft or approved): modules, capabilities, data, rules, events, contracts and behaviors, with stable IDs. They describe declared INTENT, not the code. Check context.snapshotStatus on every result: "approved" is agreed intent; "draft" is work in progress that may contain unresolved references (edges whose target is { unresolved: "..." }), reported in diagnostics and in the overview's validation counts. Do not present a draft as approved intent. Every result carries context.implementationChecked: false; nothing has been compared with source code, tests or runtime behavior. Never present a query result as proof that the repository implements it.
 
 Recommended workflow:
 1. vcv_get_project_overview: modules, their dependencies and exposed contracts, and the current modelRevision.
@@ -34,7 +34,7 @@ Recommended workflow:
 Pass the modelRevision you started from as expectedRevision on later calls; a REVISION_MISMATCH error means the model changed during your analysis, so start again. Errors come back as { ok: false, error: { code, message, details? } } with code INVALID_REQUEST, UNKNOWN_ID, REVISION_MISMATCH, INVALID_CURSOR or STORE_ERROR. These tools never change the model.`;
 
 const IR_ONLY =
-  "Reads the VCV model (declared intent) only: the result has context.implementationChecked=false, and the repository's code must be inspected separately before claiming anything about real behavior.";
+  "Reads the VCV model (declared intent, draft or approved: see context.snapshotStatus and diagnostics) only: the result has context.implementationChecked=false, and the repository's code must be inspected separately before claiming anything about real behavior.";
 const REVISION = "Pass expectedRevision (the modelRevision from an earlier result) to detect a model change between calls.";
 
 type ToolDef = { tool: Tool; call: (api: QueryApi, args: unknown) => QueryResult<unknown> };

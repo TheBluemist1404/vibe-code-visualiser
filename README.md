@@ -19,7 +19,7 @@ Requires Node 22.18+ (runs TypeScript directly, no build step).
 
 ```sh
 npm install
-npm test            # 72 tests
+npm test            # 74 tests
 npm run typecheck
 npm run vcv -- validate examples/enrollment/model.rev-1.yaml
 npm run vcv -- init .vcv-store examples/enrollment/model.rev-1.yaml
@@ -34,7 +34,7 @@ node --experimental-strip-types apps/mcp/src/main.ts --store .vcv-store   # MCP 
 ## Agent access (MCP)
 
 `apps/mcp` lets any MCP client (Claude Code, Codex, others) read the model of one local store
-through `vcv_get_project_overview`, `vcv_search_objects`, `vcv_get_context` and
+(draft or approved) through `vcv_get_project_overview`, `vcv_search_objects`, `vcv_get_context` and
 `vcv_analyze_impact`. It is a transport adapter over `@vcv/query`; results are model intent only
 (`implementationChecked: false`). Client configs, opt-in `AGENTS.md`/`CLAUDE.md` guidance and
 the agent workflow are in [apps/mcp/README.md](apps/mcp/README.md); a recorded Claude Code run is
