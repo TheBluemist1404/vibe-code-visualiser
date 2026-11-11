@@ -217,6 +217,32 @@ test("merging two diverged model branches is detected (conflict, then foreign hi
   assert.equal(after.model!.revision, revB);
 });
 
+test("merging diverged branches and resolving .vcv/HEAD to the common ancestor keeps both branch revisions (PR #8 review)", () => {
+  const repo = repoWithProject();
+  git(repo, "checkout", "-q", "-b", "feature-a");
+  const revA = engineFor(repo).propose(rename("ch-a", "rev-1", "Waiting (A)"), owner).record!.resultingRevision!;
+  commitAll(repo, "model: A");
+  git(repo, "checkout", "-q", "main");
+  git(repo, "checkout", "-q", "-b", "feature-b");
+  const revB = engineFor(repo).propose(rename("ch-b", "rev-1", "Waiting (B)"), owner).record!.resultingRevision!;
+  commitAll(repo, "model: B");
+
+  assert.equal(tryGit(repo, "merge", "-q", "feature-a"), false);
+  // Resolve HEAD to main's version (rev-1): both rev-2 files now verify as "children of HEAD".
+  writeFileSync(join(repo, VCV_DIR, "HEAD"), git(repo, "show", `main:${VCV_DIR}/HEAD`) + "\n");
+  git(repo, "add", `${VCV_DIR}/HEAD`);
+  git(repo, "commit", "-q", "-m", "merge, model reset to ancestor");
+
+  const s = projectStatus(repo);
+  assert.equal(s.state, "diverged");
+  assert.equal(s.model!.revision, "rev-1");
+  assert.ok(s.inspection.state === "diverged" && [revA, revB].every((r) => s.inspection.state === "diverged" && s.inspection.foreign.some((f) => f.id === r)));
+  assert.throws(() => new FileStore(join(repo, VCV_DIR)), (e: unknown) => e instanceof StoreError && e.code === "DIVERGED");
+  const files = readdirSync(join(repo, VCV_DIR, "revisions"));
+  assert.ok(files.includes(`${revA}.yaml`) && files.includes(`${revB}.yaml`), "neither branch revision was orphaned");
+  assert.equal(git(repo, "status", "--porcelain"), "", "nothing in the checkout changed");
+});
+
 test("model history survives restart and an ordinary checkout round trip", () => {
   const repo = repoWithProject();
   const e = engineFor(repo);

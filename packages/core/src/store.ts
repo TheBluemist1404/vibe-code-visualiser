@@ -413,24 +413,38 @@ export function conflictedFiles(dir: string): string[] {
 export type UnlistedRevision = {
   id: string;
   file: string;
-  /** leftover: exactly the next child of HEAD (an interrupted commit). foreign: anything else. */
+  /** leftover: provably an interrupted commit of this store. foreign: anything else. */
   kind: "leftover" | "foreign";
   reason: string;
 };
 
-/** Revision files present on disk that HEAD's history does not list, classified. Read-only. */
+/**
+ * Revision files present on disk that HEAD's history does not list, classified. Read-only.
+ *
+ * Conservative by design (ADR 0007 §3): recovery may move a "leftover" out of the way, so a
+ * file is a leftover only if all of these hold, and is "foreign" (never moved) otherwise:
+ *   1. it is the next child of HEAD: branch-safe digest verifies with HEAD as parent at
+ *      seq = history length + 1 (legacy IDs: named nextRevision(HEAD));
+ *   2. no change record says it was applied. The commit protocol writes the applied record only
+ *      after HEAD names the revision, so an applied record is durable evidence that the revision
+ *      was committed on some line of history, not interrupted;
+ *   3. it is the only such candidate. One interrupted commit leaves at most one file, so two
+ *      verified children (e.g. two branches merged with HEAD resolved to their common ancestor)
+ *      mean real branch revisions.
+ */
 export function unlistedRevisions(dir: string, head: { revision: string; history: readonly string[] }): UnlistedRevision[] {
   const committed = new Set(head.history);
-  const out: UnlistedRevision[] = [];
-  if (!existsSync(join(dir, "revisions"))) return out;
+  if (!existsSync(join(dir, "revisions"))) return [];
+  const seq = head.history.length + 1;
+  const applied = appliedRevisions(dir);
+  const found: UnlistedRevision[] = [];
   for (const file of readdirSync(join(dir, "revisions")).sort()) {
     if (file.includes(".tmp-")) continue;
     const id = file.replace(/\.yaml$/, "");
     if (committed.has(id)) continue;
-    const seq = head.history.length + 1;
     if (parseRevisionId(id).scheme === "legacy") {
       // Pre-M2 stores minted sequential IDs, so only the name can be checked.
-      out.push(
+      found.push(
         id === nextRevision(head.revision)
           ? { id, file, kind: "leftover", reason: `named as the next sequential revision after ${head.revision}` }
           : { id, file, kind: "foreign", reason: `not in HEAD's history and not the next revision after ${head.revision}` },
@@ -444,9 +458,36 @@ export function unlistedRevisions(dir: string, head: { revision: string; history
       model = undefined;
     }
     if (model && model.project.modelRevision === id && isChildRevision(id, model, head.revision, seq)) {
-      out.push({ id, file, kind: "leftover", reason: `content digest matches a child of ${head.revision}` });
+      found.push({ id, file, kind: "leftover", reason: `content digest matches a child of ${head.revision}` });
     } else {
-      out.push({ id, file, kind: "foreign", reason: model ? `not a child of HEAD revision ${head.revision}` : "unreadable revision file" });
+      found.push({ id, file, kind: "foreign", reason: model ? `not a child of HEAD revision ${head.revision}` : "unreadable revision file" });
+    }
+  }
+  const candidates = found.filter((u) => u.kind === "leftover");
+  for (const u of candidates) {
+    const by = applied.get(u.id);
+    if (by) {
+      u.kind = "foreign";
+      u.reason = `change ${by} records it as applied, so it was committed on another line of history`;
+    } else if (candidates.length > 1) {
+      u.kind = "foreign";
+      u.reason = `${candidates.length} unlisted children of ${head.revision}; an interrupted commit leaves at most one, so these are branch revisions`;
+    }
+  }
+  return found;
+}
+
+/** Revision ID → change ID, for every readable "applied" change record. Read-only. */
+function appliedRevisions(dir: string): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!existsSync(join(dir, "changes"))) return out;
+  for (const f of readdirSync(join(dir, "changes")).sort()) {
+    if (f.includes(".tmp-") || !f.endsWith(".json")) continue;
+    try {
+      const rec = JSON.parse(readFileSync(join(dir, "changes", f), "utf8")) as Partial<ChangeRecord>;
+      if (rec.status === "applied" && typeof rec.resultingRevision === "string") out.set(rec.resultingRevision, rec.changeId ?? f.replace(/\.json$/, ""));
+    } catch {
+      // unreadable records are reported by the regular checks
     }
   }
   return out;

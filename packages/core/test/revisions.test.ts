@@ -158,3 +158,46 @@ test("inspectStore distinguishes absent, uninitialized and invalid stores withou
   const r = inspectStore(broken);
   assert.equal(r.state, "invalid");
 });
+
+// Review on PR #8 (P1): two branch children merged with HEAD resolved to their common ancestor
+// both verify as "next child of HEAD". They are real revisions and must never be orphaned.
+function mergedAtAncestor({ keepChangeRecords }: { keepChangeRecords: boolean }) {
+  const { root, a, b, revA, revB } = divergedPair();
+  const merged = join(root, "merged");
+  cpSync(join(root, "base"), merged, { recursive: true }); // HEAD = rev-1, the common ancestor
+  for (const [side, rev] of [[a, revA], [b, revB]] as const) {
+    cpSync(join(side, "revisions", `${rev}.yaml`), join(merged, "revisions", `${rev}.yaml`));
+    if (keepChangeRecords) cpSync(join(side, "changes"), join(merged, "changes"), { recursive: true });
+  }
+  return { merged, revA, revB };
+}
+
+for (const keepChangeRecords of [true, false]) {
+  test(`sibling branch revisions with HEAD at their common ancestor are DIVERGED, not leftovers (change records ${keepChangeRecords ? "kept" : "removed"})`, () => {
+    const { merged, revA, revB } = mergedAtAncestor({ keepChangeRecords });
+    const before = readdirSync(join(merged, "revisions")).sort();
+
+    const inspected = inspectStore(merged);
+    assert.equal(inspected.state, "diverged");
+    if (inspected.state === "diverged") {
+      assert.deepEqual(inspected.foreign.map((f) => f.id).sort(), [revA, revB].sort());
+      assert.deepEqual(inspected.leftovers, []);
+    }
+    assert.throws(() => new FileStore(merged), storeErr("DIVERGED"));
+    assert.deepEqual(readdirSync(join(merged, "revisions")).sort(), before, "no branch revision was moved");
+    assert.ok(!existsSync(join(merged, "orphaned")) || readdirSync(join(merged, "orphaned")).length === 0);
+  });
+}
+
+test("a single verified child is still foreign when an applied change record names it", () => {
+  const { root, a, revA } = divergedPair();
+  const merged = join(root, "merged-one");
+  cpSync(join(root, "base"), merged, { recursive: true });
+  cpSync(join(a, "revisions", `${revA}.yaml`), join(merged, "revisions", `${revA}.yaml`));
+  cpSync(join(a, "changes"), join(merged, "changes"), { recursive: true });
+  const inspected = inspectStore(merged);
+  assert.equal(inspected.state, "diverged");
+  assert.match(inspected.state === "diverged" ? inspected.foreign[0]!.reason : "", /records it as applied/);
+  assert.throws(() => new FileStore(merged), storeErr("DIVERGED"));
+  assert.ok(existsSync(join(merged, "revisions", `${revA}.yaml`)));
+});
