@@ -7,8 +7,10 @@ import { readFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { loadModel, parseYaml, ownershipTree } from "../../../packages/ir/src/index.ts";
 import type { Diagnostic, TreeNode } from "../../../packages/ir/src/index.ts";
-import { FileStore, ModelEngine } from "../../../packages/core/src/index.ts";
+import { FileStore, ModelEngine, StoreError } from "../../../packages/core/src/index.ts";
 import { createQueryApi } from "../../../packages/query/src/index.ts";
+import { initProject, projectStatus } from "../../../packages/repo/src/index.ts";
+import type { ProjectStatus } from "../../../packages/repo/src/index.ts";
 import type { HostContext, Outcome, Permission } from "../../../packages/core/src/index.ts";
 
 const USAGE = `vcv <command> [options]
@@ -22,6 +24,8 @@ const USAGE = `vcv <command> [options]
   query <store-dir> search <text...> [--kind k] [--limit n]
   query <store-dir> context <id> [--depth n] [--direction in|out|both] [--limit n]
   query <store-dir> impact <id...> [--depth n] [--limit n]
+  project status [path] [--json]        Find .vcv/ in the checkout containing path; report model + Git state
+  project init <path> <model.yaml>      Create .vcv/ at the checkout root from a valid model file
 
   --as <principal>      Who is acting (default: local-user)
   --perm <list>         Comma list of propose,apply,approve (default: all three)`;
@@ -36,6 +40,7 @@ const { positionals, values } = parseArgs({
     limit: { type: "string" },
     depth: { type: "string" },
     direction: { type: "string" },
+    json: { type: "boolean", default: false },
   },
 });
 const [cmd, a, b, ...rest] = positionals;
@@ -59,6 +64,16 @@ function printOutcome(o: Outcome) {
 function printTree(n: TreeNode, depth = 0) {
   console.log(`${"  ".repeat(depth)}${n.kind} ${n.id}${n.name !== n.id ? ` "${n.name}"` : ""}`);
   n.children.forEach((c) => printTree(c, depth + 1));
+}
+
+function printProject(s: ProjectStatus) {
+  console.log(`project: ${s.state} (${s.storeDir})`);
+  if (s.model) console.log(`model:   ${s.model.projectId} at ${s.model.revision} [${s.model.status}], ${s.model.history.length} revision(s)`);
+  if (s.git) {
+    const where = s.git.branch ?? `detached at ${s.git.commit?.slice(0, 12) ?? "(no commits)"}`;
+    console.log(`git:     ${where}${s.git.commit ? ` ${s.git.commit.slice(0, 12)}` : ""}${s.git.dirty ? ", working tree dirty" : ", clean"}${s.git.operation ? `, ${s.git.operation} in progress` : ""}`);
+  }
+  for (const d of s.diagnostics) console.log(`  ${d.severity === "error" ? "✗" : d.severity === "warning" ? "!" : "·"} ${d.code}: ${d.message}`);
 }
 
 function main(): number {
@@ -107,10 +122,36 @@ function main(): number {
       console.log(JSON.stringify(result, null, 2));
       return result.ok ? 0 : 1;
     }
+    case "project": {
+      if (a === "status") {
+        const st = projectStatus(b ?? ".");
+        if (values.json) console.log(JSON.stringify(st, null, 2));
+        else printProject(st);
+        return st.state === "ready" ? 0 : 1;
+      }
+      if (a === "init" && b && rest[0]) {
+        const r = loadModel(readFileSync(rest[0], "utf8"));
+        if (!r.ok || !r.model) {
+          printDiagnostics(r.diagnostics);
+          return 1;
+        }
+        printProject(initProject(b, r.model));
+        return 0;
+      }
+      console.log(USAGE);
+      return 1;
+    }
     default:
       console.log(USAGE);
       return cmd ? 1 : 0;
   }
 }
 
-process.exitCode = main();
+try {
+  process.exitCode = main();
+} catch (err) {
+  // Store problems (e.g. CONFLICTED or DIVERGED after a Git merge) are reported, not thrown at the user.
+  if (!(err instanceof StoreError)) throw err;
+  console.error(`✗ ${err.code}: ${err.message}`);
+  process.exitCode = 2;
+}

@@ -38,7 +38,9 @@ which, and guidance tells agents not to treat a draft as agreed intent); it must
    atomically; interrupted-commit leftovers are not in `HEAD` and are never read. Consequences:
    a long-running server sees revisions committed by the CLI, `expectedRevision` works across
    that boundary, and querying a store changes nothing on disk. Recovery still happens when a
-   writer (`FileStore`) next opens the store.
+   writer (`FileStore`) next opens the store. Since ADR 0007 the reader also re-runs the read-only integrity
+   checks (`inspectStore`) whenever store files change, and refuses a conflicted, diverged or corrupt
+   checkout.
 8. **Guidance at three levels**, all provider-neutral: tool descriptions (each states IR-only,
    bounds and `expectedRevision`), the MCP `instructions` sent at initialize, and opt-in
    `AGENTS.md` / `CLAUDE.md` templates the user copies in themselves.

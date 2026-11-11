@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { MemoryStore, ModelEngine } from "../src/index.ts";
-import { baseModel, mcpAgent, owner, renamePending, reviewer, timeoutChange, viewer } from "./helpers.ts";
+import { assertRev, baseModel, mcpAgent, owner, renamePending, reviewer, timeoutChange, viewer } from "./helpers.ts";
 
 const engine = () => new ModelEngine(new MemoryStore(baseModel()), { now: () => new Date("2026-11-10T15:00:00Z") });
 
@@ -20,7 +20,7 @@ test("a denied proposal is logged but creates no record, so it cannot claim the 
       ["propose", "user:hoang", "ch-timeout-01", "applied", []],
     ],
   );
-  assert.equal(e.audit()[1]!.resultingRevision, "rev-2");
+  assertRev(e.audit()[1]!.resultingRevision, 2);
   assert.equal(e.audit()[0]!.at, "2026-11-10T15:00:00.000Z");
 });
 

@@ -28,13 +28,14 @@ approved intent to match the code, or the other way round.
 ## Status
 
 Early and pre-release. The engine works from the command line and from coding agents over
-MCP. There is no visual interface yet and no repository indexing yet.
+MCP, and a model can now live in a `.vcv/` folder inside your Git repository. There is no
+visual interface yet, and the model is not yet linked to source code.
 
 | Milestone | What it delivers | Status |
 |---|---|---|
 | **M0** Semantic foundation | Typed IR, validation, change/approval engine, file store with crash recovery, audit log, read-only query API, CLI | ✅ Done |
 | **M1** Local MCP for agents | stdio MCP server with four read-only query tools, opt-in agent guidance, Claude Code demo | ✅ Done ([#5](https://github.com/TheBluemist1404/vibe-code-visualiser/pull/5)) |
-| **M2** Repository integration | `.vcv/` in the repo, TypeScript indexer, portable model↔code bindings | 🚧 Next ([#6](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/6)) |
+| **M2** Repository integration | `.vcv/` in the repo, TypeScript indexer, portable model↔code bindings | 🚧 In progress ([#6](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/6)): `.vcv/` projects and branch-safe revisions done ([#8](https://github.com/TheBluemist1404/vibe-code-visualiser/pull/8)) |
 | **M3** Approved model → code | Agent proposes model changes, human approves, coding agent implements, VCV records diff and tests | Planned |
 | **M4** Code → model reconciliation | Detect stale bindings and real contract drift after direct code edits | Planned |
 | **M5** Local visual product | Module graph, change review and evidence panels in a local UI | Planned |
@@ -64,7 +65,7 @@ to it: rejecting an enrollment request automatically after seven days.
 npm run vcv -- validate examples/enrollment/model.rev-1.yaml
 npm run vcv -- init .vcv-store examples/enrollment/model.rev-1.yaml
 
-# An agent proposes the change; a human approves it, creating rev-2
+# An agent proposes the change; a human approves it, creating a new revision
 npm run vcv -- propose .vcv-store examples/enrollment/change.timeout.yaml --as agent:mcp --perm propose
 npm run vcv -- approve .vcv-store ch-timeout-01 --as hoang
 
@@ -74,8 +75,23 @@ npm run vcv -- query .vcv-store search enrollment notifications --kind module
 npm run vcv -- query .vcv-store impact evt-enrollment-rejected
 ```
 
-Run `npm run vcv` with no arguments for the full command list. `--as` and `--perm` simulate
+Revision IDs after the first look like `rev-2-84dfbfe94209`: the digest keeps two Git
+branches from minting the same ID. Run `npm run vcv` with no arguments for the full command list. `--as` and `--perm` simulate
 the identity a real host would supply; they are not authentication.
+
+### Keep the model in your repository
+
+A VCV project lives in `.vcv/` at the root of a Git checkout and is committed with the code.
+
+```sh
+npm run vcv -- project init <checkout> examples/enrollment/model.rev-1.yaml   # create <checkout>/.vcv
+npm run vcv -- project status <checkout>                                      # model and Git state, read-only
+```
+
+`project status` works from any subdirectory and reports whether the project is ready,
+absent, conflicted, diverged or invalid, along with the checkout's commit, branch and dirty
+state. It never creates or repairs anything. A merged or half-merged `.vcv/` is refused rather
+than silently reset. See [ADR 0007](docs/adr/0007-repository-projects.md).
 
 ### Connect a coding agent
 
@@ -96,6 +112,7 @@ are in [apps/mcp/README.md](apps/mcp/README.md).
 packages/ir        The model (IR): types, schema, validation, YAML load/dump, tree and graph views
 packages/core      Typed operations, ModelEngine (propose/approve), file and memory stores, audit log, bindings, layout
 packages/query     Read-only semantic queries: overview, search, context, impact
+packages/repo      Repository projects: find and load .vcv/, observe Git state, track branches
 apps/cli           `vcv` command-line tool, a thin layer over the engine
 apps/mcp           Local stdio MCP server for coding agents
 examples/          Sample Enrollment model and a proposed change
@@ -114,7 +131,8 @@ them holds its own copy of the model or its own rules.
   [0003](docs/adr/0003-persistence.md) file persistence and crash recovery ·
   [0004](docs/adr/0004-audit.md) change records and audit log ·
   [0005](docs/adr/0005-semantic-query-api.md) semantic query API ·
-  [0006](docs/adr/0006-mcp-adapter.md) MCP adapter
+  [0006](docs/adr/0006-mcp-adapter.md) MCP adapter ·
+  [0007](docs/adr/0007-repository-projects.md) repository projects, revisions and bindings
 - [IR v0.2 conformance](docs/ir-v0.2-conformance.md): which tests cover the spec's acceptance
   cases, extra hardening, and decisions the spec left open
 - [Sample semantic queries](docs/samples/semantic-queries.md) and the

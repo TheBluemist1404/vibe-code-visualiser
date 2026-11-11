@@ -4,7 +4,9 @@ import { hasErrors, persistedIdProblem, validateModel } from "@vcv/ir";
 import type { Diagnostic, Model } from "@vcv/ir";
 import { applyOperations, proposedChangeSchema } from "./operations.ts";
 import type { ProposedModelChange } from "./operations.ts";
-import type { ModelStore } from "./store.ts";
+import { StoreError } from "./store.ts";
+import type { ChangeGuard, ModelStore, StoreSnapshot } from "./store.ts";
+import { branchSafeRevisionId } from "./revisions.ts";
 
 /** Supplied by the trusted host (session, OAuth token, local user), never by the caller's payload. */
 export type HostContext = {
@@ -108,6 +110,9 @@ export class ModelEngine {
       return this.log("propose", ctx, { status: "rejected", changeId: claimedId, diagnostics });
     }
     const change = parsed.data;
+    // Take the snapshot first and decide everything (replay check, validation, the write) on it,
+    // so no decision is made on a checkout that is gone by the time of the write.
+    const snap = this.store.snapshot();
     const existing = this.store.getChange(change.changeId);
     if (existing) {
       // Replays never overwrite the original record.
@@ -128,15 +133,21 @@ export class ModelEngine {
       validationResults: [],
       change,
     };
-    const check = this.dryRun(change, this.store.current());
-    if (check.errors.length) return this.log("propose", ctx, this.save({ ...record, status: "rejected", validationResults: check.errors }));
+    // Validate and commit against that snapshot: the store refuses the write if anything moved
+    // in between (a Git checkout, a merge, another writer), so a validated model is never
+    // retargeted onto a different line.
+    const check = this.dryRun(change, snap.model);
+    // Every record write is guarded by the same snapshot: a new record may only be created where
+    // none exists, in the store state it was validated against.
+    const fresh = { token: snap.token, previous: null };
+    if (check.errors.length) return this.log("propose", ctx, this.save({ ...record, status: "rejected", validationResults: check.errors }, fresh));
     record.validationResults = check.warnings;
 
     const needsApproval =
       !ctx.permissions.includes("model:apply") ||
       (change.operations.some((o) => o.type === "approveDraft") && !ctx.permissions.includes("model:approve"));
-    if (needsApproval) return this.log("propose", ctx, this.save(record));
-    return this.log("propose", ctx, this.commit(record, check.model!));
+    if (needsApproval) return this.log("propose", ctx, this.save(record, fresh));
+    return this.log("propose", ctx, this.commit(record, check.model!, snap, null));
   }
 
   /**
@@ -148,6 +159,7 @@ export class ModelEngine {
     if (idProblem) {
       return this.log("approve", ctx, { status: "rejected", changeId, diagnostics: [diag("INVALID_ID", "changeId", `change id ${idProblem}`)] });
     }
+    const snap = this.store.snapshot();
     const record = this.store.getChange(changeId);
     if (!record) {
       return this.log("approve", ctx, { status: "rejected", changeId, diagnostics: [diag("UNKNOWN_CHANGE", "changeId", `no change "${changeId}"`)] });
@@ -161,11 +173,11 @@ export class ModelEngine {
     if (ctx.principalId === record.proposerId && !this.policy.allowSelfApproval) {
       return this.log("approve", ctx, { status: "denied", changeId, diagnostics: [diag("SELF_APPROVAL", "", "a proposer cannot approve their own change")], record });
     }
-    const check = this.dryRun(record.change, this.store.current());
+    const check = this.dryRun(record.change, snap.model);
     if (check.errors.length) {
-      return this.log("approve", ctx, this.save({ ...record, approverId: ctx.principalId, status: "rejected", validationResults: check.errors }));
+      return this.log("approve", ctx, this.save({ ...record, approverId: ctx.principalId, status: "rejected", validationResults: check.errors }, { token: snap.token, previous: record }));
     }
-    return this.log("approve", ctx, this.commit({ ...record, approverId: ctx.principalId, validationResults: check.warnings }, check.model!));
+    return this.log("approve", ctx, this.commit({ ...record, approverId: ctx.principalId, validationResults: check.warnings }, check.model!, snap, record));
   }
 
   private dryRun(change: ProposedModelChange, current: Model): { model?: Model; errors: Diagnostic[]; warnings: Diagnostic[] } {
@@ -186,16 +198,37 @@ export class ModelEngine {
       : { model: applied.model, errors: [], warnings: results };
   }
 
-  private commit(record: ChangeRecord, model: Model): Outcome {
-    const next = nextRevision(model.project.modelRevision);
+  private commit(record: ChangeRecord, model: Model, snap: StoreSnapshot, previous: ChangeRecord | null): Outcome {
+    // Branch-safe identity (ADR 0007): the parent is the revision the change was validated
+    // against, and the digest covers the new content, so two Git branches never mint the same ID
+    // for different models.
+    const parent = model.project.modelRevision;
+    const next = branchSafeRevisionId(model, parent, snap.history.length + 1);
     model.project.modelRevision = next;
     const done: ChangeRecord = { ...record, status: "applied", resultingRevision: next };
-    this.store.commit(model, done);
+    try {
+      this.store.commit(model, done, { token: snap.token, previous });
+    } catch (e) {
+      // The store moved after validation. Nothing was written and no record is created or
+      // changed (a pending proposal stays pending); the caller re-reads and retries.
+      if (e instanceof StoreError && (e.code === "HEAD_CHANGED" || e.code === "STORE_CHANGED")) {
+        return { status: "rejected", changeId: record.changeId, diagnostics: [diag(e.code, "", e.message)] };
+      }
+      throw e;
+    }
     return { status: "applied", changeId: done.changeId, diagnostics: done.validationResults, record: done };
   }
 
-  private save(record: ChangeRecord): Outcome {
-    this.store.putChange(record);
+  private save(record: ChangeRecord, guard: ChangeGuard): Outcome {
+    try {
+      this.store.putChange(record, guard);
+    } catch (e) {
+      // The store moved since validation: persist nothing (the attempt is still audited).
+      if (e instanceof StoreError && e.code === "STORE_CHANGED") {
+        return { status: "rejected", changeId: record.changeId, diagnostics: [diag(e.code, "", e.message)] };
+      }
+      throw e;
+    }
     return { status: record.status, changeId: record.changeId, diagnostics: record.validationResults, record };
   }
 
@@ -213,6 +246,11 @@ export class ModelEngine {
   }
 }
 
+/**
+ * The pre-M2 sequential scheme (rev-1 → rev-2). No longer used for new commits because two
+ * Git branches would both produce rev-2; kept for callers and tests that relied on it.
+ * @deprecated use branchSafeRevisionId
+ */
 export function nextRevision(rev: string): string {
   const m = /^(.*?)(\d+)$/.exec(rev);
   return m ? `${m[1]}${Number(m[2]) + 1}` : `${rev}-1`;

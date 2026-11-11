@@ -1,3 +1,4 @@
+import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadModel, parseYaml } from "@vcv/ir";
@@ -20,3 +21,9 @@ export const renamePending = (changeId: string, expectedRevision = "rev-1"): Pro
   expectedRevision,
   operations: [{ type: "renameState", behaviorId: "beh-enrollment-approval", stateId: "st-pending", name: "Waiting" }],
 });
+
+/** Revision IDs are branch-safe (ADR 0007): rev-<seq>-<12 hex digest>. */
+export function assertRev(actual: string | undefined, seq: number): string {
+  assert.match(actual ?? "", new RegExp(`^rev-${seq}-[0-9a-f]{12}$`));
+  return actual!;
+}
