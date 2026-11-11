@@ -1,7 +1,7 @@
 // The implementation handoff and the implementation evidence report (Issue #17, M3.3).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -412,4 +412,56 @@ test("a malformed persisted report is INVALID_RECORD, never a crash", () => {
   writeFileSync(file, "{not json");
   const s = implementationStatus(repo, id);
   assert.equal(!s.ok && s.error.code, "INVALID_RECORD");
+});
+
+test("bound sources behind in-checkout symlinks (directory and file, Git-ignored targets) are snapshotted by their target bytes", () => {
+  const { repo, id } = approved();
+  mkdirSync(join(repo, ".generated"));
+  const dirTarget = join(repo, ".generated/module.ts");
+  const fileTarget = join(repo, ".generated/single.ts");
+  writeFileSync(dirTarget, "export const generated = 1;\n");
+  writeFileSync(fileTarget, "export const single = 1;\n");
+  symlinkSync("../../../.generated", join(repo, "server/src/enrollment/alias"));
+  symlinkSync("../../../.generated/single.ts", join(repo, "server/src/enrollment/single.ts"));
+  appendFileSync(join(repo, ".git/info/exclude"), ".generated/\nserver/src/enrollment/alias\nserver/src/enrollment/single.ts\n");
+  const host = { ...implementer, source: "agent" } as never;
+  for (const [bindingId, path] of [["gen.alias", "server/src/enrollment/alias/module.ts"], ["gen.single", "server/src/enrollment/single.ts"]] as const) {
+    const b = recordBinding(repo, { bindingId, modelObjectId: "rul-seat-limit", relation: "implements", locator: { path, selector: { kind: "file" } } }, host, null);
+    assert.equal(b.resolution.state, "resolved", JSON.stringify(b.resolution));
+  }
+  const ok = buildHandoff(repo, id);
+  assert.ok(ok.ok, JSON.stringify(ok));
+  assert.equal(ok.data.git.worktree.complete, true);
+  const h = ok.data;
+  edit(repo, SERVICE, "taken.length >= course.capacity", "taken.length >= course.capacity /* capacity reported */");
+  const rec = recordImplementation(repo, report(h), implementer);
+  assert.ok(rec.ok, JSON.stringify(rec));
+
+  for (const target of [dirTarget, fileTarget]) {
+    const original = readFileSync(target, "utf8");
+    const change = () => writeFileSync(target, original.replace("= 1", "= 2"));
+    const hb = buildHandoff(repo, id, { afterRead: change });
+    assert.equal(!hb.ok && hb.error.code, "STATE_CHANGED", `handoff, ${target}`);
+    writeFileSync(target, original);
+    const rr = recordImplementation(repo, report(h), implementer, rec.data.digest, { afterRead: change });
+    assert.equal(!rr.ok && rr.error.code, "STATE_CHANGED", `record, ${target}`);
+    writeFileSync(target, original);
+    const ss = implementationStatus(repo, id, { afterRead: change });
+    assert.equal(!ss.ok && ss.error.code, "STATE_CHANGED", `show, ${target}`);
+    // Changed and left changed: the stored snapshot no longer matches.
+    const now = implementationStatus(repo, id);
+    assert.ok(now.ok);
+    assert.equal(now.data.changedSinceReport, true, `show after an edit of ${target}`);
+    writeFileSync(target, original);
+    const back = implementationStatus(repo, id);
+    assert.ok(back.ok);
+    assert.equal(back.data.changedSinceReport, false);
+  }
+  // Retargeting the link is a change too, even to identical bytes.
+  writeFileSync(join(repo, ".generated/other.ts"), readFileSync(fileTarget));
+  rmSync(join(repo, "server/src/enrollment/single.ts"));
+  symlinkSync("../../../.generated/other.ts", join(repo, "server/src/enrollment/single.ts"));
+  const moved = implementationStatus(repo, id);
+  assert.ok(moved.ok);
+  assert.equal(moved.data.changedSinceReport, true);
 });

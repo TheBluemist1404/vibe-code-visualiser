@@ -6,16 +6,18 @@
 // difference) and a stored report can say which dirty source state it describes. The same paths
 // with the same bytes give the same digest.
 //
-// Safe and bounded: paths are repository-relative and never followed through a symlink (a symlink
-// is identified by its target text, a directory or other non-file by its kind); files are opened
+// Safe and bounded: paths are repository-relative. A path through a symlink is resolved the way the
+// binding verifier resolves it (resolveInside: only targets inside the checkout), and identified by
+// the resolved in-checkout path and that target's bytes, so the snapshot covers exactly what
+// verification reads; a target outside the checkout is never read. Files are opened
 // O_NOFOLLOW|O_NONBLOCK and streamed in chunks; past the per-file or total byte budget, or the file
 // count, a file is identified by its size and modification time instead of its bytes, and the state
 // says so (`complete: false`). This is observation integrity, not a claim about what the code does.
-import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readSync, readlinkSync } from "node:fs";
+import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readSync, readlinkSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
-import { join } from "node:path";
+import { join, relative, sep } from "node:path";
 import { canonicalJson } from "@vcv/core";
-import { pathProblem } from "./locator.ts";
+import { pathProblem, resolveInside } from "./locator.ts";
 
 export const WORKTREE_LIMITS = { files: 5000, fileBytes: 64 * 1024 * 1024, totalBytes: 512 * 1024 * 1024 } as const;
 const CHUNK = 1024 * 1024;
@@ -53,14 +55,7 @@ function identity(root: string, rel: string, budget: number): { id: string; byte
     } catch {
       return { id: "absent" };
     }
-    if (st.isSymbolicLink()) {
-      if (i < segments.length - 1) return { id: "via-symlink" };
-      try {
-        return { id: `symlink:${createHash("sha256").update(readlinkSync(abs)).digest("hex")}` };
-      } catch {
-        return { id: "symlink:unreadable" };
-      }
-    }
+    if (st.isSymbolicLink()) return throughLink(root, rel, abs, budget);
     if (i < segments.length - 1) {
       if (!st.isDirectory()) return { id: "absent" };
       continue;
@@ -73,6 +68,40 @@ function identity(root: string, rel: string, budget: number): { id: string; byte
   }
   return { id: "absent" };
 }
+
+/**
+ * A path with a symlink on it: resolved like verifyBinding resolves it, identified by the link
+ * text, the resolved in-checkout path and the target's bytes (or why it does not resolve).
+ */
+function throughLink(root: string, rel: string, link: string, budget: number): { id: string; bytes?: number; partial?: boolean } {
+  let text: string;
+  try {
+    text = createHash("sha256").update(readlinkSync(link)).digest("hex").slice(0, 16);
+  } catch {
+    text = "unreadable";
+  }
+  let where;
+  try {
+    where = resolveInside(root, rel);
+  } catch {
+    return { id: `link:${text}:unresolvable` };
+  }
+  if (!where.ok) return { id: `link:${text}:${where.reason}` };
+  const target = relative(realRoot(root), where.abs).split(sep).join("/");
+  const st = lstatSync(where.abs, { bigint: true });
+  const stat = `stat:${st.size}:${st.mtimeNs}:${st.ino}`;
+  if (st.size > BigInt(Math.min(budget, WORKTREE_LIMITS.fileBytes))) return { id: `link:${text}:${target}:${stat}`, partial: true };
+  const h = hashFile(where.abs);
+  return h ? { id: `link:${text}:${target}:${h.id}`, bytes: h.bytes } : { id: `link:${text}:${target}:unreadable` };
+}
+
+const realRoot = (root: string) => {
+  try {
+    return realpathSync(root);
+  } catch {
+    return root;
+  }
+};
 
 function hashFile(abs: string): { id: string; bytes: number } | null {
   let fd: number;

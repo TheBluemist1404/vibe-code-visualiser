@@ -119,7 +119,9 @@ four sections apart, and none implies another:
   - `.vcv/` changes by area;
   - `worktree`: a digest of the bytes of every changed and bound file (content hashes, or size and
     mtime past the budget, then `complete: false`), so the report names one concrete dirty source
-    state, not only file names;
+    state, not only file names. A path through a symlink is resolved like the binding verifier
+    resolves it (inside the checkout only) and identified by its target's bytes, Git-ignored
+    targets included;
   - each affected binding claim verified now, with `reasserted` (claimed at the approved revision
     or later).
 - **`notReconciled`**: always `not-reconciled`. Whether the code implements the model is M4's
