@@ -12,6 +12,7 @@ packages/core   typed operations, ModelEngine (propose/approve), Memory/File sto
 apps/cli        thin CLI over the engine (no domain logic)
 apps/mcp        local stdio MCP server exposing the four read-only queries to coding agents (ADR 0006)
 examples/enrollment   model.rev-1.yaml (valid fixture), change.timeout.yaml (the spec's 7-day timeout change)
+examples/reference-app   Course Desk, a runnable React + NestJS app used as an unknown repository for agent-led bootstrap (M2.2)
 docs/adr        decision records 0001–0007
 docs/samples    sample query results and the recorded agent demo on the Enrollment fixture
 ```
@@ -20,7 +21,7 @@ Requires Node 22.18+ (runs TypeScript directly, no build step).
 
 ```sh
 npm install
-npm test            # 126 tests
+npm test            # 129 tests
 npm run typecheck
 npm run vcv -- validate examples/enrollment/model.rev-1.yaml
 npm run vcv -- init .vcv-store examples/enrollment/model.rev-1.yaml
@@ -42,6 +43,10 @@ A project lives in `.vcv/` at the root of a Git checkout and is committed with t
 dirty state as observation context. Nothing is created or repaired by looking. New model
 revisions are named `rev-<seq>-<digest>` so two branches never mint the same ID, and a merged
 or half-merged `.vcv/` is refused rather than silently reset. See ADR 0007.
+
+`examples/reference-app` is the app an agent will bootstrap a model for (M2.3). Use
+`examples/reference-app/materialize.sh <dest>` to get it as its own Git repository with no
+`.vcv/`, or `examples/reference-app/check.sh` to install, test, run and check it end to end.
 
 ## Agent access (MCP)
 

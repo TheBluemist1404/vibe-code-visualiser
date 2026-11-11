@@ -24,3 +24,22 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm test
+
+  # The M2.2 reference app (examples/reference-app), installed and run as a standalone repository.
+  reference-app:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # The fixture's own minimum (its package.json engines; jsdom needs 22.22.2) and latest 22.x.
+        node: ["22.22.2", "22.x"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            examples/reference-app/template/package-lock.json
+      - run: npm ci
+      - run: examples/reference-app/check.sh "$RUNNER_TEMP/course-desk"
