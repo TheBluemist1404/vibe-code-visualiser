@@ -25,32 +25,40 @@ tools. So the reviewer's identity must not come from anything that agent can set
 | a reviewer-owned trust file outside the checkout (`--trust <file>`) | only if the agent can write there | yes |
 | an Ed25519 private key kept outside the checkout and any agent sandbox | no, unless it is leaked | yes, this is the identity |
 
-The boundary is therefore **a private key the agent cannot read**, matched against a **trust
-list whose authority is established outside the agent's reach**. Everything else is reported,
-never trusted.
+### Where authorization is actually established
 
-A local ref name proves nothing: whoever has a shell in the checkout can create a tag or a
-branch, or move `refs/remotes/origin/main`, to point at a commit with their own key in it. So a
-local approval accepts only two anchors, each reported with how its authority was established:
+Two things together are the boundary: **a private key the agent cannot read**, and **the host
+gate**: `vcv integrity` run by the hosting service's CI, reading the base and its trust list
+from the protected branch, in a required check the change under review cannot edit. A change
+is authorized when it passes that gate, and not before.
 
-- `pinned-commit`: `--trust-commit <full commit ID>`, which the reviewer copies from the hosting
-  service's view of the protected branch (not from this checkout). The commit must exist
-  locally (fetch first); with `--trust-ref`, the ref must resolve to exactly that commit.
-- `external-file`: `--trust <file>`, a trust list the reviewer keeps outside the checkout,
-  where the agent cannot write. VCV checks the resolved path (parent symlinks followed) is
-  outside the checkout; it cannot check who else can write it.
+`vcv review approve` cannot be that boundary on its own. It runs in a shell the coding agent
+may share, and anything it is told about where the trust list came from is the caller's word:
+a pinned commit ID is an **immutability pin, not proof of origin** (an agent can commit its own
+key, tag the commit and pass that tag with that SHA), and a file outside the checkout is only as
+safe as its write permissions. So VCV labels every local anchor **caller-asserted** and says, on
+every approval, that it is evidence for the gate, not authorization. What it still enforces
+locally:
 
-Neither proves the branch is protected (Git cannot): the reviewer asserts it by choosing the
-pin. The candidate is refused outright (`HEAD`, `@`, the checked-out branch under any spelling,
-a commit only it contains, any trust file inside the checkout). An unpinned `--trust-ref` is
-`local-ref` authority: fine for `vcv integrity` in CI, where the hosting service provides the
-ref and the agent does not control the runner, never for a local approval.
+- the candidate is refused outright: `HEAD`, `@`, the checked-out branch under any spelling, a
+  commit only it contains, any trust file inside the checkout (resolved, parent symlinks
+  followed), the working tree (except in explicit unsafe development mode);
+- a bare local ref name (tag, branch, `origin/main`) is refused, because anyone with a shell can
+  create or move one; the reviewer must pin the commit (`--trust-commit <full ID>`, copied from
+  the hosting service, with the ref, if given, resolving to exactly it) or use their own file
+  (`--trust <file>`);
+- the approver identity comes only from the key, the content only from the reviewed digest.
+
+An agent that signs with its own key under its own anchor gets a locally applied, signed,
+caller-asserted approval, and then fails the host gate: its key is not in the protected base's
+trust list (`untrusted-key`), and an integrity check whose trust anchor is not the base under
+check (or an ancestor of it) reports `TRUST_NOT_FROM_BASE`.
 
 What VCV cannot prove, and says so in every integrity report (`limits`):
 
 - which person held a key, or that a key was not shared or stolen;
-- that the trust list itself is right: it is only as strong as the branch protection on the ref
-  it is read from;
+- where a trust anchor came from: every anchor given on the command line is caller-asserted;
+  the trust list is only as strong as the branch protection and the CI setup that supply it;
 - who created the initial revision (`vcv project init` has no recorded derivation);
 - that the source code implements the model (that is M4's reconciliation);
 - anything from `.vcv/audit.jsonl`, which is local and not shared through Git.
@@ -172,14 +180,18 @@ be decided on the branch, and legacy unattested base revisions are not required 
 signature. An `invalid` attestation is always an error. A revision
 introduced without a valid attestation is a warning by default and an error with
 `--require-attestation`. Other checks: `HEAD_WITHOUT_LAST_COMMIT`, `HEAD_RECORD_MISMATCH`,
-`ORPHAN_APPLIED_RECORD`, `STRAY_ATTESTATION`, and `TRUST_FROM_CHECKOUT` when the trust list
+`ORPHAN_APPLIED_RECORD`, `STRAY_ATTESTATION`, `TRUST_NOT_FROM_BASE` when `--base` is given and
+the trust anchor is neither that base nor an ancestor of it (an error with
+`--require-attestation`), and `TRUST_FROM_CHECKOUT` when the trust list
 comes from the candidate (working tree, a file inside the checkout, `HEAD` or the checked-out
 branch): a warning by default, an error with `--require-attestation`, so a strict check never
-passes on self-controlled trust.
+passes on self-controlled trust. Every report carries `authorization`: `ok` means consistent and
+attested under the anchor given; it authorizes only when the host supplied that anchor.
 
-### In CI
+### In CI: the authorization gate
 
-Read the base and the trust list from the protected branch, never from the PR's own tree:
+Read the base and the trust list from the protected branch, never from the PR's own tree, and
+make sure the check itself is one the PR cannot change:
 
 ```yaml
 # .github/workflows/vcv.yml (excerpt)
@@ -188,10 +200,15 @@ Read the base and the trust list from the protected branch, never from the PR's 
 - run: npm ci && npm run vcv -- integrity . --base origin/main --trust-ref origin/main --require-attestation
 ```
 
-Protect `main` so that changes to `.vcv/reviewers.json` need a human review. A PR that adds the
-agent's own key to `reviewers.json` cannot use it to approve (its branch is not an anchor);
-signing in unsafe development mode is possible, but CI reports that key as `untrusted-key` and
-fails.
+- Make it a **required status check** on `main`, and protect `main` so that changes to
+  `.vcv/reviewers.json` and to the workflow file need a human code-owner review (for example
+  CODEOWNERS on `.vcv/reviewers.json` and `.github/workflows/`). A `pull_request` workflow runs
+  the PR's own copy of the workflow file, so without that protection a PR could edit the gate.
+- If you run it from `pull_request_target` instead, check out and run VCV from the base, and
+  treat the PR head only as data to read; never install or run the PR's code there.
+
+A PR that adds the agent's own key to `reviewers.json` and signs with it locally then fails
+here: the key is `untrusted-key` under the protected base's list.
 
 ## What this does not do
 

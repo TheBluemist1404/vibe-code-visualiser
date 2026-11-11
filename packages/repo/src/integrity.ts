@@ -22,9 +22,9 @@ import type { ChangeRecord } from "@vcv/core";
 import type { Model } from "@vcv/ir";
 import { readdirSync, lstatSync } from "node:fs";
 import { join } from "node:path";
-import { APPROVALS_DIR, ApprovalError, MAX_ATTESTATION_BYTES, keyFingerprint, loadTrust, readAttestation, signatureValid } from "./approval.ts";
+import { APPROVALS_DIR, ApprovalError, MAX_ATTESTATION_BYTES, TRUST_VERIFICATION, keyFingerprint, loadTrust, readAttestation, signatureValid } from "./approval.ts";
 import type { LoadedTrust, TrustSource } from "./approval.ts";
-import { fileAtCommit, filesAtCommit, resolveCommit } from "./git.ts";
+import { fileAtCommit, filesAtCommit, isAncestor, resolveCommit } from "./git.ts";
 import { VCV_DIR, projectStatus } from "./project.ts";
 
 export type IntegrityProblem = { code: string; severity: "error" | "warning"; message: string; revision?: string; changeId?: string };
@@ -59,7 +59,13 @@ export type IntegrityReport = {
   revision: string | null;
   revisions: RevisionCheck[];
   problems: IntegrityProblem[];
-  trust: { source: string; reviewers: number; protectedFromCheckout: boolean; authority: LoadedTrust["authority"]; anchor: string } | null;
+  trust: { source: string; reviewers: number; protectedFromCheckout: boolean; authority: LoadedTrust["authority"]; verification: typeof TRUST_VERIFICATION; anchor: string; commit: string | null } | null;
+  /**
+   * What `ok` means for authorization. `ok` says the history is consistent and attested under
+   * the given anchor; it authorizes only when the host supplied that anchor (CI on the protected
+   * branch). This field says so on every report.
+   */
+  authorization: string;
   base: { ref: string; commit: string; revision: string | null; history: string[] } | null;
   requireAttestation: boolean;
   /** What this check cannot establish. Always read with the result. */
@@ -74,6 +80,9 @@ export type IntegrityOptions = {
   /** Make every introduced revision without a trusted attestation an error (default: warning). */
   requireAttestation?: boolean;
 };
+
+const AUTHORIZATION =
+  "caller-asserted: ok means consistent and attested under the trust anchor given here; it authorizes a change only when that anchor (and --base) is supplied by the host from the hosting service's protected branch, in a check the change under review cannot edit";
 
 const LIMITS = [
   "An attestation proves that the holder of a trusted reviewer key signed this exact change; it does not prove which person held the key, or that the key was not shared or stolen.",
@@ -98,6 +107,7 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
     trust: null,
     base: null,
     requireAttestation,
+    authorization: AUTHORIZATION,
     limits: LIMITS,
     ...over,
   });
@@ -170,6 +180,12 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
         baseEvidence(status.root, storeDir, commit, opts.base, err);
       }
     }
+  }
+
+  // With a base, a Git trust anchor must be that base (or an ancestor of it): the trust list that
+  // governs a change is the one the change is merged into, never one the branch chose for itself.
+  if (base && trust?.commit && !isAncestor(status.root, trust.commit, base.commit)) {
+    (requireAttestation ? err : warn)("TRUST_NOT_FROM_BASE", `the trust list's commit ${trust.commit.slice(0, 12)} is not ${base.ref} (${base.commit.slice(0, 12)}) or one of its ancestors; read trust from the base under check`);
   }
 
   // Records.
@@ -266,7 +282,7 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
     projectId,
     revision,
     revisions,
-    trust: trust ? { source: trust.source, reviewers: trust.list.reviewers.length, protectedFromCheckout: trust.protectedFromCheckout, authority: trust.authority, anchor: trust.anchor } : null,
+    trust: trust ? { source: trust.source, reviewers: trust.list.reviewers.length, protectedFromCheckout: trust.protectedFromCheckout, authority: trust.authority, verification: TRUST_VERIFICATION, anchor: trust.anchor, commit: trust.commit ?? null } : null,
     base,
   });
 }

@@ -559,6 +559,7 @@ function reviewCommand(): number {
   const r = a === "approve" ? reviewApprove(path, input) : reviewFinalize(path, input);
   console.log(`reviewer: ${r.reviewer.id} (key ${r.reviewer.keyFingerprint}, trusted per ${r.reviewer.trustSource})`);
   console.log(`  trust anchor: ${r.reviewer.trustAnchor}`);
+  console.log(`  ! authorization ${r.authorization}`);
   const code = printOutcome(r.outcome);
   if (r.attestation) console.log(`  attestation: ${r.attestation.file}${r.attestation.alreadyPresent ? " (already present; unchanged)" : " (commit it with the change record and the new revision)"}`);
   return code;
@@ -568,6 +569,7 @@ function printIntegrity(r: IntegrityReport) {
   console.log(`integrity: ${r.ok ? "ok" : "FAILED"}${r.projectId ? ` (${r.projectId} at ${r.revision})` : ""}`);
   if (r.base) console.log(`  base:  ${r.base.ref} ${r.base.commit.slice(0, 12)} at ${r.base.revision ?? "(no .vcv/)"}`);
   console.log(`  trust: ${r.trust ? `${r.trust.source}, ${r.trust.reviewers} reviewer(s); ${r.trust.anchor}` : "none"}`);
+  console.log(`  authorization: ${r.authorization}`);
   for (const c of r.revisions) {
     console.log(`  ${c.seq}. ${c.revision}${c.introduced ? " (new)" : ""}: ${c.derivation}${c.changeId ? ` by ${c.changeId}` : ""}; approval ${c.approval.state}${c.approval.detail ? ` (${c.approval.detail})` : ""}`);
   }

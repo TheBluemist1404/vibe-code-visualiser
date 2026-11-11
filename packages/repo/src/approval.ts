@@ -73,6 +73,17 @@ export type TrustSource = { kind: "file"; path: string } | { kind: "git-ref"; re
 export type TrustAuthority = "external-file" | "pinned-commit" | "local-ref" | "checkout";
 
 /**
+ * What a standalone CLI can say about any trust anchor it is handed: the caller asserted it.
+ * A pinned commit is an immutability pin, not proof of origin: a shell-capable agent can supply
+ * both the SHA and a ref to it. A file outside the checkout is only as safe as its write access.
+ * Authorization is established by the host gate (docs/approvals.md): `vcv integrity` in CI,
+ * reading the base and its trust list from the hosting service's protected branch.
+ */
+export const TRUST_VERIFICATION = "caller-asserted" as const;
+export const AUTHORIZATION_GATE =
+  "not established by this command: the trust anchor is caller-asserted, and a shell in this checkout can supply its own. The authorization gate is `vcv integrity --base <protected base> --trust-ref <protected base> --require-attestation` run by the host (CI) on the hosting service's protected branch";
+
+/**
  * A loaded trust list and where it came from. `protectedFromCheckout` is false when the list is
  * part of what the change under review can alter (the working tree, a file inside the checkout,
  * or a ref that is the checked-out branch or only reachable from it); `unprotectedReason` says
@@ -179,7 +190,7 @@ export function loadTrust(root: string, source: TrustSource): LoadedTrust {
         authority: inside ? "checkout" : "external-file",
         protectedFromCheckout: !inside,
         ...(inside ? { unprotectedReason: `${source.path} is inside the checkout under review` } : {}),
-        anchor: inside ? "file inside the checkout (unprotected)" : "file outside the checkout; its integrity is the caller's responsibility",
+        anchor: inside ? "file inside the checkout (unprotected)" : "file outside the checkout: caller-asserted and unverified; only as safe as who can write it",
       };
     }
     case "git-ref": {
@@ -204,7 +215,7 @@ export function loadTrust(root: string, source: TrustSource): LoadedTrust {
         anchor: why
           ? `candidate branch (unprotected): ${why}`
           : source.pinnedCommit
-            ? `commit ${commit.slice(0, 12)} pinned by the caller (from outside this checkout); that it is the protected branch is the caller's assertion`
+            ? `commit ${commit.slice(0, 12)} pinned by the caller: an immutability pin, not proof of origin; that it is the protected branch is caller-asserted and unverified`
             : `${anchorKind(root, source.ref)} ${source.ref} at ${commit.slice(0, 12)}: a local ref, not pinned; anyone with a shell here can create or move it; ${UNVERIFIED}`,
       };
     }
@@ -347,8 +358,10 @@ export type ReviewApproveInput = {
 
 export type ReviewApproveResult = {
   outcome: Outcome;
-  reviewer: { id: string; keyFingerprint: string; trustSource: string; trustAnchor: string; trustAuthority: TrustAuthority };
+  reviewer: { id: string; keyFingerprint: string; trustSource: string; trustAnchor: string; trustAuthority: TrustAuthority; trustVerification: typeof TRUST_VERIFICATION };
   attestation?: { file: string; attestation: Attestation; alreadyPresent?: boolean };
+  /** Always the same: a local approval is evidence for the host gate, never authorization. */
+  authorization: typeof AUTHORIZATION_GATE;
 };
 
 type Reviewer = { entry: TrustEntry; key: KeyObject; pub: string; info: ReviewApproveResult["reviewer"] };
@@ -367,7 +380,7 @@ function reviewerFor(root: string, input: Pick<ReviewApproveInput, "keyFile" | "
   const entry = trust.list.reviewers.find((r) => r.publicKey === pub);
   if (!entry) throw new ApprovalError("UNTRUSTED_KEY", `the key ${keyFingerprint(pub)} is not in the trust list (${trust.source})`);
   if (!entry.permissions.includes("model:approve")) throw new ApprovalError("UNTRUSTED_KEY", `${entry.id} is listed without model:approve in ${trust.source}`);
-  return { entry, key, pub, info: { id: entry.id, keyFingerprint: keyFingerprint(pub), trustSource: trust.source, trustAnchor: trust.anchor, trustAuthority: trust.authority } };
+  return { entry, key, pub, info: { id: entry.id, keyFingerprint: keyFingerprint(pub), trustSource: trust.source, trustAnchor: trust.anchor, trustAuthority: trust.authority, trustVerification: TRUST_VERIFICATION } };
 }
 
 /** Refuse before committing anything if the attestation could not be written afterwards. */
@@ -472,13 +485,13 @@ export function reviewApprove(path: string, input: ReviewApproveInput): ReviewAp
 
   const engine = new ModelEngine(new FileStore(status.storeDir), { now: input.now });
   const outcome = engine.approve(input.changeId, { principalId: who.entry.id, permissions: who.entry.permissions }, { expectedDigest: input.expectedDigest });
-  if (outcome.status !== "applied" || !outcome.record) return { outcome, reviewer: who.info };
+  if (outcome.status !== "applied" || !outcome.record) return { outcome, reviewer: who.info, authorization: AUTHORIZATION_GATE };
 
   const r: ChangeRecord = outcome.record;
   try {
     input.afterCommit?.();
     const attestation = signFor(r, who, input.now);
-    return { outcome, reviewer: who.info, attestation: { file: writeAttestation(status.storeDir, r, attestation), attestation } };
+    return { outcome, reviewer: who.info, attestation: { file: writeAttestation(status.storeDir, r, attestation), attestation }, authorization: AUTHORIZATION_GATE };
   } catch (e) {
     throw new ApprovalError("ATTESTATION_NOT_WRITTEN", `${(e as Error).message}. ${finalizeHint(r)}`);
   }
@@ -513,10 +526,10 @@ export function reviewFinalize(path: string, input: ReviewFinalizeInput): Review
   if (existing) {
     const a = existing.attestation;
     const same = a && a.publicKey === who.pub && signatureValid(a) && a.proposalDigest === digest && a.approverId === r.approverId && a.proposerId === r.proposerId && a.baseRevision === r.baseRevision && a.resultingRevision === r.resultingRevision && a.projectId === r.projectId;
-    if (same) return { outcome: { status: "applied", changeId: r.changeId, record: r, diagnostics: [] }, reviewer: who.info, attestation: { file: `${VCV_DIR}/${APPROVALS_DIR}/${r.changeId}.json`, attestation: a, alreadyPresent: true } };
+    if (same) return { outcome: { status: "applied", changeId: r.changeId, record: r, diagnostics: [] }, reviewer: who.info, attestation: { file: `${VCV_DIR}/${APPROVALS_DIR}/${r.changeId}.json`, attestation: a, alreadyPresent: true }, authorization: AUTHORIZATION_GATE };
     throw new ApprovalError("ATTESTATION_EXISTS", `${VCV_DIR}/${APPROVALS_DIR}/${r.changeId}.json already exists and is not this reviewer's valid attestation of this change; it is never overwritten (${existing.problem ?? "different content"})`);
   }
   preflightAttestation(status.storeDir, r.changeId);
   const attestation = signFor(r, who, input.now);
-  return { outcome: { status: "applied", changeId: r.changeId, record: r, diagnostics: [] }, reviewer: who.info, attestation: { file: writeAttestation(status.storeDir, r, attestation), attestation } };
+  return { outcome: { status: "applied", changeId: r.changeId, record: r, diagnostics: [] }, reviewer: who.info, attestation: { file: writeAttestation(status.storeDir, r, attestation), attestation }, authorization: AUTHORIZATION_GATE };
 }

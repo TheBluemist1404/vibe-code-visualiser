@@ -153,3 +153,9 @@ export function filesAtCommit(root: string, commit: string, dir: string): string
   if (!/^[0-9a-f]{40,64}$/.test(commit) || dir.startsWith("-") || dir.includes("\0")) return [];
   return (git(root, ["ls-tree", "-r", "-z", "--name-only", commit, "--", dir]) ?? "").split("\0").filter(Boolean).sort();
 }
+
+/** Whether `ancestor` is `commit` or one of its ancestors (`git merge-base --is-ancestor`). */
+export function isAncestor(root: string, ancestor: string, commit: string): boolean {
+  if (!/^[0-9a-f]{40,64}$/.test(ancestor) || !/^[0-9a-f]{40,64}$/.test(commit)) return false;
+  return git(root, ["merge-base", "--is-ancestor", ancestor, commit]) !== null;
+}

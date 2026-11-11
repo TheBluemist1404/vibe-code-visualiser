@@ -212,6 +212,43 @@ test("an agent that commits its own key on the feature branch cannot anchor trus
   assert.ok(codes(strict).includes("error:APPROVAL_NOT_ATTESTED"));
 });
 
+test("an attacker-chosen pin with an attacker-created tag: the local approval is labelled caller-asserted, and neither it nor integrity claims authorization; the host gate rejects it", () => {
+  const { repo } = setup();
+  const digest = propose(repo, change(repo, "chg-a"));
+  const own = keyFor("user:fake-reviewer");
+  addTrustedReviewer(repo, own.entry);
+  git(repo, "add", ".vcv/reviewers.json");
+  git(repo, "commit", "-q", "-m", "agent trusts itself");
+  git(repo, "tag", "agent-trust", "HEAD");
+  const fakeBase = git(repo, "rev-parse", "HEAD");
+  const anchor: TrustSource = { kind: "git-ref", ref: "agent-trust", pinnedCommit: fakeBase };
+
+  // VCV cannot tell this pin from a genuine one, so it does not pretend to: the approval is
+  // recorded and signed, labelled caller-asserted, and says it is not authorization.
+  const r = approve(repo, "chg-a", digest, own.file, anchor);
+  assert.equal(r.outcome.status, "applied");
+  assert.equal(r.reviewer.trustAuthority, "pinned-commit");
+  assert.equal(r.reviewer.trustVerification, "caller-asserted");
+  assert.match(r.reviewer.trustAnchor, /immutability pin, not proof of origin; .* caller-asserted and unverified/);
+  assert.match(r.authorization, /^not established by this command/);
+
+  // Integrity against the base under check refuses trust the branch chose for itself.
+  const self = checkIntegrity(repo, { base: "main", trust: anchor, requireAttestation: true });
+  assert.equal(self.ok, false);
+  assert.ok(codes(self).includes("error:TRUST_NOT_FROM_BASE"), JSON.stringify(codes(self)));
+  assert.equal(self.trust!.verification, "caller-asserted");
+  // Without a base, the self-chosen anchor is internally consistent, and the report says what that is worth.
+  const noBase = checkIntegrity(repo, { trust: anchor, requireAttestation: true });
+  assert.equal(noBase.revisions[1]!.approval.state, "attested");
+  assert.match(noBase.authorization, /^caller-asserted: ok means consistent and attested under the trust anchor given here; it authorizes a change only when that anchor .* is supplied by the host/);
+  // The host gate (base and trust from the protected branch) rejects the forged key.
+  const gate = checkIntegrity(repo, { base: "main", trust: MAIN, requireAttestation: true });
+  assert.equal(gate.ok, false);
+  assert.equal(gate.revisions[1]!.approval.state, "untrusted-key");
+  // And a trust ref that is an ancestor of the base is accepted as coming from the base.
+  assert.ok(!codes(checkIntegrity(repo, { base: "main", trust: { kind: "git-ref", ref: "main~1" } })).some((c) => c.endsWith("TRUST_NOT_FROM_BASE")));
+});
+
 test("the attestation destination is checked before anything is committed, and a failed write after the commit is recoverable by the approver only", () => {
   // Unsafe destination: refused before the engine runs.
   {

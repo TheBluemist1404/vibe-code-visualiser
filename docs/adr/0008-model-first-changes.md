@@ -93,6 +93,14 @@ what a proposal changes before deciding.
   ref, if given, must resolve to it: `TRUST_PIN_MISMATCH`) or `external-file` (a reviewer-owned
   list outside the checkout). An unpinned `--trust-ref` is `local-ref` authority: accepted by
   `vcv integrity`, whose CI use relies on the host providing the base ref, and reported as such.
+- **Local approval is caller-asserted; the host gate authorizes** (review round 3). A standalone
+  CLI cannot authenticate where a pin or a file came from: an agent can commit its own key, tag
+  it, and pass that tag with that SHA. So every local anchor is labelled `caller-asserted`, each
+  approval result carries `authorization: not established by this command…`, and each
+  integrity report says `ok` authorizes only when the host supplied the anchor. With `--base`,
+  a Git trust anchor must be the base or an ancestor of it (`TRUST_NOT_FROM_BASE`), so the gate
+  cannot be pointed at a branch-chosen list. The documented gate is a required CI check on the
+  protected branch whose workflow and trust list are code-owner protected.
 - **Preflight, exclusive write, explicit repair** (review round 1). The attestation destination
   is checked before the model commit; the file is created exclusively (link, never rename over).
   If the write still fails after the commit, `ATTESTATION_NOT_WRITTEN` names `vcv review
