@@ -19,6 +19,8 @@ import { LIMITS, contextRequest, impactRequest, overviewRequest, searchRequest }
 import type { QueryApi, QueryResult } from "../../../packages/query/src/index.ts";
 import { EVIDENCE_LIMITS, bindingEvidenceRequest, evidenceOverviewRequest, objectEvidenceRequest, refreshEvidenceRequest } from "../../../packages/repo/src/evidence.ts";
 import type { EvidenceApi, EvidenceResult } from "../../../packages/repo/src/evidence.ts";
+import { PROPOSAL_LIMITS, listProposalsRequest, previewProposalRequest } from "../../../packages/repo/src/proposals.ts";
+import type { ProposalReadApi, ProposalResult } from "../../../packages/repo/src/proposals.ts";
 
 export const SERVER_NAME = "vcv";
 export const SERVER_VERSION = "0.1.0";
@@ -46,8 +48,8 @@ export const EVIDENCE_INSTRUCTIONS = `
 
 Source evidence (repository mode): binding claims say that some code implements, exposes, persists or tests a model object. They are made by an agent or a person; VCV only checks that the pointer resolves and whether the code or the model object changed since the claim. Each item keeps four things apart: claim (the claimant's interpretation, provenance and confidence), locator (does it resolve now), freshness (source/model/git, each with a cause) and approval (always approved: false). States: resolved, stale (code or model changed: look again), missing (renamed/moved/deleted), ambiguous, unchecked (outside the supported TypeScript subset), indeterminate (some evidence unknown, not a pass) and invalid (unreadable claim file). "resolved" is not "correct": inspect the code yourself. Every call recomputes against the working tree; vcv_refresh_evidence rechecks all claims and returns an observationToken to compare later. Nothing is inferred, written or proposed. Extra error codes: UNKNOWN_BINDING, PROJECT_NOT_READY, UNSAFE_PATH, STATE_CHANGED (retry).`;
 
-export type Apis = { query: QueryApi; evidence?: EvidenceApi };
-type ToolDef = { tool: Tool; call: (apis: Apis, args: unknown) => QueryResult<unknown> | EvidenceResult<unknown> };
+export type Apis = { query: QueryApi; evidence?: EvidenceApi; proposals?: ProposalReadApi };
+type ToolDef = { tool: Tool; call: (apis: Apis, args: unknown) => QueryResult<unknown> | EvidenceResult<unknown> | ProposalResult<unknown> };
 
 /** JSON Schema for a tool's input, generated from the query package's request contract. */
 function inputSchema(schema: z.ZodType): Tool["inputSchema"] {
@@ -152,7 +154,38 @@ const EVIDENCE_TOOLS: ToolDef[] = [
   },
 ];
 
+/** Shown in addition when the server also serves proposals (--repo). */
+export const PROPOSAL_INSTRUCTIONS = `
+
+Model proposals (repository mode, read-only here): a proposal is a typed model change waiting for a separate reviewer. vcv_preview_proposal shows what one changes before anyone approves it (pass changeId for a submitted one, or change for a dry run of your own draft): operations, the object-level before/after delta, structural impact across modules and contracts (crossModule), binding claims on the touched objects, the engine's diagnostics now (each with a hint) and the assumptions nobody has verified. Lifecycles: pending (waiting; .vcv/HEAD unchanged), stale (its base revision is no longer current: submit a new one), rejected, applied, invalid. The model's draft/approved status, a change's approval and implementation are separate things; implementation is never recorded by VCV. Submitting is not offered over MCP: use the host's \`vcv proposal submit\` (proposal-only). Nothing here approves, applies or writes. Each call reads the checkout once and rechecks it before answering; STATE_CHANGED means it moved (a checkout or an edit) and nothing was mixed: retry. A change's approval field (none, applied-by-host, approved-by-separate-reviewer) is what the record says, not an authenticated identity. Extra error codes: UNKNOWN_CHANGE, INVALID_RECORD, STATE_CHANGED.`;
+
+const PROPOSAL = "Read-only; writes nothing, approves nothing. Structural impact is not semantic proof, and code is never inspected (context.implementationChecked=false).";
+
+const PROPOSAL_TOOLS: ToolDef[] = [
+  {
+    tool: {
+      name: "vcv_list_proposals",
+      title: "VCV model proposals",
+      description: `Every model change proposal recorded in this checkout, with its derived lifecycle (pending, stale with reason superseded|other-line, rejected, applied, invalid), proposer, base revision, resulting revision if applied, proposalDigest and operation count; counts by lifecycle. Filter with lifecycles; limit ≤ ${PROPOSAL_LIMITS.list.max} (default ${PROPOSAL_LIMITS.list.default}). ${PROPOSAL}`,
+      inputSchema: inputSchema(listProposalsRequest),
+      annotations: { ...annotations, title: "VCV model proposals" },
+    },
+    call: ({ proposals }, args) => proposals!.listProposals(args as never),
+  },
+  {
+    tool: {
+      name: "vcv_preview_proposal",
+      title: "Preview a VCV model proposal",
+      description: `Review one proposal before approval: pass changeId (submitted) or change (the same typed change object submit takes, as a dry run; at most ${PROPOSAL_LIMITS.maxOperations} operations). Returns its operations, proposalDigest, the engine's validation against the current revision now (errors carry hints; a stale proposal shows its delta against its base revision), the object-level before/after delta, impacted modules and contracts with crossModule, structural impact candidates, binding claims on changed/removed/impacted objects, separate change/approval/snapshot/implementation states, and unverified assumptions. Lists are capped by limit ≤ ${PROPOSAL_LIMITS.items.max}. ${PROPOSAL}`,
+      inputSchema: inputSchema(previewProposalRequest),
+      annotations: { ...annotations, title: "Preview a VCV model proposal" },
+    },
+    call: ({ proposals }, args) => proposals!.previewProposal(args as never),
+  },
+];
+
 export const TOOL_NAMES = TOOLS.map((t) => t.tool.name);
+export const PROPOSAL_TOOL_NAMES = PROPOSAL_TOOLS.map((t) => t.tool.name);
 export const EVIDENCE_TOOL_NAMES = EVIDENCE_TOOLS.map((t) => t.tool.name);
 
 export type ServerOptions = {
@@ -166,12 +199,15 @@ export type ServerOptions = {
  */
 export function createVcvMcpServer(api: QueryApi | Apis, opts: ServerOptions = {}): Server {
   const apis: Apis = "query" in api ? api : { query: api };
-  const tools = apis.evidence ? [...TOOLS, ...EVIDENCE_TOOLS] : TOOLS;
+  const tools = [...TOOLS, ...(apis.evidence ? EVIDENCE_TOOLS : []), ...(apis.proposals ? PROPOSAL_TOOLS : [])];
   const names = tools.map((t) => t.tool.name);
   const log = opts.log ?? ((m: string) => process.stderr.write(`vcv-mcp: ${m}\n`));
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION, title: "Vibe Code Visualiser (read-only model queries)" },
-    { capabilities: { tools: {} }, instructions: apis.evidence ? SERVER_INSTRUCTIONS + EVIDENCE_INSTRUCTIONS : SERVER_INSTRUCTIONS },
+    {
+      capabilities: { tools: {} },
+      instructions: SERVER_INSTRUCTIONS + (apis.evidence ? EVIDENCE_INSTRUCTIONS : "") + (apis.proposals ? PROPOSAL_INSTRUCTIONS : ""),
+    },
   );
 
   server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: tools.map((t) => t.tool) }));
@@ -196,7 +232,7 @@ export function createVcvMcpServer(api: QueryApi | Apis, opts: ServerOptions = {
   return server;
 }
 
-type AdapterResult = QueryResult<unknown> | EvidenceResult<unknown> | { ok: false; error: { code: "INVALID_REQUEST" | "STORE_ERROR"; message: string } };
+type AdapterResult = QueryResult<unknown> | EvidenceResult<unknown> | ProposalResult<unknown> | { ok: false; error: { code: "INVALID_REQUEST" | "STORE_ERROR"; message: string } };
 
 /** The QueryResult itself is the structured content; the text block carries the same JSON. */
 function toolResult(result: AdapterResult): CallToolResult {

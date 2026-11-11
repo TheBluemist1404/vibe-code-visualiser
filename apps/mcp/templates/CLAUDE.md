@@ -56,5 +56,9 @@ them with `mcp__vcv__vcv_get_evidence_overview`, `mcp__vcv__vcv_get_object_evide
   (never a pass), `invalid` that the claim file is unreadable.
 - Evidence is recomputed on each call against the working tree; nothing watches the repository.
   Inspect the code yourself before concluding anything, and propose model changes through VCV's
-  change operations (`vcv propose`) for a person to approve. Never edit `.vcv/` by hand.
+  change operations (`vcv proposal submit`, proposal-only) for a person to approve. Never edit
+  `.vcv/` by hand.
+- Before submitting, dry-run your change with `vcv_preview_proposal` (`{ change }`): it shows
+  the model delta, cross-module impact, the binding claims you will have to revisit and the
+  engine's diagnostics with hints. A pending proposal is not approved and not implemented.
 - Routes are controller-relative (no global prefix); only syntax is read.

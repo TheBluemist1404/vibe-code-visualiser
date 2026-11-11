@@ -17,9 +17,11 @@
 import {
   appendFileSync,
   closeSync,
+  constants as fsConstants,
   existsSync,
   fstatSync,
   fsyncSync,
+  lstatSync,
   mkdirSync,
   openSync,
   readFileSync,
@@ -27,7 +29,6 @@ import {
   readSync,
   renameSync,
   rmSync,
-  statSync,
   writeSync,
 } from "node:fs";
 import { createHash } from "node:crypto";
@@ -61,6 +62,92 @@ export class StoreError extends Error {
     this.code = code;
     this.name = "StoreError";
   }
+}
+
+// --- Safe reads of store files (M3.1 review of PR #18) ---------------------------------
+//
+// A checkout is untrusted input: `.vcv/` may hold a symlink to a file outside the repository, a
+// FIFO that would block a read, or a huge file. Every read of HEAD, a revision or a change record
+// goes through readStoreFile: regular files only, never through a symlink (lstat, then O_NOFOLLOW
+// and a re-check on the open descriptor), size-bounded. The `revisions/` and `changes/`
+// directories themselves must be plain directories. Anything else is reported, never followed.
+
+/** Size bounds for store files (bytes). Change records hold at most one bounded proposal plus diagnostics. */
+export const STORE_FILE_LIMITS = { head: 4 * 1024 * 1024, revision: 8 * 1024 * 1024, change: 1024 * 1024 } as const;
+
+export type StoreFileRead = { kind: "file"; bytes: Buffer; text: string } | { kind: "absent" } | { kind: "unsafe"; problem: string };
+
+function lstatOrNull(p: string) {
+  try {
+    return lstatSync(p);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === "ENOENT" || (e as NodeJS.ErrnoException).code === "ENOTDIR") return null;
+    throw e;
+  }
+}
+
+/** Why `sub` (e.g. "changes") is not a plain directory of the store, or undefined (absent is fine). */
+function subdirProblem(dir: string, sub: string): string | undefined {
+  const st = lstatOrNull(join(dir, sub));
+  if (!st) return undefined;
+  if (st.isSymbolicLink()) return `${sub}/ is a symlink, which is never followed`;
+  if (!st.isDirectory()) return `${sub}/ is not a directory`;
+  return undefined;
+}
+
+/** Entry names of a store subdirectory, sorted; [] if absent. CORRUPT if it is not a plain directory. */
+function listStoreDir(dir: string, sub: string): string[] {
+  const problem = subdirProblem(dir, sub);
+  if (problem) throw new StoreError("CORRUPT", problem);
+  if (!existsSync(join(dir, sub))) return [];
+  return readdirSync(join(dir, sub)).sort();
+}
+
+/**
+ * Read one store file (`rel` is store-relative, e.g. "changes/x.json"): a regular file of at most
+ * `max` bytes, opened without following symlinks and checked again on the descriptor, so a swap
+ * after the lstat cannot redirect the read. Never blocks on a FIFO or device. Read-only.
+ */
+export function readStoreFile(dir: string, rel: string, max: number): StoreFileRead {
+  const slash = rel.indexOf("/");
+  if (slash > 0) {
+    const problem = subdirProblem(dir, rel.slice(0, slash));
+    if (problem) return { kind: "unsafe", problem };
+  }
+  const p = join(dir, rel);
+  const st = lstatOrNull(p);
+  if (!st) return { kind: "absent" };
+  if (st.isSymbolicLink()) return { kind: "unsafe", problem: `${rel} is a symlink, which is never followed` };
+  if (!st.isFile()) return { kind: "unsafe", problem: `${rel} is not a regular file` };
+  if (st.size > max) return { kind: "unsafe", problem: `${rel} is larger than ${max} bytes` };
+  let fd: number;
+  try {
+    fd = openSync(p, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0));
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    if (code === "ENOENT") return { kind: "absent" };
+    if (code === "ELOOP") return { kind: "unsafe", problem: `${rel} is a symlink, which is never followed` };
+    return { kind: "unsafe", problem: `${rel} cannot be opened (${code})` };
+  }
+  try {
+    if (!fstatSync(fd).isFile()) return { kind: "unsafe", problem: `${rel} is not a regular file` };
+    const buf = Buffer.alloc(max + 1);
+    let n = 0;
+    for (let r; n < buf.length && (r = readSync(fd, buf, n, buf.length - n, n)) > 0; ) n += r;
+    if (n > max) return { kind: "unsafe", problem: `${rel} is larger than ${max} bytes` };
+    const bytes = Buffer.from(buf.subarray(0, n));
+    return { kind: "file", bytes, text: bytes.toString("utf8") };
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** One store file's text, or a CORRUPT error naming the problem. */
+function readStoreText(dir: string, rel: string, max: number, missing: string): string {
+  const f = readStoreFile(dir, rel, max);
+  if (f.kind === "absent") throw new StoreError("CORRUPT", missing);
+  if (f.kind === "unsafe") throw new StoreError("CORRUPT", f.problem);
+  return f.text;
 }
 
 /**
@@ -301,10 +388,12 @@ export class FileStore implements ModelStore {
   }
 
   getChange(id: string): ChangeRecord | undefined {
-    const p = this.changePath(id);
-    if (!existsSync(p)) return undefined;
+    this.changePath(id); // validates the ID
+    const f = readStoreFile(this.dir, `changes/${id}.json`, STORE_FILE_LIMITS.change);
+    if (f.kind === "absent") return undefined;
+    if (f.kind === "unsafe") throw new StoreError("CORRUPT", `change record ${id} is unreadable: ${f.problem}`);
     try {
-      return JSON.parse(readFileSync(p, "utf8")) as ChangeRecord;
+      return JSON.parse(f.text) as ChangeRecord;
     } catch {
       throw new StoreError("CORRUPT", `change record ${id} is unreadable`);
     }
@@ -383,7 +472,7 @@ export class FileStore implements ModelStore {
 
     // 1. Temp files are never committed content.
     for (const sub of ["", "revisions", "changes"]) {
-      for (const f of readdirSync(join(this.dir, sub))) {
+      for (const f of sub ? listStoreDir(this.dir, sub) : readdirSync(this.dir)) {
         if (f.includes(".tmp-")) {
           rmSync(join(this.dir, sub, f));
           report.removedTempFiles.push(join(sub, f));
@@ -417,7 +506,8 @@ export class FileStore implements ModelStore {
     }
 
     // 3. An "applied" record must point at a committed revision.
-    for (const f of readdirSync(join(this.dir, "changes"))) {
+    for (const f of listStoreDir(this.dir, "changes")) {
+      if (!f.endsWith(".json") || persistedIdProblem(f.replace(/\.json$/, ""))) continue;
       const id = f.replace(/\.json$/, "");
       const rec = this.getChange(id);
       if (rec?.status === "applied" && !committed.has(rec.resultingRevision ?? "")) {
@@ -460,10 +550,12 @@ export class FileStore implements ModelStore {
   }
 
   private recordOnDisk(id: string): ChangeRecord | null {
-    const path = this.changePath(id);
-    if (!existsSync(path)) return null;
+    this.changePath(id);
+    const f = readStoreFile(this.dir, `changes/${id}.json`, STORE_FILE_LIMITS.change);
+    if (f.kind === "absent") return null;
     try {
-      return JSON.parse(readFileSync(path, "utf8")) as ChangeRecord;
+      if (f.kind === "unsafe") throw new Error(f.problem);
+      return JSON.parse(f.text) as ChangeRecord;
     } catch {
       return { changeId: "\0unreadable" } as ChangeRecord;
     }
@@ -521,6 +613,13 @@ export class FileStoreReader {
     return [...readHeadFile(this.dir).history];
   }
 
+  /** A committed revision of the line HEAD names (verified like every revision read), or undefined. */
+  revision(rev: string): Model | undefined {
+    this.check();
+    const head = readHeadFile(this.dir);
+    return head.history.includes(rev) ? readRevisionFile(this.dir, rev, head.history) : undefined;
+  }
+
   /**
    * Re-run the read-only integrity checks (inspectStore) whenever any store file changed, so a
    * long-lived reader refuses a checkout that a fresh open would refuse: conflicted, diverged
@@ -547,12 +646,7 @@ export class FileStoreReader {
 }
 
 function readHeadFile(dir: string): Head {
-  let text: string;
-  try {
-    text = readFileSync(join(dir, "HEAD"), "utf8");
-  } catch {
-    throw new StoreError("CORRUPT", "HEAD is unreadable");
-  }
+  const text = readStoreText(dir, "HEAD", STORE_FILE_LIMITS.head, "HEAD is unreadable");
   if (hasConflictMarkers(text)) throw conflictError(["HEAD"]);
   let head: Head;
   try {
@@ -575,17 +669,20 @@ const hasConflictMarkers = (text: string) => CONFLICT_MARKER.test(text);
 /** Store files (relative paths) that contain Git conflict markers. */
 export function conflictedFiles(dir: string): string[] {
   const out: string[] = [];
-  const check = (rel: string) => {
-    try {
-      if (hasConflictMarkers(readFileSync(join(dir, rel), "utf8"))) out.push(rel);
-    } catch {
-      // unreadable files are reported by the regular checks
-    }
+  const check = (rel: string, max: number) => {
+    // Unsafe or unreadable files are reported by the regular checks, never followed here.
+    const f = readStoreFile(dir, rel, max);
+    if (f.kind === "file" && hasConflictMarkers(f.text)) out.push(rel);
   };
-  if (existsSync(join(dir, "HEAD"))) check("HEAD");
-  for (const sub of ["revisions", "changes"]) {
-    if (!existsSync(join(dir, sub))) continue;
-    for (const f of readdirSync(join(dir, sub)).sort()) if (!f.includes(".tmp-")) check(`${sub}/${f}`);
+  check("HEAD", STORE_FILE_LIMITS.head);
+  for (const sub of ["revisions", "changes"] as const) {
+    let names: string[];
+    try {
+      names = listStoreDir(dir, sub);
+    } catch {
+      continue; // reported by the regular checks
+    }
+    for (const f of names) if (!f.includes(".tmp-")) check(`${sub}/${f}`, sub === "revisions" ? STORE_FILE_LIMITS.revision : STORE_FILE_LIMITS.change);
   }
   return out;
 }
@@ -618,7 +715,7 @@ export function unlistedRevisions(dir: string, head: { revision: string; history
   const seq = head.history.length + 1;
   const applied = appliedRevisions(dir);
   const found: UnlistedRevision[] = [];
-  for (const file of readdirSync(join(dir, "revisions")).sort()) {
+  for (const file of listStoreDir(dir, "revisions")) {
     if (file.includes(".tmp-")) continue;
     const id = file.replace(/\.yaml$/, "");
     if (committed.has(id)) continue;
@@ -633,7 +730,8 @@ export function unlistedRevisions(dir: string, head: { revision: string; history
     }
     let model: Model | undefined;
     try {
-      model = loadModel(readFileSync(join(dir, "revisions", file), "utf8")).model;
+      const f = readStoreFile(dir, `revisions/${file}`, STORE_FILE_LIMITS.revision);
+      model = f.kind === "file" ? loadModel(f.text).model : undefined;
     } catch {
       model = undefined;
     }
@@ -659,37 +757,78 @@ export function unlistedRevisions(dir: string, head: { revision: string; history
 
 /** Revision ID → change ID, for every readable "applied" change record. Read-only. */
 /** One message per `changes/*.json` file that is not a readable record for its own change ID. */
-function unreadableChangeRecords(dir: string): string[] {
-  if (!existsSync(join(dir, "changes"))) return [];
-  const out: string[] = [];
-  for (const f of readdirSync(join(dir, "changes")).sort()) {
-    if (f.includes(".tmp-") || !f.endsWith(".json")) continue;
-    const id = f.replace(/\.json$/, "");
-    let rec: unknown;
-    try {
-      rec = JSON.parse(readFileSync(join(dir, "changes", f), "utf8"));
-    } catch {
-      out.push(`change record ${id} is unreadable (changes/${f} is not valid JSON)`);
+/** One file under changes/, read without writing anything (M3.1 proposal listings). */
+export type ChangeRecordEntry = { changeId: string; record?: ChangeRecord; problem?: string };
+
+/**
+ * The one reader of `changes/*.json` (inspection, recovery and listings all use it): each file
+ * through readStoreFile (regular, no symlink, at most STORE_FILE_LIMITS.change bytes), then
+ * parsed. An entry is unreadable when it is unsafe, not JSON, or names another change ID; such an
+ * entry makes the store invalid (recovery relies on reading every applied record, ADR 0007), so
+ * status, reader, writer and listings agree. Throws CORRUPT when changes/ is not a plain directory.
+ */
+function readChangeRecordFiles(dir: string): (ChangeRecordEntry & { file: string; unreadable: boolean })[] {
+  const out: (ChangeRecordEntry & { file: string; unreadable: boolean })[] = [];
+  for (const file of listStoreDir(dir, "changes")) {
+    if (file.includes(".tmp-") || !file.endsWith(".json")) continue;
+    const changeId = file.replace(/\.json$/, "");
+    const f = readStoreFile(dir, `changes/${file}`, STORE_FILE_LIMITS.change);
+    if (f.kind !== "file") {
+      out.push({ changeId, file, unreadable: true, problem: f.kind === "unsafe" ? f.problem : `changes/${file} disappeared while reading` });
       continue;
     }
-    if (typeof rec !== "object" || rec === null || (rec as Partial<ChangeRecord>).changeId !== id) {
-      out.push(`change record ${id} is unreadable (changes/${f} does not hold the record for ${id})`);
+    let rec: unknown;
+    try {
+      rec = JSON.parse(f.text);
+    } catch {
+      out.push({ changeId, file, unreadable: true, problem: `changes/${file} is not valid JSON` });
+      continue;
     }
+    if (typeof rec !== "object" || rec === null || (rec as Partial<ChangeRecord>).changeId !== changeId) {
+      out.push({ changeId, file, unreadable: true, problem: `changes/${file} does not hold the record for ${changeId}` });
+      continue;
+    }
+    out.push({ changeId, file, unreadable: false, record: rec as ChangeRecord });
   }
   return out;
 }
 
+/**
+ * Every change record file in a store directory, in ID order, read-only, through the same safe
+ * reader as inspection. Unreadable files are listed with a problem (inspection reports the store
+ * invalid for them); files whose name is not a persisted ID are skipped. The record content is not
+ * otherwise trusted: callers derive state from it, never authority. Throws CORRUPT when changes/
+ * is a symlink or not a directory.
+ */
+export function listChangeRecords(dir: string): ChangeRecordEntry[] {
+  return readChangeRecordFiles(dir)
+    .filter((e) => !persistedIdProblem(e.changeId))
+    .map(({ changeId, record, problem }) => (record ? { changeId, record } : { changeId, problem: problem! }));
+}
+
+/** One message per `changes/*.json` file that is not a readable record for its own change ID. */
+function unreadableChangeRecords(dir: string): string[] {
+  let entries;
+  try {
+    entries = readChangeRecordFiles(dir);
+  } catch (e) {
+    return [`change records are unreadable: ${(e as Error).message}`];
+  }
+  return entries.filter((e) => e.unreadable).map((e) => `change record ${e.changeId} is unreadable (${e.problem})`);
+}
+
+/** Revision ID → change ID, for every readable "applied" change record. Read-only. */
 function appliedRevisions(dir: string): Map<string, string> {
   const out = new Map<string, string>();
-  if (!existsSync(join(dir, "changes"))) return out;
-  for (const f of readdirSync(join(dir, "changes")).sort()) {
-    if (f.includes(".tmp-") || !f.endsWith(".json")) continue;
-    try {
-      const rec = JSON.parse(readFileSync(join(dir, "changes", f), "utf8")) as Partial<ChangeRecord>;
-      if (rec.status === "applied" && typeof rec.resultingRevision === "string") out.set(rec.resultingRevision, rec.changeId ?? f.replace(/\.json$/, ""));
-    } catch {
-      // reported by unreadableChangeRecords(), which inspection and recovery both check
-    }
+  let entries;
+  try {
+    entries = readChangeRecordFiles(dir);
+  } catch {
+    return out; // reported by unreadableChangeRecords(), which inspection and recovery both check
+  }
+  for (const e of entries) {
+    const rec = e.record;
+    if (rec?.status === "applied" && typeof rec.resultingRevision === "string") out.set(rec.resultingRevision, rec.changeId);
   }
   return out;
 }
@@ -734,7 +873,12 @@ export function inspectStore(dir: string): StoreInspection {
   // reader and writer agree on it.
   const badRecord = unreadableChangeRecords(dir)[0];
   if (badRecord) return { state: "invalid", dir, message: badRecord };
-  const unlisted = unlistedRevisions(dir, head);
+  let unlisted: UnlistedRevision[];
+  try {
+    unlisted = unlistedRevisions(dir, head);
+  } catch (e) {
+    return { state: "invalid", dir, message: e instanceof Error ? e.message : String(e) };
+  }
   const foreign = unlisted.filter((u) => u.kind === "foreign");
   const leftovers = unlisted.filter((u) => u.kind === "leftover");
   const base = { dir, revision: head.revision, history: [...head.history], leftovers };
@@ -744,11 +888,8 @@ export function inspectStore(dir: string): StoreInspection {
 /** SHA-256 of a revision file's bytes, or null if it cannot be read. Used to tell same-ID revisions apart. */
 export function revisionFileDigest(dir: string, rev: string): string | null {
   if (persistedIdProblem(rev)) return null;
-  try {
-    return createHash("sha256").update(readFileSync(join(dir, "revisions", `${rev}.yaml`))).digest("hex");
-  } catch {
-    return null;
-  }
+  const f = readStoreFile(dir, `revisions/${rev}.yaml`, STORE_FILE_LIMITS.revision);
+  return f.kind === "file" ? createHash("sha256").update(f.bytes).digest("hex") : null;
 }
 
 /**
@@ -767,33 +908,28 @@ export function readHeadRevision(dir: string): Model {
  */
 export function storeFingerprint(dir: string): string {
   const h = createHash("sha256");
-  let headText = "";
-  try {
-    headText = readFileSync(join(dir, "HEAD"), "utf8");
-  } catch {
-    headText = "\0no-head";
-  }
+  const headFile = readStoreFile(dir, "HEAD", STORE_FILE_LIMITS.head);
+  const headText = headFile.kind === "file" ? headFile.text : `\0${headFile.kind === "unsafe" ? headFile.problem : "no-head"}`;
   h.update(headText).update("\0");
   try {
     const rev = (JSON.parse(headText) as { revision?: unknown }).revision;
-    if (typeof rev === "string" && !persistedIdProblem(rev)) h.update(readFileSync(join(dir, "revisions", `${rev}.yaml`)));
+    const f = typeof rev === "string" && !persistedIdProblem(rev) ? readStoreFile(dir, `revisions/${rev}.yaml`, STORE_FILE_LIMITS.revision) : undefined;
+    if (f?.kind === "file") h.update(f.bytes);
+    else if (f) h.update(`\0${f.kind}`);
   } catch {
     h.update("\0unreadable");
   }
   for (const sub of ["revisions", "changes"]) {
     let names: string[] = [];
     try {
-      names = readdirSync(join(dir, sub)).sort();
-    } catch {
-      names = [];
+      names = listStoreDir(dir, sub);
+    } catch (e) {
+      h.update(`\0${sub}:${(e as Error).message}`);
     }
     for (const n of names) {
-      try {
-        const st = statSync(join(dir, sub, n));
-        h.update(`\0${sub}/${n}:${st.size}:${st.mtimeMs}`);
-      } catch {
-        h.update(`\0${sub}/${n}:gone`);
-      }
+      // lstat: a symlink is fingerprinted as itself, never followed.
+      const st = lstatOrNull(join(dir, sub, n));
+      h.update(st ? `\0${sub}/${n}:${st.isFile() ? "f" : st.isSymbolicLink() ? "l" : "o"}:${st.size}:${st.mtimeMs}` : `\0${sub}/${n}:gone`);
     }
   }
   return h.digest("hex");
@@ -801,12 +937,9 @@ export function storeFingerprint(dir: string): string {
 
 function revisionCacheKey(dir: string, head: Head): string {
   if (persistedIdProblem(head.revision)) return "invalid"; // readRevisionFile reports it
-  let bytes: Buffer;
-  try {
-    bytes = readFileSync(join(dir, "revisions", `${head.revision}.yaml`));
-  } catch {
-    return `missing\0${head.history.join("\0")}`; // readRevisionFile reports it
-  }
+  const f = readStoreFile(dir, `revisions/${head.revision}.yaml`, STORE_FILE_LIMITS.revision);
+  if (f.kind !== "file") return `missing\0${head.history.join("\0")}`; // readRevisionFile reports it
+  const bytes = f.bytes;
   return `${createHash("sha256").update(bytes).digest("hex")}\0${head.history.join("\0")}`;
 }
 
@@ -822,12 +955,7 @@ const sameLine = (a: Head, b: Head) => a.revision === b.revision && a.history.le
  */
 function readRevisionFile(dir: string, rev: string, history?: readonly string[]): Model {
   if (persistedIdProblem(rev)) throw new StoreError("CORRUPT", `HEAD lists an invalid revision ID "${rev}"`);
-  let text: string;
-  try {
-    text = readFileSync(join(dir, "revisions", `${rev}.yaml`), "utf8");
-  } catch {
-    throw new StoreError("CORRUPT", `committed revision ${rev} is missing`);
-  }
+  const text = readStoreText(dir, `revisions/${rev}.yaml`, STORE_FILE_LIMITS.revision, `committed revision ${rev} is missing`);
   if (hasConflictMarkers(text)) throw conflictError([`revisions/${rev}.yaml`]);
   const r = loadModel(text);
   if (!r.model) throw new StoreError("CORRUPT", `committed revision ${rev} is unreadable: ${r.diagnostics.map((d) => d.message).join("; ")}`);

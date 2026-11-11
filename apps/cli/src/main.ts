@@ -11,7 +11,11 @@ import { FileStore, ModelEngine, StoreError } from "../../../packages/core/src/i
 import { createQueryApi } from "../../../packages/query/src/index.ts";
 import {
   BindingError,
+  PROPOSAL_LIMITS,
   createEvidenceApi,
+  listProposals,
+  previewProposal,
+  submitProposal,
   disputeBinding,
   formatLocator,
   initProject,
@@ -24,7 +28,7 @@ import {
   verifyBinding,
   verifyBindings,
 } from "../../../packages/repo/src/index.ts";
-import type { BindingHost, ProjectStatus, Verification } from "../../../packages/repo/src/index.ts";
+import type { BindingHost, HintedDiagnostic, ProjectStatus, ProposalPreview, ProposalResult, Verification } from "../../../packages/repo/src/index.ts";
 import type { BindingRelation, ClaimSource } from "../../../packages/core/src/index.ts";
 import type { HostContext, Outcome, Permission } from "../../../packages/core/src/index.ts";
 
@@ -41,6 +45,17 @@ const USAGE = `vcv <command> [options]
   query <store-dir> impact <id...> [--depth n] [--limit n]
   project status [path] [--json]        Find .vcv/ in the checkout containing path; report model + Git state
   project init <path> <model.yaml>      Create .vcv/ at the checkout root from a valid model file
+
+  proposal submit <path> <change.yaml> [--json]
+                                        Proposal-only: record a typed model change as pending for a separate
+                                        reviewer. Never applies or approves, whatever --perm says; .vcv/HEAD
+                                        does not move. (docs/proposals.md)
+  proposal preview <path> <changeId> [--json] [--limit n]
+  proposal preview <path> --file <change.yaml> [--json]
+                                        Read-only review of a proposal (submitted, or a dry run of a file):
+                                        operations, before/after delta, structural impact across modules and
+                                        contracts, affected binding claims, diagnostics now, assumptions
+  proposal list <path> [--states pending,stale,rejected,applied,invalid] [--json]
 
   binding add <path> --object <id> --relation <r> --locator <loc> --source agent|human|tool
               [--id <bindingId>] [--rationale <text>] [--confidence <0..1>] [--revision <rev>] [--allow-unchecked]
@@ -103,6 +118,7 @@ const { positionals, values } = parseArgs({
     states: { type: "string" },
     since: { type: "string" },
     request: { type: "string" },
+    file: { type: "string" },
   },
 });
 const [cmd, a, b, ...rest] = positionals;
@@ -260,6 +276,8 @@ function main(): number {
       return bindingCommand();
     case "evidence":
       return evidenceCommand();
+    case "proposal":
+      return proposalCommand();
     default:
       console.log(USAGE);
       return cmd ? 1 : 0;
@@ -343,6 +361,106 @@ function bindingCommand(): number {
       if (values.json) console.log(JSON.stringify(vs, null, 2));
       else vs.forEach(printVerification);
       return vs.every((v) => v.state === "resolved") ? 0 : 1;
+    }
+    default:
+      console.log(USAGE);
+      return 1;
+  }
+}
+
+/** A proposal file: YAML or JSON, bounded before parsing. */
+function readProposalFile(path: string | undefined): unknown {
+  const text = readInput(path);
+  if (Buffer.byteLength(text) > 4 * PROPOSAL_LIMITS.maxBytes) throw new InputError(`${path} is larger than ${4 * PROPOSAL_LIMITS.maxBytes} bytes; split the change`);
+  try {
+    return parseYaml(text);
+  } catch (e) {
+    throw new InputError(`${path} is not valid YAML or JSON: ${(e as Error).message.split("\n")[0]}`);
+  }
+}
+
+function printHinted(ds: HintedDiagnostic[]) {
+  for (const d of ds) {
+    console.log(`  ${d.severity === "error" ? "✗" : "!"} ${d.code} at ${d.path || "(root)"}: ${d.message}`);
+    if (d.hint) console.log(`      → ${d.hint}`);
+  }
+}
+
+function printResultError(r: Extract<ProposalResult<unknown>, { ok: false }>) {
+  console.log(`✗ ${r.error.code}: ${r.error.message}`);
+  for (const d of r.error.details ?? []) console.log(`  ${d.path || "(root)"}: ${d.message}`);
+}
+
+function printPreview(p: ProposalPreview, revision: string) {
+  const q = p.proposal;
+  console.log(`proposal ${q.changeId} (${q.origin === "record" ? `${q.lifecycle}, proposed by ${q.proposerId}` : "not submitted: dry run"})`);
+  console.log(`  digest:   ${q.proposalDigest}`);
+  console.log(`  base:     ${q.baseRevision}; this checkout is at ${revision}${p.validation.appliesToCurrent ? " (applies)" : " (does not apply now)"}`);
+  if (q.rationale) console.log(`  why:      ${q.rationale}`);
+  console.log(`  states:   change ${p.states.change}; approval ${p.states.approval}; snapshot ${p.states.snapshotStatus}; implementation ${p.states.implementation}`);
+  console.log("operations:");
+  for (const o of q.operations) console.log(`  ${o.index + 1}. ${o.summary}`);
+  if (p.validation.errors.length || p.validation.warnings.length) {
+    console.log("validation now:");
+    printHinted([...p.validation.errors, ...p.validation.warnings]);
+  }
+  if (p.delta) {
+    console.log(`model delta (against ${p.delta.against} ${p.delta.revision}; ${p.delta.total} object(s)${p.delta.truncated ? ", truncated" : ""}):`);
+    for (const c of p.delta.changes) {
+      console.log(`  ${c.change === "added" ? "+" : c.change === "removed" ? "-" : "~"} ${c.kind} ${c.id}${c.moduleId ? ` [${c.moduleId}]` : ""}`);
+      if (c.change === "modified") for (const f of c.fields) console.log(`      ${f.field}: ${f.before ?? "(none)"}\n        → ${f.after ?? "(none)"}`);
+    }
+  }
+  if (p.impact) {
+    console.log(`impact (structural candidates only)${p.impact.crossModule ? ": CROSS-MODULE" : ""}:`);
+    console.log(`  modules:   ${p.impact.modules.map((m) => `${m.id} (${m.via})`).join(", ") || "(none)"}`);
+    console.log(`  contracts: ${p.impact.contracts.map((c) => `${c.id} (${c.via})`).join(", ") || "(none)"}`);
+    for (const c of p.impact.candidates) console.log(`  · ${c.kind} ${c.id}: ${c.reason}`);
+    if (p.impact.truncated) console.log(`  … ${p.impact.total} candidates in all (cut by budget)`);
+  }
+  console.log(`binding claims to revisit (${p.bindings.total}):`);
+  for (const b of p.bindings.items) console.log(`  ${b.bindingId}: ${b.modelObjectId} ${b.relation} ${b.locator} (${b.why})`);
+  console.log("not verified by anyone yet:");
+  for (const a of p.assumptions) console.log(`  - ${a}`);
+}
+
+function proposalCommand(): number {
+  const path = need(b, "<path>");
+  switch (a) {
+    case "submit": {
+      const r = submitProposal(path, readProposalFile(rest[0]), ctx);
+      if (values.json) console.log(JSON.stringify(r, null, 2));
+      else if (!r.ok) printResultError(r);
+      else {
+        const d = r.data;
+        console.log(`${d.changeId ?? "(no change id)"}: ${d.status}${d.recorded ? " (recorded)" : " (not recorded)"}; .vcv/HEAD stays at ${d.modelRevision.after}`);
+        if (d.proposalDigest) console.log(`  digest: ${d.proposalDigest}`);
+        printHinted(d.diagnostics);
+        console.log(`  ${d.next}`);
+      }
+      return r.ok && r.data.ok ? 0 : 1;
+    }
+    case "preview": {
+      if ((rest[0] === undefined) === (values.file === undefined)) throw new InputError("pass a change ID or --file <change.yaml>, not both");
+      const req = { ...(values.file !== undefined ? { change: readProposalFile(values.file) } : { changeId: rest[0] }), ...(values.limit !== undefined ? { limit: num(values.limit) } : {}) };
+      const r = previewProposal(path, req);
+      if (values.json) console.log(JSON.stringify(r, null, 2));
+      else if (!r.ok) printResultError(r);
+      else printPreview(r.data, r.context.modelRevision);
+      return r.ok ? 0 : 1;
+    }
+    case "list": {
+      const lifecycles = values.states?.split(",").map((x) => x.trim()).filter(Boolean);
+      const r = listProposals(path, { ...(lifecycles ? { lifecycles } : {}), ...(values.limit !== undefined ? { limit: num(values.limit) } : {}) });
+      if (values.json) console.log(JSON.stringify(r, null, 2));
+      else if (!r.ok) printResultError(r);
+      else {
+        for (const p of r.data.proposals) {
+          console.log(`${p.changeId}  ${p.lifecycle}${p.stale ? ` (${p.stale.reason})` : ""}  by ${p.proposerId ?? "?"}  base ${p.baseRevision ?? "?"}${p.resultingRevision ? ` → ${p.resultingRevision}` : ""}  ${p.operations} op(s)${p.problem ? `  ${p.problem}` : ""}`);
+        }
+        if (r.data.truncated) console.log(`… ${r.data.matched} in all`);
+      }
+      return r.ok ? 0 : 1;
     }
     default:
       console.log(USAGE);

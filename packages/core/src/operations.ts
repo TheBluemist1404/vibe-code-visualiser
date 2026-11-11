@@ -21,6 +21,9 @@ export const operationSchema = z.discriminatedUnion("type", [
   // Text-only edits of existing objects (M2.5): the smallest general additions that let a
   // maintainer record a changed rule or a corrected description without remove-and-recreate.
   z.object({ type: z.literal("createRule"), rule: schemas.rule }).strict(),
+  // M3.1: the one general operation the model-first path was missing (a new capability had no
+  // typed way in; the other top-level kinds a change typically adds already had one).
+  z.object({ type: z.literal("createCapability"), capability: schemas.capability }).strict(),
   z.object({ type: z.literal("setRuleStatement"), ruleId: id, statement: z.string().min(1) }).strict(),
   z.object({ type: z.literal("setDescription"), objectId: id, description: z.string().min(1) }).strict(),
   z.object({ type: z.literal("approveDraft") }).strict(),
@@ -127,6 +130,10 @@ function applyOne(m: Model, op: ModelOperation): void {
     case "createRule":
       fresh(op.rule.id);
       m.rules.push(op.rule);
+      return;
+    case "createCapability":
+      fresh(op.capability.id);
+      m.capabilities.push(op.capability);
       return;
     case "setRuleStatement": {
       const r = m.rules.find((x) => x.id === op.ruleId) ?? fail("TARGET_MISSING", `rule "${op.ruleId}" not found`);

@@ -47,7 +47,8 @@ commit protocol and its limits.
    the publish direction.
 3. **Fixing a draft needs targeted operations.** Added `setModuleDependencies`, and in M2.5
    `createRule`, `setRuleStatement` and `setDescription` (keeping a model true after a code change
-   needs to change a rule's statement or an object's description without remove-and-recreate).
+   needs to change a rule's statement or an object's description without remove-and-recreate),
+   and in M3.1 `createCapability` (a model-first change that adds a capability had no typed way in).
    The spec's `updateObject` is not implemented because a generic version is a JSON patch in
    disguise.
 4. **`approveDraft` needs approve rights** even for principals that can apply changes.

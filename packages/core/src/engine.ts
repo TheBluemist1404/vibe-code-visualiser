@@ -6,7 +6,8 @@ import { applyOperations, proposedChangeSchema } from "./operations.ts";
 import type { ProposedModelChange } from "./operations.ts";
 import { StoreError } from "./store.ts";
 import type { ChangeGuard, ModelStore, StoreSnapshot } from "./store.ts";
-import { branchSafeRevisionId } from "./revisions.ts";
+import { branchSafeRevisionId, canonicalJson } from "./revisions.ts";
+import { createHash } from "node:crypto";
 
 /** Supplied by the trusted host (session, OAuth token, local user), never by the caller's payload. */
 export type HostContext = {
@@ -184,22 +185,8 @@ export class ModelEngine {
     return this.log("approve", ctx, this.commit({ ...record, approverId: ctx.principalId, validationResults: check.warnings }, check.model!, snap, record));
   }
 
-  private dryRun(change: ProposedModelChange, current: Model): { model?: Model; errors: Diagnostic[]; warnings: Diagnostic[] } {
-    if (change.projectId !== current.project.id) {
-      return { errors: [diag("WRONG_PROJECT", "projectId", `change targets "${change.projectId}", engine holds "${current.project.id}"`)], warnings: [] };
-    }
-    if (change.expectedRevision !== current.project.modelRevision) {
-      return {
-        errors: [diag("STALE_REVISION", "expectedRevision", `expected ${change.expectedRevision}, current is ${current.project.modelRevision}`)],
-        warnings: [],
-      };
-    }
-    const applied = applyOperations(current, change.operations);
-    if ("error" in applied) return { errors: [applied.error], warnings: [] };
-    const results = validateModel(applied.model);
-    return hasErrors(results)
-      ? { errors: results.filter((d) => d.severity === "error"), warnings: [] }
-      : { model: applied.model, errors: [], warnings: results };
+  private dryRun(change: ProposedModelChange, current: Model): ChangeCheck {
+    return checkChange(change, current);
   }
 
   private commit(record: ChangeRecord, model: Model, snap: StoreSnapshot, previous: ChangeRecord | null): Outcome {
@@ -248,6 +235,42 @@ export class ModelEngine {
     });
     return outcome;
   }
+}
+
+export type ChangeCheck = { model?: Model; errors: Diagnostic[]; warnings: Diagnostic[] };
+
+/**
+ * The engine's own validation of a well-formed change against one model state, without writing
+ * anything: project, expected revision, the typed operations in order, then whole-model
+ * validation. propose() and approve() decide on exactly this; read-only previews (M3.1) call it
+ * too, so a preview can never disagree with what an approval would check.
+ */
+export function checkChange(change: ProposedModelChange, current: Model): ChangeCheck {
+  if (change.projectId !== current.project.id) {
+    return { errors: [diag("WRONG_PROJECT", "projectId", `change targets "${change.projectId}", engine holds "${current.project.id}"`)], warnings: [] };
+  }
+  if (change.expectedRevision !== current.project.modelRevision) {
+    return {
+      errors: [diag("STALE_REVISION", "expectedRevision", `expected ${change.expectedRevision}, current is ${current.project.modelRevision}`)],
+      warnings: [],
+    };
+  }
+  const applied = applyOperations(current, change.operations);
+  if ("error" in applied) return { errors: [applied.error], warnings: [] };
+  const results = validateModel(applied.model);
+  return hasErrors(results)
+    ? { errors: results.filter((d) => d.severity === "error"), warnings: [] }
+    : { model: applied.model, errors: [], warnings: results };
+}
+
+/**
+ * Content identity of a proposal (M3.1): sha256 over the canonical JSON of the change exactly as
+ * submitted (change ID, project, expected revision, operations, rationale). Derived, never stored:
+ * whoever previews a proposal sees this digest, and an approval can be bound to it, so a record
+ * edited after the preview no longer matches what was reviewed.
+ */
+export function proposalDigest(change: ProposedModelChange): string {
+  return createHash("sha256").update(`vcv-proposal-v1\0${canonicalJson(change)}`).digest("hex");
 }
 
 /**

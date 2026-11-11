@@ -12,7 +12,7 @@ import { parseArgs } from "node:util";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { FileStoreReader } from "../../../packages/core/src/index.ts";
 import { createQueryApi } from "../../../packages/query/src/index.ts";
-import { createEvidenceApi, projectStatus } from "../../../packages/repo/src/index.ts";
+import { createEvidenceApi, createProposalReadApi, projectStatus } from "../../../packages/repo/src/index.ts";
 import { SERVER_VERSION, createVcvMcpServer } from "./server.ts";
 
 const USAGE = `usage: vcv-mcp --store <store-dir> | --repo <checkout>
@@ -66,7 +66,7 @@ try {
 
 const head = reader.current().project;
 const query = createQueryApi(reader);
-const server = createVcvMcpServer(repoArg ? { query, evidence: createEvidenceApi(repoArg) } : query, { log });
+const server = createVcvMcpServer(repoArg ? { query, evidence: createEvidenceApi(repoArg), proposals: createProposalReadApi(repoArg) } : query, { log });
 await server.connect(new StdioServerTransport());
 log(`v${SERVER_VERSION} serving ${head.id} from ${storeDir} (now at ${head.modelRevision}, read-only${repoArg ? ", with source evidence" : ""})`);
 
