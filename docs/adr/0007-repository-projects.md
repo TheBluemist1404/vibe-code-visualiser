@@ -91,7 +91,14 @@ concurrently, and MCP stays read-only. A single writer is not enough in a checko
   on disk with the line it holds. If it moved, the writer adopts the new HEAD and re-runs the
   open-time checks (conflict, divergence, digest verification). The engine therefore validates
   a change against the checked-out line, and a change based on the old line fails with
-  `STALE_REVISION`.
+  `STALE_REVISION`. A moved HEAD is adopted only after those checks pass; if they fail, the
+  writer keeps the last validated line, so every later read fails the same way and every
+  write is refused (`HEAD_CHANGED`) until the checkout is healthy again.
+- **Reader cache.** `FileStoreReader` caches the parsed current revision keyed by HEAD's whole
+  line plus the SHA-256 of the revision file's bytes, not by revision ID: the initial revision and
+  legacy IDs are not content-addressed, so two branches can hold different models named
+  `rev-1`. `projectStatus` exposes the same file digest, and `refresh()` reports such a swap as
+  `switched`.
 - **Write guard.** `commit()` re-reads HEAD immediately before writing and refuses with
   `HEAD_CHANGED`, writing nothing, if it differs from the line the change was validated
   against. This closes the window between validation and write. It is a check-then-rename, not
