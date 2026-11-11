@@ -9,8 +9,22 @@ import { loadModel, parseYaml, ownershipTree } from "../../../packages/ir/src/in
 import type { Diagnostic, TreeNode } from "../../../packages/ir/src/index.ts";
 import { FileStore, ModelEngine, StoreError } from "../../../packages/core/src/index.ts";
 import { createQueryApi } from "../../../packages/query/src/index.ts";
-import { initProject, projectStatus } from "../../../packages/repo/src/index.ts";
-import type { ProjectStatus } from "../../../packages/repo/src/index.ts";
+import {
+  BindingError,
+  disputeBinding,
+  formatLocator,
+  initProject,
+  listBindings,
+  parseLocator,
+  projectStatus,
+  readBinding,
+  recordBinding,
+  removeBinding,
+  verifyBinding,
+  verifyBindings,
+} from "../../../packages/repo/src/index.ts";
+import type { BindingHost, ProjectStatus, Verification } from "../../../packages/repo/src/index.ts";
+import type { BindingRelation, ClaimSource } from "../../../packages/core/src/index.ts";
 import type { HostContext, Outcome, Permission } from "../../../packages/core/src/index.ts";
 
 const USAGE = `vcv <command> [options]
@@ -27,14 +41,41 @@ const USAGE = `vcv <command> [options]
   project status [path] [--json]        Find .vcv/ in the checkout containing path; report model + Git state
   project init <path> <model.yaml>      Create .vcv/ at the checkout root from a valid model file
 
+  binding add <path> --object <id> --relation <r> --locator <loc> --source agent|human|tool
+              [--id <bindingId>] [--rationale <text>] [--confidence <0..1>] [--revision <rev>] [--allow-unchecked]
+                                        Record a claim that code implements|exposes|persists|tests a model object
+  binding reassert <path> <bindingId> --locator <loc> --expect <digest> --source agent|human|tool [--rationale ...]
+                                        Replace a claim (e.g. after a rename); the model revision does not change
+  binding remove <path> <bindingId> --expect <digest>
+  binding dispute <path> <bindingId> --reason <text> --expect <digest>
+  binding list <path> [--json]          Claims with their digests (pass a digest to --expect)
+  binding verify <path> [bindingId] [--json]
+                                        Does each locator still resolve, and did the code or model change?
+                                        Says nothing about whether the code does what the claim says.
+
+  Locators: <file>, <file>#symbol:Class.member, <file>#route:POST /path, <file>#test:Suite > case
+  (paths are repository-relative POSIX; routes are controller-relative, without a global prefix)
+
   --as <principal>      Who is acting (default: local-user)
-  --perm <list>         Comma list of propose,apply,approve (default: all three)`;
+  --perm <list>         Comma list (default: propose,apply,approve,binding:record,binding:dispute);
+                        names without ":" mean model:<name>`;
 
 const { positionals, values } = parseArgs({
   allowPositionals: true,
   options: {
     as: { type: "string", default: "local-user" },
-    perm: { type: "string", default: "propose,apply,approve" },
+    perm: { type: "string", default: "propose,apply,approve,binding:record,binding:dispute" },
+    object: { type: "string" },
+    relation: { type: "string" },
+    locator: { type: "string" },
+    source: { type: "string" },
+    id: { type: "string" },
+    rationale: { type: "string" },
+    confidence: { type: "string" },
+    revision: { type: "string" },
+    expect: { type: "string" },
+    reason: { type: "string" },
+    "allow-unchecked": { type: "boolean", default: false },
     tree: { type: "boolean", default: false },
     kind: { type: "string", multiple: true },
     limit: { type: "string" },
@@ -47,8 +88,39 @@ const [cmd, a, b, ...rest] = positionals;
 const num = (v: string | undefined) => (v === undefined ? undefined : Number(v));
 const ctx: HostContext = {
   principalId: values.as!,
-  permissions: values.perm!.split(",").filter(Boolean).map((p) => `model:${p.trim()}` as Permission),
+  permissions: values.perm!.split(",").map((p) => p.trim()).filter(Boolean).map((p) => (p.includes(":") ? p : `model:${p}`) as Permission),
 };
+
+function bindingHost(): BindingHost {
+  const source = values.source;
+  if (source !== "agent" && source !== "human" && source !== "tool") throw new InputError("--source agent|human|tool is required: say who makes this claim");
+  return { ...ctx, source: source as ClaimSource };
+}
+function need(v: string | undefined, flag: string): string {
+  if (!v) throw new InputError(`${flag} is required`);
+  return v;
+}
+function locatorArg(): ReturnType<typeof parseLocator> {
+  try {
+    return parseLocator(need(values.locator, "--locator"));
+  } catch (e) {
+    throw new InputError(`--locator: ${(e as Error).message}`);
+  }
+}
+function printVerification(v: Verification) {
+  const c = v.claim;
+  if (!c) {
+    console.log(`${v.bindingId}: invalid (${v.problem})`);
+    return;
+  }
+  console.log(`${v.bindingId}: ${v.state}  ${c.modelObjectId} ${c.relation} ${formatLocator(c.locator)}`);
+  console.log(`  claimed by ${c.provenance.source} ${c.provenance.principalId} at ${c.modelRevision}${c.provenance.confidence !== undefined ? `, confidence ${c.provenance.confidence}` : ""}; meaning not verified by VCV`);
+  console.log(`  locator: ${v.locator!.state}: ${v.locator!.detail}`);
+  console.log(`  source:  ${v.source!.state}: ${v.source!.cause}`);
+  console.log(`  model:   ${v.model!.state}: ${v.model!.cause}`);
+  if (v.git.commitMoved) console.log(`  git:     commit moved since the claim (not evidence of drift by itself); file is ${v.git.workingTree}`);
+  if (v.disputed) console.log(`  disputed by ${v.disputed.by}: ${v.disputed.reason}`);
+}
 
 /** An input file the user named that cannot be read: reported as a diagnostic, not a stack trace. */
 class InputError extends Error {}
@@ -153,9 +225,95 @@ function main(): number {
       console.log(USAGE);
       return 1;
     }
+    case "binding":
+      return bindingCommand();
     default:
       console.log(USAGE);
       return cmd ? 1 : 0;
+  }
+}
+
+function bindingCommand(): number {
+  const path = need(b, "<path>");
+  const id = rest[0];
+  switch (a) {
+    case "add": {
+      const conf = values.confidence === undefined ? undefined : Number(values.confidence);
+      const r = recordBinding(
+        path,
+        {
+          ...(values.id ? { bindingId: values.id } : {}),
+          modelObjectId: need(values.object, "--object"),
+          relation: need(values.relation, "--relation") as BindingRelation,
+          locator: locatorArg(),
+          ...(values.rationale !== undefined ? { rationale: values.rationale } : {}),
+          ...(conf !== undefined ? { confidence: conf } : {}),
+          ...(values.revision ? { modelRevision: values.revision } : {}),
+          allowUnchecked: values["allow-unchecked"],
+        },
+        bindingHost(),
+        null,
+      );
+      console.log(`${r.entry.bindingId}: recorded (${r.resolution.state}: ${r.resolution.detail})`);
+      console.log(`  digest: ${r.entry.digest}`);
+      console.log(`  file:   ${r.entry.file} (commit it with the code; the model revision is unchanged)`);
+      return 0;
+    }
+    case "reassert": {
+      const bindingId = need(id, "<bindingId>");
+      const expected = need(values.expect, "--expect");
+      const old = readBinding(path, bindingId);
+      if (!old?.claim) throw new BindingError(old ? "INVALID_CLAIM" : "NOT_FOUND", old ? `binding ${bindingId} is unreadable: ${old.problem}` : `binding ${bindingId} does not exist`);
+      const conf = values.confidence === undefined ? undefined : Number(values.confidence);
+      const r = recordBinding(
+        path,
+        {
+          bindingId,
+          modelObjectId: old.claim.modelObjectId,
+          relation: old.claim.relation,
+          locator: locatorArg(),
+          ...(values.rationale !== undefined ? { rationale: values.rationale } : {}),
+          ...(conf !== undefined ? { confidence: conf } : {}),
+          ...(values.revision ? { modelRevision: values.revision } : {}),
+          allowUnchecked: values["allow-unchecked"],
+        },
+        bindingHost(),
+        expected,
+      );
+      console.log(`${bindingId}: reasserted (${r.resolution.state}: ${r.resolution.detail})`);
+      console.log(`  digest: ${r.entry.digest}`);
+      return 0;
+    }
+    case "remove":
+      removeBinding(path, need(id, "<bindingId>"), { ...ctx, source: "human" }, need(values.expect, "--expect"));
+      console.log(`${id}: removed`);
+      return 0;
+    case "dispute": {
+      const e = disputeBinding(path, need(id, "<bindingId>"), need(values.reason, "--reason"), { ...ctx, source: "human" }, need(values.expect, "--expect"));
+      console.log(`${id}: disputed by ${ctx.principalId}`);
+      console.log(`  digest: ${e.digest}`);
+      return 0;
+    }
+    case "list": {
+      const entries = listBindings(path);
+      if (values.json) console.log(JSON.stringify(entries, null, 2));
+      else for (const e of entries) console.log(`${e.bindingId}  ${e.digest}  ${e.claim ? `${e.claim.modelObjectId} ${e.claim.relation} ${formatLocator(e.claim.locator)}` : `invalid: ${e.problem}`}`);
+      return 0;
+    }
+    case "verify": {
+      let vs: Verification[];
+      if (id) {
+        const e = readBinding(path, id);
+        if (!e) throw new BindingError("NOT_FOUND", `binding ${id} does not exist`);
+        vs = [verifyBinding(path, e)];
+      } else vs = verifyBindings(path);
+      if (values.json) console.log(JSON.stringify(vs, null, 2));
+      else vs.forEach(printVerification);
+      return vs.every((v) => v.state === "resolved") ? 0 : 1;
+    }
+    default:
+      console.log(USAGE);
+      return 1;
   }
 }
 
@@ -165,7 +323,7 @@ try {
   // Store problems (e.g. CONFLICTED or DIVERGED after a Git merge) and unreadable inputs are
   // reported, not thrown at the user.
   if (err instanceof InputError) console.error(`✗ INPUT: ${err.message}`);
-  else if (err instanceof StoreError) console.error(`✗ ${err.code}: ${err.message}`);
+  else if (err instanceof StoreError || err instanceof BindingError) console.error(`✗ ${err.code}: ${err.message}`);
   else throw err;
   process.exitCode = 2;
 }

@@ -20,7 +20,11 @@ export type Permission =
   /** May apply a valid proposal without a separate approval. */
   | "model:apply"
   /** May approve someone else's pending proposal, and approve drafts. */
-  | "model:approve";
+  | "model:approve"
+  /** May record, reassert or remove source binding claims (ADR 0007 §5). Never changes the model. */
+  | "binding:record"
+  /** May mark a binding claim as disputed. */
+  | "binding:dispute";
 
 export type ChangeStatus = "pending" | "applied" | "rejected" | "denied";
 

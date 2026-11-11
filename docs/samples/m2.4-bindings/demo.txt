@@ -1,0 +1,122 @@
+
+$ examples/reference-app/materialize.sh <repo>
+adb423c256ca72cf8242da855e6cb433655dbd1a
+
+$ vcv project init <repo> docs/samples/m2.3-bootstrap/agent-output/model.yaml
+project: ready (<repo>/.vcv)
+model:   prj-course-desk at rev-1 [draft], 1 revision(s)
+git:     main adb423c256ca, working tree dirty
+  · UNCOMMITTED_MODEL_CHANGES: 3 .vcv/ path(s) differ from Git HEAD adb423c256ca72cf8242da855e6cb433655dbd1a
+
+# An agent records three claims. VCV checks that each pointer resolves, nothing more.
+
+$ vcv binding add <repo> --as agent:bootstrap --source agent --id impl.cap-enroll --object cap-enroll --relation implements --locator server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll --rationale enroll() decides and records --confidence 0.8
+impl.cap-enroll: recorded (resolved: symbol EnrollmentService.enroll resolves to method EnrollmentService.enroll at line 23)
+  digest: 5506d31645495151a524353ab0b2be0c439ef1a280434594fda412e38eb8ddc1
+  file:   .vcv/bindings/impl.cap-enroll.json (commit it with the code; the model revision is unchanged)
+
+$ vcv binding add <repo> --as agent:bootstrap --source agent --id expose.cap-enroll --object cap-enroll --relation exposes --locator server/src/enrollment/enrollment.controller.ts#route:POST /enrollments
+expose.cap-enroll: recorded (resolved: route POST /enrollments resolves to route POST /enrollments → EnrollmentController.enroll at line 16)
+  digest: 14716f9444430970a4852b6662b35b356f7b7ae634464e83f27b1079a1b6979c
+  file:   .vcv/bindings/expose.cap-enroll.json (commit it with the code; the model revision is unchanged)
+
+$ vcv binding add <repo> --as agent:bootstrap --source agent --id test.rul-seat-limit --object rul-seat-limit --relation tests --locator server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > rejects an enrollment into a full course and notifies the student
+test.rul-seat-limit: recorded (resolved: test "EnrollmentService > rejects an enrollment into a full course and notifies the student" resolves to test EnrollmentService > rejects an enrollment into a full course and notifies the student at line 28)
+  digest: 849ed22b756f2808a33ed69ce04efefb596076ec3e754454972b6eb676ad4ddd
+  file:   .vcv/bindings/test.rul-seat-limit.json (commit it with the code; the model revision is unchanged)
+
+# A pointer to nothing, an unsafe path and an unsupported selector are refused, not stored.
+
+$ vcv binding add <repo> --source agent --object cap-enroll --relation implements --locator server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.reject
+✗ LOCATOR_MISSING: symbol EnrollmentService.reject not found in server/src/enrollment/enrollment.service.ts; a claim must point at something that exists
+
+$ vcv binding add <repo> --source agent --object cap-enroll --relation implements --locator ../outside.ts
+✗ UNSAFE_PATH: locator path "../outside.ts" leaves the repository ("..")
+
+$ vcv binding add <repo> --source agent --object cap-enroll --relation implements --locator README.md#symbol:Enroll
+✗ LOCATOR_UNCHECKED: symbol selectors are only checked in .ts/.tsx/.mts/.cts files. Use a file selector, or record it explicitly as unchecked
+
+$ vcv binding verify <repo>
+expose.cap-enroll: resolved  cap-enroll exposes server/src/enrollment/enrollment.controller.ts#route:POST /enrollments
+  claimed by agent agent:bootstrap at rev-1; meaning not verified by VCV
+  locator: resolved: route POST /enrollments resolves to route POST /enrollments → EnrollmentController.enroll at line 16
+  source:  unchanged: the selected declaration matches the recorded fingerprint
+  model:   unchanged: claim was made against the current revision rev-1
+impl.cap-enroll: resolved  cap-enroll implements server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll
+  claimed by agent agent:bootstrap at rev-1, confidence 0.8; meaning not verified by VCV
+  locator: resolved: symbol EnrollmentService.enroll resolves to method EnrollmentService.enroll at line 23
+  source:  unchanged: the selected declaration matches the recorded fingerprint
+  model:   unchanged: claim was made against the current revision rev-1
+test.rul-seat-limit: resolved  rul-seat-limit tests server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > rejects an enrollment into a full course and notifies the student
+  claimed by agent agent:bootstrap at rev-1; meaning not verified by VCV
+  locator: resolved: test "EnrollmentService > rejects an enrollment into a full course and notifies the student" resolves to test EnrollmentService > rejects an enrollment into a full course and notifies the student at line 28
+  source:  unchanged: the selected declaration matches the recorded fingerprint
+  model:   unchanged: claim was made against the current revision rev-1
+
+$ git add -A && git commit -m 'vcv: draft model and binding claims'
+
+# Rename the bound method in the working tree (same Git HEAD).
+
+$ sed -i 's/enroll(request/enrollStudent(request/' server/src/enrollment/enrollment.service.ts server/src/enrollment/enrollment.controller.ts
+
+$ vcv binding verify <repo>
+expose.cap-enroll: stale  cap-enroll exposes server/src/enrollment/enrollment.controller.ts#route:POST /enrollments
+  claimed by agent agent:bootstrap at rev-1; meaning not verified by VCV
+  locator: resolved: route POST /enrollments resolves to route POST /enrollments → EnrollmentController.enroll at line 16
+  source:  changed: the selected declaration's code differs from the recorded fingerprint
+  model:   unchanged: claim was made against the current revision rev-1
+  git:     commit moved since the claim (not evidence of drift by itself); file is modified
+impl.cap-enroll: missing  cap-enroll implements server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll
+  claimed by agent agent:bootstrap at rev-1, confidence 0.8; meaning not verified by VCV
+  locator: missing: symbol EnrollmentService.enroll not found in server/src/enrollment/enrollment.service.ts
+  source:  unknown: locator is missing
+  model:   unchanged: claim was made against the current revision rev-1
+  git:     commit moved since the claim (not evidence of drift by itself); file is modified
+test.rul-seat-limit: resolved  rul-seat-limit tests server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > rejects an enrollment into a full course and notifies the student
+  claimed by agent agent:bootstrap at rev-1; meaning not verified by VCV
+  locator: resolved: test "EnrollmentService > rejects an enrollment into a full course and notifies the student" resolves to test EnrollmentService > rejects an enrollment into a full course and notifies the student at line 28
+  source:  unchanged: the selected declaration matches the recorded fingerprint
+  model:   unchanged: claim was made against the current revision rev-1
+  git:     commit moved since the claim (not evidence of drift by itself); file is clean
+
+# A person reasserts the claim at its new locator, naming the claim they read (--expect).
+
+$ vcv binding reassert <repo> impl.cap-enroll --as user:reviewer --source human --expect 0000000000000000000000000000000000000000000000000000000000000000 --locator server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enrollStudent
+✗ BINDING_CHANGED: binding impl.cap-enroll on disk (digest 5506d3164549) is not the claim you read (digest 000000000000); it changed or belongs to another branch. Nothing was written
+
+$ vcv binding reassert <repo> impl.cap-enroll --as user:reviewer --source human --expect 5506d31645495151a524353ab0b2be0c439ef1a280434594fda412e38eb8ddc1 --locator server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enrollStudent
+impl.cap-enroll: reasserted (resolved: symbol EnrollmentService.enrollStudent resolves to method EnrollmentService.enrollStudent at line 23)
+  digest: 50900554f45443e0e0f74eff9b70fe0878c5cf77c629d65fd14aa3cc90d6eded
+
+$ vcv binding verify <repo>
+expose.cap-enroll: stale  cap-enroll exposes server/src/enrollment/enrollment.controller.ts#route:POST /enrollments
+  claimed by agent agent:bootstrap at rev-1; meaning not verified by VCV
+  locator: resolved: route POST /enrollments resolves to route POST /enrollments → EnrollmentController.enroll at line 16
+  source:  changed: the selected declaration's code differs from the recorded fingerprint
+  model:   unchanged: claim was made against the current revision rev-1
+  git:     commit moved since the claim (not evidence of drift by itself); file is modified
+impl.cap-enroll: resolved  cap-enroll implements server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enrollStudent
+  claimed by human user:reviewer at rev-1; meaning not verified by VCV
+  locator: resolved: symbol EnrollmentService.enrollStudent resolves to method EnrollmentService.enrollStudent at line 23
+  source:  unchanged: the selected declaration matches the recorded fingerprint
+  model:   unchanged: claim was made against the current revision rev-1
+test.rul-seat-limit: resolved  rul-seat-limit tests server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > rejects an enrollment into a full course and notifies the student
+  claimed by agent agent:bootstrap at rev-1; meaning not verified by VCV
+  locator: resolved: test "EnrollmentService > rejects an enrollment into a full course and notifies the student" resolves to test EnrollmentService > rejects an enrollment into a full course and notifies the student at line 28
+  source:  unchanged: the selected declaration matches the recorded fingerprint
+  model:   unchanged: claim was made against the current revision rev-1
+  git:     commit moved since the claim (not evidence of drift by itself); file is clean
+
+$ git add -A && git commit -m 'rename enroll, reassert its binding' && git show --stat HEAD
+rename enroll, reassert its binding
+ .vcv/bindings/impl.cap-enroll.json             | 16 +++++++---------
+ server/src/enrollment/enrollment.controller.ts |  2 +-
+ server/src/enrollment/enrollment.service.ts    |  2 +-
+ 3 files changed, 9 insertions(+), 11 deletions(-)
+
+$ vcv project status <repo>
+project: ready (<repo>/.vcv)
+model:   prj-course-desk at rev-1 [draft], 1 revision(s)
+git:     main d906d9512021, clean
+
+.vcv/HEAD unchanged by every binding operation

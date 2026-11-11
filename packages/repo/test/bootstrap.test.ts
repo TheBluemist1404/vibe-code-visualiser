@@ -49,7 +49,10 @@ test("the agent toolkit holds the engine and the guide, but no examples, tests, 
   execFileSync("bash", [join(BOOTSTRAP, "toolkit.sh"), dest], { encoding: "utf8" });
   assert.equal(readFileSync(join(dest, "AGENT_GUIDE.md"), "utf8"), readFileSync(GUIDE, "utf8"));
   assert.deepEqual(readdirSync(dest).sort(), ["AGENT_GUIDE.md", "apps", "bin", "node_modules", "package.json", "packages"]);
-  for (const p of readdirSync(join(dest, "packages"))) assert.deepEqual(readdirSync(join(dest, "packages", p)).sort(), ["package.json", "src"]);
+  for (const p of readdirSync(join(dest, "packages"))) {
+    const own = existsSync(join(ROOT, "packages", p, "node_modules")) ? ["node_modules"] : [];
+    assert.deepEqual(readdirSync(join(dest, "packages", p)).sort(), [...own, "package.json", "src"]);
+  }
   assert.deepEqual(readdirSync(join(dest, "apps")), ["cli"]);
   // Nothing outside node_modules mentions the fixture or the oracle.
   const grep = spawnSync("grep", ["-rIliE", "oracle|course desk|enrol", dest, "--exclude-dir=node_modules"], { encoding: "utf8" });

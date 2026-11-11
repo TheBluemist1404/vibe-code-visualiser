@@ -847,7 +847,7 @@ function readRevisionFile(dir: string, rev: string, history?: readonly string[])
 }
 
 /** Write via temp file, fsync, rename, then fsync the directory where the OS allows it. */
-function durableWrite(path: string, text: string, hook?: (phase: "write" | "rename") => void) {
+export function durableWrite(path: string, text: string, hook?: (phase: "write" | "rename") => void) {
   const tmp = `${path}.tmp-${process.pid}`;
   hook?.("write");
   const fd = openSync(tmp, "w");

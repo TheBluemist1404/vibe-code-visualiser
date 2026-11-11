@@ -1,0 +1,27 @@
+{
+  "format": 1,
+  "bindingId": "impl.cap-enroll",
+  "modelObjectId": "cap-enroll",
+  "relation": "implements",
+  "locator": {
+    "path": "server/src/enrollment/enrollment.service.ts",
+    "selector": {
+      "kind": "symbol",
+      "name": "EnrollmentService.enrollStudent"
+    }
+  },
+  "provenance": {
+    "source": "human",
+    "principalId": "user:reviewer"
+  },
+  "modelRevision": "rev-1",
+  "observed": {
+    "commit": "917dffb9a9d4c1eaaf90948c75f86522e0c69135",
+    "workingTree": "modified",
+    "fingerprint": {
+      "algorithm": "vcv-fp-1",
+      "file": "ceb0308ced3c492682ad655f20e2ea09a8638a22b5cef3d7ab3d431ec4bea8bf",
+      "selector": "418a119897f2865160efb43142d13dab3f3906eca652b6af18d3bdf3006c39c5"
+    }
+  }
+}

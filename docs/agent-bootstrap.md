@@ -61,8 +61,28 @@ evidence and not approved design until a person reviews it.
   drafts allow it (with a warning), approved models do not.
 - **Set `project.status: draft`** and `project.modelRevision: rev-1`. Only a person approves a
   model.
-- Source locations in descriptions are notes for reviewers. VCV does not resolve or verify
-  them yet.
+- Source locations in descriptions are notes for reviewers. To make a link that VCV can check,
+  record a binding claim (next section).
+
+## Recording binding claims (optional)
+
+After `vcv project init`, you can record which code you believe implements, exposes, persists
+or tests a model element. VCV checks that the pointer resolves to exactly one thing and stores
+the claim under `.vcv/bindings/`; it never checks that the code means what you claim.
+
+```sh
+vcv binding add . --source agent --object <element-id> --relation implements \
+  --locator 'src/orders/order.service.ts#symbol:OrderService.place' --rationale '<why>' --confidence 0.7
+vcv binding verify .
+```
+
+- Locators: a file path, `path#symbol:Class.member`, `path#route:POST /orders` (a decorated HTTP
+  handler: the controller path plus the method path, without any global prefix), or
+  `path#test:Suite > case`. Paths are relative to the repository root.
+- A refused claim (`LOCATOR_MISSING`, `LOCATOR_AMBIGUOUS`, `LOCATOR_UNCHECKED`) means the
+  pointer does not identify exactly one artifact; fix the locator rather than forcing it.
+- Record claims only for code you read. A claim is your interpretation, labelled with
+  `--source agent`, and stays unapproved.
 
 ## Model reference (schema 0.2)
 

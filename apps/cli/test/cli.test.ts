@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -44,4 +44,42 @@ test("project init creates .vcv/ in a Git checkout, then status reports it ready
   const again = vcv("project", "init", repo, FIXTURE);
   assert.equal(again.status, 2);
   assert.match(again.stderr, /✗ ALREADY_INITIALIZED/);
+});
+
+test("binding add → list → verify → reassert --expect on Course Desk, without changing the model revision", () => {
+  const ROOT = join(import.meta.dirname, "../../..");
+  const repo = join(tmp(), "course-desk");
+  execFileSync("bash", [join(ROOT, "examples/reference-app/materialize.sh"), repo]);
+  assert.equal(vcv("project", "init", repo, join(ROOT, "docs/samples/m2.3-bootstrap/agent-output/model.yaml")).status, 0);
+  const svc = "server/src/enrollment/enrollment.service.ts";
+  const add = ["binding", "add", repo, "--object", "cap-enroll", "--relation", "implements", "--locator", `${svc}#symbol:EnrollmentService.enroll`, "--id", "impl.cap-enroll"];
+
+  const noSource = vcv(...add);
+  assert.equal(noSource.status, 2);
+  assert.match(noSource.stderr, /✗ INPUT: --source agent\|human\|tool is required/);
+  const ok = vcv(...add, "--source", "agent", "--as", "agent:demo");
+  assert.equal(ok.status, 0, ok.stderr);
+  assert.match(ok.stdout, /impl\.cap-enroll: recorded \(resolved: symbol EnrollmentService\.enroll resolves to method/);
+  assert.match(vcv(...add, "--source", "agent").stderr, /✗ BINDING_EXISTS/);
+  const missing = vcv("binding", "add", repo, "--object", "cap-enroll", "--relation", "implements", "--locator", `${svc}#symbol:EnrollmentService.reject`, "--source", "agent");
+  assert.equal(missing.status, 2);
+  assert.match(missing.stderr, /✗ LOCATOR_MISSING/);
+
+  const verify = vcv("binding", "verify", repo);
+  assert.equal(verify.status, 0);
+  assert.match(verify.stdout, /impl\.cap-enroll: resolved .*\n {2}claimed by agent agent:demo at rev-1; meaning not verified by VCV/);
+
+  const text = readFileSync(join(repo, svc), "utf8");
+  writeFileSync(join(repo, svc), text.replace("  enroll(request", "  enrollStudent(request"));
+  const broken = vcv("binding", "verify", repo, "impl.cap-enroll");
+  assert.equal(broken.status, 1);
+  assert.match(broken.stdout, /impl\.cap-enroll: missing/);
+
+  const digest = vcv("binding", "list", repo).stdout.split(/\s+/)[1]!;
+  assert.match(vcv("binding", "reassert", repo, "impl.cap-enroll", "--locator", `${svc}#symbol:EnrollmentService.enrollStudent`, "--source", "human").stderr, /--expect is required/);
+  assert.match(vcv("binding", "reassert", repo, "impl.cap-enroll", "--locator", `${svc}#symbol:EnrollmentService.enrollStudent`, "--source", "human", "--expect", "0".repeat(64)).stderr, /✗ BINDING_CHANGED/);
+  const re = vcv("binding", "reassert", repo, "impl.cap-enroll", "--locator", `${svc}#symbol:EnrollmentService.enrollStudent`, "--source", "human", "--expect", digest);
+  assert.equal(re.status, 0, re.stderr);
+  assert.equal(vcv("binding", "verify", repo).status, 0);
+  assert.match(vcv("project", "status", repo).stdout, /at rev-1 \[draft\], 1 revision/);
 });
