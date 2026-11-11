@@ -7,6 +7,7 @@ import { loadModel, parseYaml, checkModel } from "@vcv/ir";
 import type { Model } from "@vcv/ir";
 import { FileStore, LayoutStore, MemoryStore, ModelEngine, assessBinding } from "../src/index.ts";
 import type { Binding, HostContext, ProposedModelChange } from "../src/index.ts";
+import { assertRev } from "./helpers.ts";
 
 const FIXTURES = join(import.meta.dirname, "../../../examples/enrollment");
 const baseModel = (): Model => loadModel(readFileSync(join(FIXTURES, "model.rev-1.yaml"), "utf8")).model!;
@@ -31,9 +32,9 @@ test("the spec's seven-day timeout change applies at rev-1 and produces rev-2", 
   const e = engine();
   const r = e.propose(timeoutChange(), owner);
   assert.equal(r.status, "applied", JSON.stringify(r.diagnostics));
-  assert.equal(r.record!.resultingRevision, "rev-2");
+  assertRev(r.record!.resultingRevision, 2);
   const now = e.current();
-  assert.equal(now.project.modelRevision, "rev-2");
+  assertRev(now.project.modelRevision, 2);
   const tr = now.behaviors[0]!.transitions.find((t) => t.id === "tr-timeout")!;
   assert.deepEqual(tr.trigger, { kind: "elapsed", duration: "P7D", anchor: { dataId: "data-enrollment-request", attributeId: "attr-request-created-at" } });
   assert.equal(checkModel(now).ok, true);
@@ -50,7 +51,7 @@ test("AC13: a second change on the stale base revision is rejected, and a replay
   assert.equal(replay.status, "rejected");
   assert.equal(replay.diagnostics[0]!.code, "DUPLICATE_CHANGE");
   assert.equal(e.record("ch-timeout-01")!.status, "applied", "replay does not overwrite the original record");
-  assert.equal(e.current().project.modelRevision, "rev-2");
+  assertRev(e.current().project.modelRevision, 2);
 });
 
 test("AC11: a change set applies atomically or not at all", () => {
@@ -92,7 +93,7 @@ test("AC12: an MCP agent can only propose; its change waits for a host-verified 
   const ok = e.approve("ch-timeout-01", reviewer);
   assert.equal(ok.status, "applied");
   assert.equal(ok.record!.approverId, "user:reviewer");
-  assert.equal(ok.record!.resultingRevision, "rev-2");
+  assertRev(ok.record!.resultingRevision, 2);
 });
 
 test("AC12: callers cannot claim approval or identity inside the change payload", () => {
@@ -114,7 +115,7 @@ test("AC13: approval revalidates against the current revision", () => {
   const r = e.approve("ch-timeout-01", reviewer);
   assert.equal(r.status, "rejected");
   assert.equal(r.diagnostics[0]!.code, "STALE_REVISION");
-  assert.equal(e.current().project.modelRevision, "rev-2");
+  assertRev(e.current().project.modelRevision, 2);
 });
 
 test("AC5/AC14: renaming a state keeps every reference by ID", () => {
@@ -142,14 +143,14 @@ test("AC14: removing a referenced object is rejected unless the same change unli
         { type: "removeObject", objectId: "tr-reject" },
         { type: "removeObject", objectId: "st-rejected" },
       ],
-      { expectedRevision: "rev-2" },
+      { expectedRevision: e.current().project.modelRevision },
     ),
     owner,
   );
   assert.equal(ok.status, "applied", JSON.stringify(ok.diagnostics));
   assert.ok(!e.current().behaviors[0]!.states.some((s) => s.id === "st-rejected"));
 
-  const module = e.propose(change([{ type: "removeObject", objectId: "mod-notifications" }], { expectedRevision: "rev-3" }), owner);
+  const module = e.propose(change([{ type: "removeObject", objectId: "mod-notifications" }], { expectedRevision: e.current().project.modelRevision }), owner);
   assert.equal(module.status, "rejected");
   assert.equal(module.diagnostics[0]!.code, "HAS_OWNED_OBJECTS", "no cascading deletion of owned objects");
 });
@@ -213,8 +214,8 @@ test("FileStore persists revisions and change records and reloads them", () => {
   const e = new ModelEngine(FileStore.init(dir, baseModel()));
   e.propose(timeoutChange(), owner);
   const reopened = new ModelEngine(new FileStore(dir));
-  assert.equal(reopened.current().project.modelRevision, "rev-2");
+  assertRev(reopened.current().project.modelRevision, 2);
   assert.ok(reopened.current().behaviors[0]!.transitions.some((t) => t.id === "tr-timeout"));
   assert.equal(reopened.record("ch-timeout-01")!.status, "applied");
-  assert.deepEqual(readdirSync(join(dir, "revisions")).sort(), ["rev-1.yaml", "rev-2.yaml"]);
+  assert.deepEqual(readdirSync(join(dir, "revisions")).sort(), ["rev-1.yaml", `${reopened.current().project.modelRevision}.yaml`].sort());
 });
