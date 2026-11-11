@@ -5,6 +5,7 @@ import type { Diagnostic, Model } from "@vcv/ir";
 import { applyOperations, proposedChangeSchema } from "./operations.ts";
 import type { ProposedModelChange } from "./operations.ts";
 import type { ModelStore } from "./store.ts";
+import { branchSafeRevisionId } from "./revisions.ts";
 
 /** Supplied by the trusted host (session, OAuth token, local user), never by the caller's payload. */
 export type HostContext = {
@@ -187,7 +188,11 @@ export class ModelEngine {
   }
 
   private commit(record: ChangeRecord, model: Model): Outcome {
-    const next = nextRevision(model.project.modelRevision);
+    // Branch-safe identity (ADR 0007): the parent is the revision the change was validated
+    // against, and the digest covers the new content, so two Git branches never mint the same ID
+    // for different models.
+    const parent = model.project.modelRevision;
+    const next = branchSafeRevisionId(model, parent, this.store.revisions().length + 1);
     model.project.modelRevision = next;
     const done: ChangeRecord = { ...record, status: "applied", resultingRevision: next };
     this.store.commit(model, done);
@@ -213,6 +218,11 @@ export class ModelEngine {
   }
 }
 
+/**
+ * The pre-M2 sequential scheme (rev-1 → rev-2). No longer used for new commits because two
+ * Git branches would both produce rev-2; kept for callers and tests that relied on it.
+ * @deprecated use branchSafeRevisionId
+ */
 export function nextRevision(rev: string): string {
   const m = /^(.*?)(\d+)$/.exec(rev);
   return m ? `${m[1]}${Number(m[2]) + 1}` : `${rev}-1`;

@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileS
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileStore, FileStoreReader, ModelEngine, StoreError } from "../src/index.ts";
-import { baseModel, owner, renamePending } from "./helpers.ts";
+import { assertRev, baseModel, owner, renamePending } from "./helpers.ts";
 
 const newDir = () => join(mkdtempSync(join(tmpdir(), "vcv-reader-")), "store");
 
@@ -23,8 +23,8 @@ test("FileStoreReader reads the committed head and follows commits made by anoth
 
   const outcome = new ModelEngine(new FileStore(dir)).propose(renamePending("ch-rename-01"), owner);
   assert.equal(outcome.status, "applied");
-  assert.equal(reader.current().project.modelRevision, "rev-2");
-  assert.deepEqual(reader.revisions(), ["rev-1", "rev-2"]);
+  assertRev(reader.current().project.modelRevision, 2);
+  assert.equal(reader.revisions().length, 2);
 
   // Callers get copies; mutating one cannot change what the next call returns.
   const m = reader.current();

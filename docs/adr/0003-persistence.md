@@ -32,7 +32,9 @@ successful one. Step 3 is derivable from HEAD, so losing it loses nothing.
 Runs every time a `FileStore` is opened (and via `recover()`); idempotent:
 
 - delete `*.tmp-*` files (never committed content);
-- move revision files HEAD does not list into `orphaned/` (kept for inspection);
+- move a revision file HEAD does not list into `orphaned/` (kept for inspection) only if it is
+  the next child of HEAD; any other unlisted revision means another line of history and
+  recovery refuses with `DIVERGED` (ADR 0007); Git conflict markers give `CONFLICTED`;
 - move "applied" change records whose revision HEAD does not list into `orphaned/`;
 - rewrite the last commit's change record from HEAD if it is missing or out of date;
 - fail with `StoreError("CORRUPT")` if HEAD is unreadable or lists a missing revision file.

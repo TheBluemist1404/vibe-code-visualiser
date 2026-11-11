@@ -33,8 +33,20 @@ import { join } from "node:path";
 import { dumpModel, loadModel, persistedIdProblem } from "@vcv/ir";
 import type { Model } from "@vcv/ir";
 import type { AuditEvent, ChangeRecord } from "./engine.ts";
+import { nextRevision } from "./engine.ts";
+import { isChildRevision, parseRevisionId } from "./revisions.ts";
 
-export type StoreErrorCode = "INVALID_ID" | "CORRUPT" | "REVISION_EXISTS" | "NOT_INITIALIZED" | "ALREADY_INITIALIZED" | "BAD_COMMIT";
+export type StoreErrorCode =
+  | "INVALID_ID"
+  | "CORRUPT"
+  | "REVISION_EXISTS"
+  | "NOT_INITIALIZED"
+  | "ALREADY_INITIALIZED"
+  | "BAD_COMMIT"
+  /** A store file contains Git conflict markers (an unresolved merge). */
+  | "CONFLICTED"
+  /** The store holds revisions that are not in HEAD's history and are not an interrupted commit. */
+  | "DIVERGED";
 
 export class StoreError extends Error {
   readonly code: StoreErrorCode;
@@ -263,14 +275,19 @@ export class FileStore implements ModelStore {
       }
     }
 
-    // 2. Revision files HEAD does not list are leftovers of an interrupted commit.
+    // 2. Revision files HEAD does not list. Only the one an interrupted commit leaves (the next
+    //    child of HEAD) is moved aside. Anything else came from another line of history, for
+    //    example a Git merge resolved to one side's HEAD; moving it would silently drop that
+    //    branch's model, so refuse and let a person decide (ADR 0007).
     const committed = new Set(this.head.history);
-    for (const f of readdirSync(join(this.dir, "revisions"))) {
-      const rev = f.replace(/\.yaml$/, "");
-      if (!committed.has(rev)) {
-        renameSync(join(this.dir, "revisions", f), join(this.dir, "orphaned", `revision.${f}`));
-        report.orphanedRevisions.push(rev);
-      }
+    const conflicted = conflictedFiles(this.dir);
+    if (conflicted.length) throw conflictError(conflicted);
+    const unlisted = unlistedRevisions(this.dir, this.head);
+    const foreign = unlisted.filter((u) => u.kind === "foreign");
+    if (foreign.length) throw divergedError(foreign);
+    for (const u of unlisted) {
+      renameSync(join(this.dir, "revisions", u.file), join(this.dir, "orphaned", `revision.${u.file}`));
+      report.orphanedRevisions.push(u.id);
     }
     for (const rev of this.head.history) {
       if (!existsSync(join(this.dir, "revisions", `${rev}.yaml`))) {
@@ -350,16 +367,132 @@ export class FileStoreReader {
 }
 
 function readHeadFile(dir: string): Head {
+  let text: string;
+  try {
+    text = readFileSync(join(dir, "HEAD"), "utf8");
+  } catch {
+    throw new StoreError("CORRUPT", "HEAD is unreadable");
+  }
+  if (hasConflictMarkers(text)) throw conflictError(["HEAD"]);
   let head: Head;
   try {
-    head = JSON.parse(readFileSync(join(dir, "HEAD"), "utf8")) as Head;
+    head = JSON.parse(text) as Head;
   } catch {
     throw new StoreError("CORRUPT", "HEAD is unreadable");
   }
   if (head.format !== 1 || !Array.isArray(head.history) || head.history.at(-1) !== head.revision) {
     throw new StoreError("CORRUPT", "HEAD is not a valid format-1 head");
   }
+  if (new Set(head.history).size !== head.history.length) throw new StoreError("CORRUPT", "HEAD lists a revision twice");
   return head;
+}
+
+// --- Git-aware integrity checks (ADR 0007) ---------------------------------------------
+
+const CONFLICT_MARKER = /^(<{7}|>{7})(\s|$)/m;
+const hasConflictMarkers = (text: string) => CONFLICT_MARKER.test(text);
+
+/** Store files (relative paths) that contain Git conflict markers. */
+export function conflictedFiles(dir: string): string[] {
+  const out: string[] = [];
+  const check = (rel: string) => {
+    try {
+      if (hasConflictMarkers(readFileSync(join(dir, rel), "utf8"))) out.push(rel);
+    } catch {
+      // unreadable files are reported by the regular checks
+    }
+  };
+  if (existsSync(join(dir, "HEAD"))) check("HEAD");
+  for (const sub of ["revisions", "changes"]) {
+    if (!existsSync(join(dir, sub))) continue;
+    for (const f of readdirSync(join(dir, sub)).sort()) if (!f.includes(".tmp-")) check(`${sub}/${f}`);
+  }
+  return out;
+}
+
+export type UnlistedRevision = {
+  id: string;
+  file: string;
+  /** leftover: exactly the next child of HEAD (an interrupted commit). foreign: anything else. */
+  kind: "leftover" | "foreign";
+  reason: string;
+};
+
+/** Revision files present on disk that HEAD's history does not list, classified. Read-only. */
+export function unlistedRevisions(dir: string, head: { revision: string; history: readonly string[] }): UnlistedRevision[] {
+  const committed = new Set(head.history);
+  const out: UnlistedRevision[] = [];
+  if (!existsSync(join(dir, "revisions"))) return out;
+  for (const file of readdirSync(join(dir, "revisions")).sort()) {
+    if (file.includes(".tmp-")) continue;
+    const id = file.replace(/\.yaml$/, "");
+    if (committed.has(id)) continue;
+    const seq = head.history.length + 1;
+    if (parseRevisionId(id).scheme === "legacy") {
+      // Pre-M2 stores minted sequential IDs, so only the name can be checked.
+      out.push(
+        id === nextRevision(head.revision)
+          ? { id, file, kind: "leftover", reason: `named as the next sequential revision after ${head.revision}` }
+          : { id, file, kind: "foreign", reason: `not in HEAD's history and not the next revision after ${head.revision}` },
+      );
+      continue;
+    }
+    let model: Model | undefined;
+    try {
+      model = loadModel(readFileSync(join(dir, "revisions", file), "utf8")).model;
+    } catch {
+      model = undefined;
+    }
+    if (model && model.project.modelRevision === id && isChildRevision(id, model, head.revision, seq)) {
+      out.push({ id, file, kind: "leftover", reason: `content digest matches a child of ${head.revision}` });
+    } else {
+      out.push({ id, file, kind: "foreign", reason: model ? `not a child of HEAD revision ${head.revision}` : "unreadable revision file" });
+    }
+  }
+  return out;
+}
+
+function conflictError(files: string[]): StoreError {
+  return new StoreError("CONFLICTED", `unresolved Git merge conflict in ${files.join(", ")}; VCV does not merge model histories, resolve the merge (or check out one side) first`);
+}
+
+function divergedError(foreign: UnlistedRevision[]): StoreError {
+  return new StoreError(
+    "DIVERGED",
+    `revisions ${foreign.map((f) => f.id).join(", ")} are not in HEAD's history (${foreign[0]!.reason}); they probably come from another branch. ` +
+      "VCV will not drop or merge them automatically: keep one line of history and remove the other's revision files, or restore the matching HEAD",
+  );
+}
+
+export type StoreInspection =
+  | { state: "absent"; dir: string }
+  | { state: "uninitialized"; dir: string }
+  | { state: "conflicted"; dir: string; files: string[] }
+  | { state: "invalid"; dir: string; message: string }
+  | { state: "diverged"; dir: string; revision: string; history: string[]; foreign: UnlistedRevision[]; leftovers: UnlistedRevision[] }
+  | { state: "ok"; dir: string; revision: string; history: string[]; leftovers: UnlistedRevision[] };
+
+/**
+ * Describe a store directory without changing anything: no recovery, no directory creation.
+ * Used by project loading to decide whether a checkout's model can be served, and why not.
+ */
+export function inspectStore(dir: string): StoreInspection {
+  if (!existsSync(dir)) return { state: "absent", dir };
+  if (!existsSync(join(dir, "HEAD"))) return { state: "uninitialized", dir };
+  const files = conflictedFiles(dir);
+  if (files.length) return { state: "conflicted", dir, files };
+  let head: Head;
+  try {
+    head = readHeadFile(dir);
+    for (const rev of head.history) readRevisionFile(dir, rev);
+  } catch (e) {
+    return { state: "invalid", dir, message: e instanceof Error ? e.message : String(e) };
+  }
+  const unlisted = unlistedRevisions(dir, head);
+  const foreign = unlisted.filter((u) => u.kind === "foreign");
+  const leftovers = unlisted.filter((u) => u.kind === "leftover");
+  const base = { dir, revision: head.revision, history: [...head.history], leftovers };
+  return foreign.length ? { state: "diverged", ...base, foreign } : { state: "ok", ...base };
 }
 
 function readRevisionFile(dir: string, rev: string): Model {
@@ -370,6 +503,7 @@ function readRevisionFile(dir: string, rev: string): Model {
   } catch {
     throw new StoreError("CORRUPT", `committed revision ${rev} is missing`);
   }
+  if (hasConflictMarkers(text)) throw conflictError([`revisions/${rev}.yaml`]);
   const r = loadModel(text);
   if (!r.model) throw new StoreError("CORRUPT", `committed revision ${rev} is unreadable: ${r.diagnostics.map((d) => d.message).join("; ")}`);
   return r.model;

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileStore, ModelEngine, StoreError } from "../src/index.ts";
 import type { CommitStep } from "../src/index.ts";
-import { baseModel, mcpAgent, owner, reviewer, timeoutChange } from "./helpers.ts";
+import { assertRev, baseModel, mcpAgent, owner, reviewer, timeoutChange } from "./helpers.ts";
 
 const STEPS: CommitStep[] = ["revision.write", "revision.rename", "head.write", "head.rename", "change.write", "change.rename"];
 /** HEAD is the commit point: a crash before its rename leaves the old revision current. */
@@ -34,27 +34,30 @@ for (const step of STEPS) {
     assert.deepEqual(readdirSync(join(dir, "changes")).filter((f) => f.includes(".tmp-")), []);
 
     if (committedIfCrashAt(step)) {
-      assert.equal(e.current().project.modelRevision, "rev-2");
-      assert.deepEqual(store.revisions(), ["rev-1", "rev-2"]);
+      assertRev(e.current().project.modelRevision, 2);
+      assert.equal(store.revisions().length, 2);
+      assertRev(store.revisions()[1], 2);
       const rec = e.record("ch-timeout-01")!;
       assert.equal(rec.status, "applied");
-      assert.equal(rec.resultingRevision, "rev-2");
+      assertRev(rec.resultingRevision, 2);
       assert.deepEqual(store.recovery.repairedChangeRecords, ["ch-timeout-01"], "the lost record was rebuilt from HEAD");
       // A retry is recognised as a replay, not applied twice.
       assert.equal(e.propose(timeoutChange(), owner).diagnostics[0]!.code, "DUPLICATE_CHANGE");
     } else {
       assert.equal(e.current().project.modelRevision, "rev-1", "an incomplete commit is not visible");
       assert.deepEqual(store.revisions(), ["rev-1"]);
-      assert.equal(store.revision("rev-2"), undefined);
       assert.equal(e.record("ch-timeout-01"), undefined, "no record claims the change was applied");
+      let leftover: string | undefined;
       if (step === "head.write" || step === "head.rename") {
-        assert.deepEqual(store.recovery.orphanedRevisions, ["rev-2"]);
-        assert.ok(existsSync(join(dir, "orphaned", "revision.rev-2.yaml")), "leftover kept for inspection, not deleted");
+        assert.equal(store.recovery.orphanedRevisions.length, 1);
+        leftover = assertRev(store.recovery.orphanedRevisions[0], 2);
+        assert.ok(existsSync(join(dir, "orphaned", `revision.${leftover}.yaml`)), "leftover kept for inspection, not deleted");
       }
       // Safe retry: the same change now applies cleanly.
       const retry = e.propose(timeoutChange(), owner);
       assert.equal(retry.status, "applied");
-      assert.equal(retry.record!.resultingRevision, "rev-2");
+      assertRev(retry.record!.resultingRevision, 2);
+      if (leftover) assert.equal(retry.record!.resultingRevision, leftover, "same parent + same content = same revision ID");
     }
 
     // Whatever happened, a further reopen finds nothing to fix.
@@ -73,7 +76,7 @@ test("an approval interrupted after HEAD moved repairs the pending record to app
   const rec = e.record("ch-timeout-01")!;
   assert.equal(rec.status, "applied");
   assert.equal(rec.approverId, "user:reviewer");
-  assert.equal(e.current().project.modelRevision, "rev-2");
+  assertRev(e.current().project.modelRevision, 2);
 });
 
 test("an approval interrupted before HEAD moved leaves the proposal pending and can be retried", () => {
