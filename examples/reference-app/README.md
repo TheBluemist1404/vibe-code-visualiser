@@ -9,6 +9,7 @@ every enrollment decision is announced through a notification.
 | `template/` | The application source, exactly as it is committed in the fixture repository | The agent (after materializing) |
 | `materialize.sh <dest>` | Copies `template/` into a new standalone Git repository and commits a baseline with fixed identity and dates (same template → same commit ID) | |
 | `check.sh [dest]` | Materialize → `npm ci` → typecheck → test → build → HTTP smoke run → `vcv project status` must say `absent` | CI (`reference-app` job) |
+| `bootstrap/` | `run-agent.sh` (independent agent bootstrap, M2.3), `toolkit.sh`, the generic `prompt.md`, `summarize.mjs` (transcript and isolation audit) | Runs the agent; the agent only sees the prompt and the toolkit |
 | `ORACLE.md` | Facts about the app, traced to code and tests, for checking an agent's model | Reviewers only, never the agent |
 
 ```sh

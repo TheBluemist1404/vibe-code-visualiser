@@ -1,0 +1,110 @@
+{
+  "ok": true,
+  "context": {
+    "projectId": "prj-course-desk",
+    "modelRevision": "rev-1",
+    "snapshotStatus": "draft",
+    "source": "canonical-ir",
+    "coverage": "model-only",
+    "implementationChecked": false
+  },
+  "data": {
+    "project": {
+      "id": "prj-course-desk",
+      "name": "Course Desk",
+      "description": "Draft bootstrapped from the repository at commit adb423c; not reviewed. Students enroll in courses and every enrollment decision is announced as a notification. NestJS API (server/, in-memory storage) plus a React page (web/). Based on README.md and the sources.",
+      "schemaVersion": "0.2"
+    },
+    "modules": [
+      {
+        "id": "mod-enrollment",
+        "kind": "module",
+        "name": "Enrollment",
+        "description": "server/src/enrollment/ (EnrollmentModule). EnrollmentService calls NotificationsService.notify directly (injected via NotificationsModule import); this is a direct call, not an event, so no events or contracts are modelled.",
+        "moduleId": "mod-enrollment",
+        "parentId": "prj-course-desk",
+        "irPath": "modules[0]",
+        "purpose": "Holds the course catalog and decides, records and exposes enrollments.",
+        "dependsOn": [
+          "mod-notifications"
+        ],
+        "consumes": [],
+        "exposes": [],
+        "counts": {
+          "dependsOn": 1,
+          "consumes": 0,
+          "exposes": 0
+        },
+        "owned": {
+          "attribute": 8,
+          "capability": 3,
+          "data": 2,
+          "rule": 4
+        }
+      },
+      {
+        "id": "mod-notifications",
+        "kind": "module",
+        "name": "Notifications",
+        "description": "server/src/notifications/ (NotificationsModule). Exports NotificationsService; has no dependencies.",
+        "moduleId": "mod-notifications",
+        "parentId": "prj-course-desk",
+        "irPath": "modules[1]",
+        "purpose": "In-memory outbox of messages to recipients, readable over HTTP.",
+        "dependsOn": [],
+        "consumes": [],
+        "exposes": [],
+        "counts": {
+          "dependsOn": 0,
+          "consumes": 0,
+          "exposes": 0
+        },
+        "owned": {
+          "attribute": 5,
+          "capability": 1,
+          "data": 1,
+          "rule": 1
+        }
+      },
+      {
+        "id": "mod-web",
+        "kind": "module",
+        "name": "Web",
+        "description": "web/src (App.tsx, api/client.ts, components/). Depends on the other modules only through their HTTP routes under /api (api/client.ts), not through imports.",
+        "moduleId": "mod-web",
+        "parentId": "prj-course-desk",
+        "irPath": "modules[2]",
+        "purpose": "Single-page React UI for enrolling and viewing the student's notifications.",
+        "dependsOn": [
+          "mod-enrollment",
+          "mod-notifications"
+        ],
+        "consumes": [],
+        "exposes": [],
+        "counts": {
+          "dependsOn": 2,
+          "consumes": 0,
+          "exposes": 0
+        },
+        "owned": {
+          "capability": 1
+        }
+      }
+    ],
+    "modulesTotal": 3,
+    "truncated": false,
+    "inventory": {
+      "actor": 1,
+      "attribute": 13,
+      "capability": 5,
+      "data": 3,
+      "module": 3,
+      "rule": 5
+    },
+    "validation": {
+      "errors": 0,
+      "warnings": 0
+    }
+  },
+  "diagnostics": []
+}

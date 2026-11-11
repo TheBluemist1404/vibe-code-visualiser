@@ -50,6 +50,18 @@ const ctx: HostContext = {
   permissions: values.perm!.split(",").filter(Boolean).map((p) => `model:${p.trim()}` as Permission),
 };
 
+/** An input file the user named that cannot be read: reported as a diagnostic, not a stack trace. */
+class InputError extends Error {}
+function readInput(path: string | undefined): string {
+  if (!path) throw new InputError("a file argument is missing");
+  try {
+    return readFileSync(path, "utf8");
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException).code;
+    throw new InputError(`cannot read ${path}${code === "ENOENT" ? ": no such file" : code === "EISDIR" ? ": is a directory" : code ? ` (${code})` : ""}`);
+  }
+}
+
 function printDiagnostics(ds: Diagnostic[]) {
   for (const d of ds) console.log(`  ${d.severity === "error" ? "✗" : "!"} ${d.code} at ${d.path || "(root)"}: ${d.message}`);
 }
@@ -79,13 +91,13 @@ function printProject(s: ProjectStatus) {
 function main(): number {
   switch (cmd) {
     case "validate": {
-      const r = loadModel(readFileSync(a!, "utf8"));
+      const r = loadModel(readInput(a));
       console.log(r.ok ? `${a}: valid` : `${a}: invalid`);
       printDiagnostics(r.diagnostics);
       return r.ok ? 0 : 1;
     }
     case "init": {
-      const r = loadModel(readFileSync(b!, "utf8"));
+      const r = loadModel(readInput(b));
       if (!r.ok || !r.model) {
         printDiagnostics(r.diagnostics);
         return 1;
@@ -101,7 +113,7 @@ function main(): number {
       return 0;
     }
     case "propose":
-      return printOutcome(new ModelEngine(new FileStore(a!)).propose(parseYaml(readFileSync(b!, "utf8")), ctx));
+      return printOutcome(new ModelEngine(new FileStore(a!)).propose(parseYaml(readInput(b)), ctx));
     case "approve":
       return printOutcome(new ModelEngine(new FileStore(a!)).approve(b!, ctx));
     case "query": {
@@ -130,7 +142,7 @@ function main(): number {
         return st.state === "ready" ? 0 : 1;
       }
       if (a === "init" && b && rest[0]) {
-        const r = loadModel(readFileSync(rest[0], "utf8"));
+        const r = loadModel(readInput(rest[0]));
         if (!r.ok || !r.model) {
           printDiagnostics(r.diagnostics);
           return 1;
@@ -150,8 +162,10 @@ function main(): number {
 try {
   process.exitCode = main();
 } catch (err) {
-  // Store problems (e.g. CONFLICTED or DIVERGED after a Git merge) are reported, not thrown at the user.
-  if (!(err instanceof StoreError)) throw err;
-  console.error(`✗ ${err.code}: ${err.message}`);
+  // Store problems (e.g. CONFLICTED or DIVERGED after a Git merge) and unreadable inputs are
+  // reported, not thrown at the user.
+  if (err instanceof InputError) console.error(`✗ INPUT: ${err.message}`);
+  else if (err instanceof StoreError) console.error(`✗ ${err.code}: ${err.message}`);
+  else throw err;
   process.exitCode = 2;
 }

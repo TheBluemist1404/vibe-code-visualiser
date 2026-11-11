@@ -1,0 +1,5 @@
+?? .vcv/.gitignore
+?? .vcv/HEAD
+?? .vcv/revisions/rev-1.yaml
+?? vcv-bootstrap/model.yaml
+?? vcv-bootstrap/report.md
