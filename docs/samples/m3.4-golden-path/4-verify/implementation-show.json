@@ -1,0 +1,281 @@
+{
+  "ok": true,
+  "context": {
+    "projectId": "prj-course-desk",
+    "modelRevision": "rev-3-a5c764161201",
+    "snapshotStatus": "approved",
+    "source": "model-proposals",
+    "implementationChecked": false,
+    "observed": {
+      "commit": "f8e3e2d5479998e7eaa67e54956226f079e30d37",
+      "branch": "feature/rejection-reason",
+      "dirty": false
+    }
+  },
+  "data": {
+    "file": ".vcv/implementations/chg-notification-rejection-reason.json",
+    "digest": "c24b43f20748eee2f0a570af923d198bb9732d7b05feed85c540fcea403f271d",
+    "report": {
+      "format": 1,
+      "kind": "vcv-implementation-report",
+      "changeId": "chg-notification-rejection-reason",
+      "approvedRevision": "rev-3-a5c764161201",
+      "proposalDigest": "eb632d5c7f6ca1653af3eb93e5b2d86d710ad9d639d288d2b8a9f30fd41c8f68",
+      "handoffDigest": "7b07682ff911ee2b575110ba722b257a08308b282258c139be7b5d8836d52715",
+      "approvedIntent": {
+        "request": {
+          "behavior": "When an enrollment is rejected, the notification created for the student carries the rejection reason (COURSE_FULL or ALREADY_ENROLLED) in a new optional `reason` field, returned by GET /notifications, and the web page shows that reason next to the rejected notification. Confirmed notifications have no reason.\n",
+          "acceptanceCriteria": [
+            "A COURSE_FULL rejection produces a notification with reason COURSE_FULL, and the message text is unchanged",
+            "An ALREADY_ENROLLED rejection produces a notification with reason ALREADY_ENROLLED",
+            "A confirmed enrollment's notification has no reason field and is otherwise unchanged",
+            "GET /api/notifications returns the reason for rejected notifications",
+            "The web page shows the reason next to a rejected notification and nothing extra for confirmed ones",
+            "The notifications module does not import from the enrollment module (no new module dependency)"
+          ],
+          "suggestedTests": [
+            "EnrollmentService: rejects an enrollment into a full course and notifies the student",
+            "NotificationsService: keeps each recipient's notifications separate, in order",
+            "App: shows the outcome and the student's notification after enrolling, then a rejection when full"
+          ],
+          "scope": [
+            "server/src/notifications/**",
+            "server/src/enrollment/enrollment.service.ts",
+            "server/src/enrollment/enrollment.service.spec.ts",
+            "server/test/app.e2e-spec.ts",
+            "web/src/api/client.ts",
+            "web/src/components/NotificationList.tsx",
+            "web/src/App.test.tsx"
+          ]
+        },
+        "operations": [
+          "add attribute att-ntf-reason (reason: string) to dat-notification",
+          "change the description of dat-notification",
+          "change the statement of rule rul-announce-every-decision",
+          "change the description of cap-use-ui"
+        ],
+        "note": "What the reviewer approved (covered by the proposal digest). Not a statement about the code."
+      },
+      "agentClaims": {
+        "testsRun": [
+          {
+            "command": "npm run typecheck",
+            "outcome": "passed",
+            "summary": "tsc --noEmit clean in server and web"
+          },
+          {
+            "command": "npm test",
+            "outcome": "passed",
+            "summary": "server 9 passed (3 files, includes e2e spec); web 3 passed"
+          }
+        ],
+        "acceptance": [
+          {
+            "criterion": "A COURSE_FULL rejection produces a notification with reason COURSE_FULL, and the message text is unchanged",
+            "status": "met",
+            "evidence": "enrollment.service.spec.ts full-course test asserts reason and unchanged message"
+          },
+          {
+            "criterion": "An ALREADY_ENROLLED rejection produces a notification with reason ALREADY_ENROLLED",
+            "status": "met",
+            "evidence": "enrollment.service.spec.ts repeat-enrollment test"
+          },
+          {
+            "criterion": "A confirmed enrollment's notification has no reason field and is otherwise unchanged",
+            "status": "met",
+            "evidence": "existing toEqual assertion on the confirmed notification still passes; notifications.service.spec.ts asserts no reason property"
+          },
+          {
+            "criterion": "GET /api/notifications returns the reason for rejected notifications",
+            "status": "met",
+            "evidence": "server/test/app.e2e-spec.ts asserts reason COURSE_FULL for stu-bob"
+          },
+          {
+            "criterion": "The web page shows the reason next to a rejected notification and nothing extra for confirmed ones",
+            "status": "met",
+            "evidence": "NotificationList.tsx; App.test.tsx asserts no reason element after confirmation and (COURSE_FULL) after rejection (against a fake API, not a real browser)"
+          },
+          {
+            "criterion": "The notifications module does not import from the enrollment module (no new module dependency)",
+            "status": "met",
+            "evidence": "reason is typed string in notification.types.ts; grep finds no enrollment import in server/src/notifications"
+          }
+        ],
+        "gaps": [
+          "Bindings test.rul-seat-limit and impl.rul-seat-limit are stale because enroll() and the spec test changed; they were not flagged reassertAfterImplementing and I did not reassert them, a person should review them.",
+          "The web UI was only tested with a fake API, not in a browser."
+        ],
+        "outOfScope": [
+          {
+            "path": ".vcv/bindings/impl.rul-announce-every-decision.json",
+            "reason": "required reassertion of a claim on a changed object, done through vcv binding reassert"
+          },
+          {
+            "path": ".vcv/bindings/persist.dat-notification.json",
+            "reason": "required reassertion of a claim on a changed object, done through vcv binding reassert"
+          }
+        ],
+        "confidence": "high",
+        "claimedBy": "agent:implementer",
+        "verifiedByVcv": false,
+        "note": "The implementing agent's own account, as asserted by its host. VCV ran nothing and verified none of it."
+      },
+      "vcvObserved": {
+        "baseCommit": "b0eff0016fd6ca32a77ed5e1e4442adc1a95f1d1",
+        "headCommit": "b0eff0016fd6ca32a77ed5e1e4442adc1a95f1d1",
+        "branch": "feature/rejection-reason",
+        "dirty": true,
+        "modelRevision": "rev-3-a5c764161201",
+        "filesModified": [
+          "server/src/enrollment/enrollment.service.spec.ts",
+          "server/src/enrollment/enrollment.service.ts",
+          "server/src/notifications/notification.types.ts",
+          "server/src/notifications/notifications.service.spec.ts",
+          "server/src/notifications/notifications.service.ts",
+          "server/test/app.e2e-spec.ts",
+          "web/src/App.test.tsx",
+          "web/src/api/client.ts",
+          "web/src/components/NotificationList.tsx"
+        ],
+        "filesTruncated": false,
+        "outOfScope": [],
+        "store": {
+          "bindings": [
+            ".vcv/bindings/impl.rul-announce-every-decision.json",
+            ".vcv/bindings/persist.dat-notification.json"
+          ],
+          "model": [],
+          "other": []
+        },
+        "worktree": {
+          "digest": "7cdf947834ac8ad34ca378f36a2ca6183381489adea4907a4a096d9a75222e44",
+          "files": 13,
+          "complete": true
+        },
+        "bindings": [
+          {
+            "bindingId": "impl.rul-announce-every-decision",
+            "modelObjectId": "rul-announce-every-decision",
+            "relation": "implements",
+            "locator": "server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll",
+            "why": "changed",
+            "state": "resolved",
+            "source": "unchanged",
+            "model": "unchanged",
+            "reassertAfterImplementing": true,
+            "claimedAtRevision": "rev-3-a5c764161201",
+            "reasserted": true
+          },
+          {
+            "bindingId": "persist.dat-notification",
+            "modelObjectId": "dat-notification",
+            "relation": "persists",
+            "locator": "server/src/notifications/notification.types.ts#symbol:Notification",
+            "why": "changed",
+            "state": "resolved",
+            "source": "unchanged",
+            "model": "unchanged",
+            "reassertAfterImplementing": true,
+            "claimedAtRevision": "rev-3-a5c764161201",
+            "reasserted": true
+          }
+        ],
+        "note": "What VCV observed when the report was recorded: changed files from the base commit, scope, and binding claims verified as locator facts (meaning unverified)."
+      },
+      "notReconciled": {
+        "state": "not-reconciled",
+        "note": "Whether the source implements the approved model is not established by anything here (M4 reconciliation)."
+      },
+      "warnings": [
+        {
+          "code": "GAP",
+          "message": "Bindings test.rul-seat-limit and impl.rul-seat-limit are stale because enroll() and the spec test changed; they were not flagged reassertAfterImplementing and I did not reassert them, a person should review them."
+        },
+        {
+          "code": "GAP",
+          "message": "The web UI was only tested with a fake API, not in a browser."
+        },
+        {
+          "code": "CLAIMS_UNVERIFIED",
+          "message": "tests, outcomes and acceptance are the agent's claims: VCV ran nothing and verified none of them"
+        }
+      ]
+    },
+    "now": {
+      "baseCommit": "b0eff0016fd6ca32a77ed5e1e4442adc1a95f1d1",
+      "headCommit": "f8e3e2d5479998e7eaa67e54956226f079e30d37",
+      "branch": "feature/rejection-reason",
+      "dirty": false,
+      "modelRevision": "rev-3-a5c764161201",
+      "filesModified": [
+        "server/src/enrollment/enrollment.service.spec.ts",
+        "server/src/enrollment/enrollment.service.ts",
+        "server/src/notifications/notification.types.ts",
+        "server/src/notifications/notifications.service.spec.ts",
+        "server/src/notifications/notifications.service.ts",
+        "server/test/app.e2e-spec.ts",
+        "web/src/App.test.tsx",
+        "web/src/api/client.ts",
+        "web/src/components/NotificationList.tsx"
+      ],
+      "filesTruncated": false,
+      "outOfScope": [],
+      "store": {
+        "bindings": [
+          ".vcv/bindings/impl.rul-announce-every-decision.json",
+          ".vcv/bindings/persist.dat-notification.json"
+        ],
+        "model": [],
+        "other": []
+      },
+      "worktree": {
+        "digest": "7cdf947834ac8ad34ca378f36a2ca6183381489adea4907a4a096d9a75222e44",
+        "files": 13,
+        "complete": true
+      },
+      "bindings": [
+        {
+          "bindingId": "impl.rul-announce-every-decision",
+          "modelObjectId": "rul-announce-every-decision",
+          "relation": "implements",
+          "locator": "server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll",
+          "why": "changed",
+          "state": "resolved",
+          "source": "unchanged",
+          "model": "unchanged",
+          "reassertAfterImplementing": true,
+          "claimedAtRevision": "rev-3-a5c764161201",
+          "reasserted": true
+        },
+        {
+          "bindingId": "persist.dat-notification",
+          "modelObjectId": "dat-notification",
+          "relation": "persists",
+          "locator": "server/src/notifications/notification.types.ts#symbol:Notification",
+          "why": "changed",
+          "state": "resolved",
+          "source": "unchanged",
+          "model": "unchanged",
+          "reassertAfterImplementing": true,
+          "claimedAtRevision": "rev-3-a5c764161201",
+          "reasserted": true
+        }
+      ]
+    },
+    "changedSinceReport": false,
+    "warningsNow": [
+      {
+        "code": "GAP",
+        "message": "Bindings test.rul-seat-limit and impl.rul-seat-limit are stale because enroll() and the spec test changed; they were not flagged reassertAfterImplementing and I did not reassert them, a person should review them."
+      },
+      {
+        "code": "GAP",
+        "message": "The web UI was only tested with a fake API, not in a browser."
+      },
+      {
+        "code": "CLAIMS_UNVERIFIED",
+        "message": "tests, outcomes and acceptance are the agent's claims: VCV ran nothing and verified none of them"
+      }
+    ]
+  }
+}

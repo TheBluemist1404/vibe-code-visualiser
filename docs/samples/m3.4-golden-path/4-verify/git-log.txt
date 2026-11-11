@@ -1,0 +1,5 @@
+f8e3e2d Course Desk Fixture: feat: rejection reason on notifications (chg-notification-rejection-reason)
+b0eff00 Course Desk Fixture: vcv: approve chg-notification-rejection-reason (reviewed proposal digest eb632d5c7f6ca1653af3eb93e5b2d86d710ad9d639d288d2b8a9f30fd41c8f68)
+5a65d65 Course Desk Fixture: vcv: approve chg-baseline (approved baseline model)
+f952721 Course Desk Fixture: vcv: draft model, binding claims and the reviewer trust list
+adb423c Course Desk Fixture: Course Desk baseline

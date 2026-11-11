@@ -1,0 +1,28 @@
+{
+  "format": 1,
+  "bindingId": "persist.dat-notification",
+  "modelObjectId": "dat-notification",
+  "relation": "persists",
+  "locator": {
+    "path": "server/src/notifications/notification.types.ts",
+    "selector": {
+      "kind": "symbol",
+      "name": "Notification"
+    }
+  },
+  "provenance": {
+    "source": "agent",
+    "principalId": "agent:implementer",
+    "rationale": "Re-read Notification: new optional reason?: string (string, not an enrollment type import), set only on rejected notifications by NotificationsService.notify."
+  },
+  "modelRevision": "rev-3-a5c764161201",
+  "observed": {
+    "commit": "b0eff0016fd6ca32a77ed5e1e4442adc1a95f1d1",
+    "workingTree": "modified",
+    "fingerprint": {
+      "algorithm": "vcv-fp-1",
+      "file": "8850e43a0cec2921daac0b120495cc187caf0261c90da152b8508edd74c263d3",
+      "selector": "dde7af5b222a82ab6a0eba0bfc44a0af7a8d994f8b78870b61021ec491a333d4"
+    }
+  }
+}

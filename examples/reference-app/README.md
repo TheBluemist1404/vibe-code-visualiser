@@ -13,6 +13,7 @@ every enrollment decision is announced through a notification.
 | `bindings/demo.sh <dir>` | Scripted binding-claim walkthrough on a fresh checkout with the M2.3 draft (M2.4): record, refuse, rename, verify, reassert | Recorded in `docs/samples/m2.4-bindings/` |
 | `changes/waitlist.patch` | The controlled source change for M2.5: a full course waitlists instead of rejecting, with tests, types and README updated | Applied by `maintenance/setup.sh` |
 | `maintenance/` | `setup.sh` (draft, eight claims, Git baseline, the patch, the app's tests), `run-agent.sh` (isolated maintenance agent, M2.5), the generic `prompt.md`, `evaluate.sh` + `evaluate-prompt.md` (independent read-only reviewer) | Recorded in `docs/samples/m2.5-maintenance/` |
+| `golden-path/` | The M3.4 model-first golden path: `setup.sh` (approved baseline, reviewer trust list), `propose.sh` (fresh proposer agent), `review.sh` (the separate, simulated reviewer), `implement.sh` (fresh implementer agent), `verify.sh` (host gate, branch views, negative paths), `evaluate.sh` (independent read-only assessment), `replay.sh` (agent-free reproduction) | Recorded in `docs/samples/m3.4-golden-path/`; `replay.sh --app-tests` runs in CI |
 | `ORACLE.md` | Facts about the app, traced to code and tests, for checking an agent's model | Reviewers only, never the agent |
 
 ```sh

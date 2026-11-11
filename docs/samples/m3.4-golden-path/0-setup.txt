@@ -1,0 +1,37 @@
+== materialize and create the draft project
+project: ready (<repo>/.vcv)
+model:   prj-course-desk at rev-1 [draft], 1 revision(s)
+git:     main adb423c256ca, working tree dirty
+  · UNCOMMITTED_MODEL_CHANGES: 3 .vcv/ path(s) differ from Git HEAD adb423c256ca72cf8242da855e6cb433655dbd1a
+== binding claims (made by the bootstrap agent)
+impl.cap-enroll: recorded (resolved: symbol EnrollmentService.enroll resolves to method EnrollmentService.enroll at line 23)
+impl.rul-seat-limit: recorded (resolved: symbol EnrollmentService.enroll resolves to method EnrollmentService.enroll at line 23)
+impl.rul-announce-every-decision: recorded (resolved: symbol EnrollmentService.enroll resolves to method EnrollmentService.enroll at line 23)
+expose.cap-enroll: recorded (resolved: route POST /enrollments resolves to route POST /enrollments → EnrollmentController.enroll at line 16)
+test.rul-seat-limit: recorded (resolved: test "EnrollmentService > rejects an enrollment into a full course and notifies the student" resolves to test EnrollmentService > rejects an enrollment into a full course and notifies the student at line 28)
+persist.dat-enrollment: recorded (resolved: symbol Enrollment resolves to interface Enrollment at line 15)
+persist.dat-notification: recorded (resolved: symbol Notification resolves to interface Notification at line 3)
+impl.cap-list-notifications: recorded (resolved: symbol NotificationsService.forRecipient resolves to method NotificationsService.forRecipient at line 18)
+== the reviewer's key (outside the checkout) and the trust list on main
+private key written to <keys>/reviewer.pem (mode 0600). Keep it outside the repository and any agent sandbox.
+trust-list entry (add it to .vcv/reviewers.json through a reviewed PR to the protected branch):
+{
+  "id": "user:reviewer",
+  "publicKey": "ed25519:MCowBQYDK2VwAyEAd8etLEK0saYBIXostDJM00tXtpUs9Q0f6nIIjxXgKL0=",
+  "permissions": [
+    "model:approve"
+  ]
+}
+added to .vcv/reviewers.json; commit it
+== authorize the baseline: proposed by the bootstrap agent, approved by the reviewer
+chg-baseline: pending (recorded); .vcv/HEAD stays at rev-1
+  digest: 529d6eafa13954b4b388d4371f0445af576d5f1f256409f2fd9e6e2e06584b64
+reviewer: user:reviewer (key c9ecc67163802d0d, trusted per .vcv/reviewers.json at f95272141c122ce445ea05fc8d9560ba4aad2832 (f95272141c12))
+  trust anchor: commit f95272141c12 pinned by the caller: an immutability pin, not proof of origin; that it is the protected branch is caller-asserted and unverified
+  ! authorization not established by this command: the trust anchor is caller-asserted, and a shell in this checkout can supply its own. The authorization gate is `vcv integrity --base <protected base> --trust-ref <protected base> --require-attestation` run by the host (CI) on the hosting service's protected branch
+chg-baseline: applied → rev-2-a21d7aa4915e (proposed by agent:bootstrap, approved by user:reviewer; record is applied)
+  attestation: .vcv/approvals/chg-baseline.json (commit it with the change record and the new revision)
+project: ready (<repo>/.vcv)
+model:   prj-course-desk at rev-2-a21d7aa4915e [approved], 2 revision(s)
+git:     main 5a65d6570f9e, clean
+baseline: 5a65d6570f9eae9deb902cd6faf1380b4df0adea on main (trust list from f95272141c122ce445ea05fc8d9560ba4aad2832)

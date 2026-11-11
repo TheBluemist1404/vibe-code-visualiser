@@ -1,0 +1,7 @@
+b0eff0016fd6ca32a77ed5e1e4442adc1a95f1d1 vcv: approve chg-notification-rejection-reason (reviewed proposal digest eb632d5c7f6ca1653af3eb93e5b2d86d710ad9d639d288d2b8a9f30fd41c8f68)
+
+ .vcv/HEAD                                          |  68 ++++++--
+ .../chg-notification-rejection-reason.json         |  14 ++
+ .../changes/chg-notification-rejection-reason.json |  68 ++++++++
+ .vcv/revisions/rev-3-a5c764161201.yaml             | 173 +++++++++++++++++++++
+ 4 files changed, 313 insertions(+), 10 deletions(-)

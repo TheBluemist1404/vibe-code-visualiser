@@ -1,0 +1,2 @@
+chg-baseline  applied  by agent:bootstrap  base rev-1 → rev-2-a21d7aa4915e  1 op(s)
+chg-notification-rejection-reason  pending  by agent:proposer  base rev-2-a21d7aa4915e  4 op(s)

@@ -1,0 +1,11 @@
+A reviewer approved a model change for this repository, and you are asked to implement it now.
+
+The approved handoff is at `$NOTES/handoff.json`. It holds the approved operations, the approved implementation request (behavior, acceptance criteria, suggested tests, scope), the model delta and structural impact, the binding claims that point at the affected code with their current state, the base commit and the steps to follow. Follow those steps and the VCV guide at `$VCV_GUIDE`. The `vcv` command is on your PATH. It acts as you: an agent that may record binding claims and propose model changes, but not apply or approve them.
+
+- Inspect the code and tests yourself; the handoff points at code, it does not prove where or how it must change.
+- Implement the approved behavior and focused tests, staying within the approved scope. The app's dependencies are installed: run `npm run typecheck` and `npm test` (from the repository root).
+- If the approved model turns out to be wrong or incomplete, do not work around it: stop, explain it in your report, and say a new proposal is needed. Never edit `.vcv/` by hand.
+- After implementing, re-inspect the code for every binding claim marked `reassertAfterImplementing` and reassert it (`vcv binding list .` shows digests; `vcv binding reassert . <id> --locator <loc> --expect <digest> --source agent --rationale "..."`), and add a claim (`vcv binding add`) for important new code if one is missing.
+- Write your report as JSON at `$NOTES/report.json` in the format of docs/implementation.md ("The report"), with `changeId`, `baseCommit` and `handoffDigest` taken from the handoff, every test command you ran with its real outcome, each acceptance criterion with its status, your gaps, any out-of-scope edits with a reason, and your confidence. Then record it: `vcv implementation record . --report $NOTES/report.json`, and read its warnings.
+
+Do not commit. When you are done, summarise what you changed, what the tests showed, what VCV warned about, and what is left for a person.

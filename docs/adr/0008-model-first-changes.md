@@ -187,6 +187,31 @@ what a proposal changes before deciding.
 - Not done: MCP tools for the handoff or the report (the agent already has the CLI), test
   execution, a universal verifier, and anything that triggers code generation.
 
+## M3.4 decisions
+
+- **The golden path is a set of explicit steps, not one command.** `propose.sh`, `review.sh show`
+  / `approve <digest>`, `implement.sh` and `verify.sh` are separate invocations
+  (docs/golden-path.md), so nothing starts the next step: approval does not trigger the
+  implementer, and the reviewer approves a digest they have read.
+- **Fresh agents, fixed identities.** The proposer and the implementer are fresh headless sessions
+  with an empty home, no web or MCP, the reviewer's key and this checkout denied, and a host
+  wrapper fixing `agent:proposer` (`model:propose`) and `agent:implementer` (`model:propose`,
+  `binding:record`). The implementer may edit `server/` and `web/` but never `.vcv/` except
+  through `vcv`.
+- **The reviewer is labelled a simulation.** The key is local, and the decision is the operator's.
+  The recorded decision says so, and the docs do not present it as a production boundary. The host
+  gate on the protected base remains the authorization.
+- **An approved baseline is set up the same way.** `chg-baseline` (`approveDraft`) is proposed by
+  the bootstrap agent and approved by the reviewer, so `main` starts from agreed intent with its
+  trust list, and `.gitattributes` (`.vcv/** -text`) keeps the store byte-exact across platforms.
+- **Agent-free replay for CI.** `replay.sh` re-issues the recorded decisions (the proposal, the
+  source diff, the claims, the report) through the same commands and identities with a fresh key.
+  The proposal digest and revision ID come out identical, because both derive from content. The
+  recorded transcripts, not the replay, are the evidence that fresh agents made those decisions.
+- Finding left to M4: the implementation report checks only claims on affected objects, so
+  claims on other objects whose code changed (three in the recorded run) are visible only through
+  `vcv evidence`.
+
 ## Consequences
 
 - New: `readStoreFile` / `STORE_FILE_LIMITS` in core (now used by every store read), `packages/repo/src/proposals.ts` (`submitProposal`, `listProposals`, `previewProposal`,

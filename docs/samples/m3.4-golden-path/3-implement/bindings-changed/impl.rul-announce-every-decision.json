@@ -1,0 +1,28 @@
+{
+  "format": 1,
+  "bindingId": "impl.rul-announce-every-decision",
+  "modelObjectId": "rul-announce-every-decision",
+  "relation": "implements",
+  "locator": {
+    "path": "server/src/enrollment/enrollment.service.ts",
+    "selector": {
+      "kind": "symbol",
+      "name": "EnrollmentService.enroll"
+    }
+  },
+  "provenance": {
+    "source": "agent",
+    "principalId": "agent:implementer",
+    "rationale": "Re-read enroll(): every decision still records an enrollment and calls notify exactly once; the rejected branch now passes the rejection reason as notify's reason argument."
+  },
+  "modelRevision": "rev-3-a5c764161201",
+  "observed": {
+    "commit": "b0eff0016fd6ca32a77ed5e1e4442adc1a95f1d1",
+    "workingTree": "modified",
+    "fingerprint": {
+      "algorithm": "vcv-fp-1",
+      "file": "a33e0522d86037fd25e7399b51352a9dc82222c4e9964eebe6276ad5c149b82e",
+      "selector": "8deb3adde65f1faf90a879973a298d7bd1ead90a7696ac9c5dc27054a2ee07aa"
+    }
+  }
+}

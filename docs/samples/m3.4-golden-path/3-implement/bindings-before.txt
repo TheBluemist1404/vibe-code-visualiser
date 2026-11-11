@@ -1,0 +1,8 @@
+expose.cap-enroll  aa596aa41e19544f44ade1a15e90a3b026f09f635c7a70777c332d2cbcc368f6  cap-enroll exposes server/src/enrollment/enrollment.controller.ts#route:POST /enrollments
+impl.cap-enroll  a971dc6b1f62565b84f3ccd9e03e6a6d4b22f4d3a578c3b85ee75847224bce43  cap-enroll implements server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll
+impl.cap-list-notifications  a68ac27c11c8954396e3737c99edc8106bed4e5a2dfe5951ee72ddcebe05d60b  cap-list-notifications implements server/src/notifications/notifications.service.ts#symbol:NotificationsService.forRecipient
+impl.rul-announce-every-decision  1a99f7834be7ab18183e2e5fddb12d44db0196e0e5f890fb12bad8f43257e8b2  rul-announce-every-decision implements server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll
+impl.rul-seat-limit  9d2a6d0917e8c1d4922e3b5d5eb60d7b41b993aa06db8293b57267985fabee74  rul-seat-limit implements server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll
+persist.dat-enrollment  d925cda612f518282b656c6c670baed7fc6c10fc732e428d984f88582e8af235  dat-enrollment persists server/src/enrollment/enrollment.types.ts#symbol:Enrollment
+persist.dat-notification  6cd47cfdc580f098940aee44a4778b88bb88b3cd4d2cbea892604f9b55b6a06f  dat-notification persists server/src/notifications/notification.types.ts#symbol:Notification
+test.rul-seat-limit  d8e0c04c4b402d282419d3996a309de0d16279454d9f76d10b951e4c0abcfba2  rul-seat-limit tests server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > rejects an enrollment into a full course and notifies the student

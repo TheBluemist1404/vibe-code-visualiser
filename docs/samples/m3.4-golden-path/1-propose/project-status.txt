@@ -1,0 +1,4 @@
+project: ready (<repo>/.vcv)
+model:   prj-course-desk at rev-2-a21d7aa4915e [approved], 2 revision(s)
+git:     feature/rejection-reason 5a65d6570f9e, working tree dirty
+  · UNCOMMITTED_MODEL_CHANGES: 1 .vcv/ path(s) differ from Git HEAD 5a65d6570f9eae9deb902cd6faf1380b4df0adea

@@ -1,0 +1,274 @@
+{
+  "ok": true,
+  "context": {
+    "projectId": "prj-course-desk",
+    "modelRevision": "rev-2-a21d7aa4915e",
+    "snapshotStatus": "approved",
+    "source": "model-proposals",
+    "implementationChecked": false,
+    "observed": {
+      "commit": "5a65d6570f9eae9deb902cd6faf1380b4df0adea",
+      "branch": "feature/rejection-reason",
+      "dirty": true
+    }
+  },
+  "data": {
+    "proposal": {
+      "changeId": "chg-notification-rejection-reason",
+      "proposalDigest": "eb632d5c7f6ca1653af3eb93e5b2d86d710ad9d639d288d2b8a9f30fd41c8f68",
+      "origin": "record",
+      "lifecycle": "pending",
+      "proposerId": "agent:proposer",
+      "projectId": "prj-course-desk",
+      "baseRevision": "rev-2-a21d7aa4915e",
+      "rationale": "Rejected students only get the reason inside the message text. Enrollment already stores the machine-readable reason (enrollment.types.ts Enrollment.reason; enrollment.service.ts enroll()), but Notification (notification.types.ts) has no such field, so the web page cannot show it. Add a nullable reason attribute to the Notification data, set only on enrollment-rejected notifications, and describe the web page showing it. Left unchanged on purpose: Enrollment data, seat-limit rule, module dependencies (mod-notifications stays dependency-free, so the reason is typed string there like Enrollment.reason, not a reference), no events/contracts, confirmed enrollments and their notifications, capabilities, and the message texts.\n",
+      "operations": [
+        {
+          "index": 0,
+          "type": "addDataAttribute",
+          "summary": "add attribute att-ntf-reason (reason: string) to dat-notification"
+        },
+        {
+          "index": 1,
+          "type": "setDescription",
+          "summary": "change the description of dat-notification"
+        },
+        {
+          "index": 2,
+          "type": "setRuleStatement",
+          "summary": "change the statement of rule rul-announce-every-decision"
+        },
+        {
+          "index": 3,
+          "type": "setDescription",
+          "summary": "change the description of cap-use-ui"
+        }
+      ],
+      "implementation": {
+        "behavior": "When an enrollment is rejected, the notification created for the student carries the rejection reason (COURSE_FULL or ALREADY_ENROLLED) in a new optional `reason` field, returned by GET /notifications, and the web page shows that reason next to the rejected notification. Confirmed notifications have no reason.\n",
+        "acceptanceCriteria": [
+          "A COURSE_FULL rejection produces a notification with reason COURSE_FULL, and the message text is unchanged",
+          "An ALREADY_ENROLLED rejection produces a notification with reason ALREADY_ENROLLED",
+          "A confirmed enrollment's notification has no reason field and is otherwise unchanged",
+          "GET /api/notifications returns the reason for rejected notifications",
+          "The web page shows the reason next to a rejected notification and nothing extra for confirmed ones",
+          "The notifications module does not import from the enrollment module (no new module dependency)"
+        ],
+        "suggestedTests": [
+          "EnrollmentService: rejects an enrollment into a full course and notifies the student",
+          "NotificationsService: keeps each recipient's notifications separate, in order",
+          "App: shows the outcome and the student's notification after enrolling, then a rejection when full"
+        ],
+        "scope": [
+          "server/src/notifications/**",
+          "server/src/enrollment/enrollment.service.ts",
+          "server/src/enrollment/enrollment.service.spec.ts",
+          "server/test/app.e2e-spec.ts",
+          "web/src/api/client.ts",
+          "web/src/components/NotificationList.tsx",
+          "web/src/App.test.tsx"
+        ]
+      }
+    },
+    "validation": {
+      "appliesToCurrent": true,
+      "errors": [],
+      "warnings": [],
+      "atSubmission": []
+    },
+    "delta": {
+      "against": "current",
+      "revision": "rev-2-a21d7aa4915e",
+      "changes": [
+        {
+          "id": "att-ntf-reason",
+          "kind": "attribute",
+          "name": "reason",
+          "moduleId": "mod-notifications",
+          "change": "added",
+          "fields": [
+            {
+              "field": "id",
+              "after": "att-ntf-reason"
+            },
+            {
+              "field": "name",
+              "after": "reason"
+            },
+            {
+              "field": "nullable",
+              "after": "true"
+            },
+            {
+              "field": "type",
+              "after": "string"
+            }
+          ]
+        },
+        {
+          "id": "cap-use-ui",
+          "kind": "capability",
+          "name": "Enroll and see outcome via the page",
+          "moduleId": "mod-web",
+          "change": "modified",
+          "fields": [
+            {
+              "field": "description",
+              "before": "App.tsx: submit the form, show outcome, then reload that student's notifications and the course seat counts.",
+              "after": "App.tsx: submit the form, show outcome, then reload that student's notifications and the course seat counts. A rejected notification is shown with its rejection reason next to it.\n"
+            }
+          ]
+        },
+        {
+          "id": "dat-notification",
+          "kind": "data",
+          "name": "Notification",
+          "moduleId": "mod-notifications",
+          "change": "modified",
+          "fields": [
+            {
+              "field": "description",
+              "before": "notification.types.ts, in-memory outbox; ids ntf-N. kind is enrollment-confirmed|enrollment-rejected. enrollmentId points at an Enrollment in another module, so it is typed id rather than reference.",
+              "after": "notification.types.ts, in-memory outbox; ids ntf-N. kind is enrollment-confirmed|enrollment-rejected. reason is COURSE_FULL|ALREADY_ENROLLED, set only on enrollment-rejected notifications and absent on confirmed ones; it duplicates the rejected Enrollment's reason as its own field in addition to the…",
+              "truncated": true
+            }
+          ]
+        },
+        {
+          "id": "rul-announce-every-decision",
+          "kind": "rule",
+          "name": "Every decision is notified",
+          "moduleId": "mod-enrollment",
+          "change": "modified",
+          "fields": [
+            {
+              "field": "statement",
+              "before": "Each enrollment decision, confirmed or rejected, is recorded and results in exactly one notification to the student.",
+              "after": "Each enrollment decision, confirmed or rejected, is recorded and results in exactly one notification to the student. A rejection notification also carries the rejection reason (COURSE_FULL or ALREADY_ENROLLED) as its own field.\n"
+            }
+          ]
+        }
+      ],
+      "total": 4,
+      "truncated": false
+    },
+    "impact": {
+      "modules": [
+        {
+          "id": "mod-enrollment",
+          "name": "Enrollment",
+          "via": "changed"
+        },
+        {
+          "id": "mod-notifications",
+          "name": "Notifications",
+          "via": "changed"
+        },
+        {
+          "id": "mod-web",
+          "name": "Web",
+          "via": "changed"
+        }
+      ],
+      "crossModule": "yes",
+      "contracts": [],
+      "candidates": [
+        {
+          "id": "mod-enrollment",
+          "kind": "module",
+          "name": "Enrollment",
+          "description": "server/src/enrollment/ (EnrollmentModule). EnrollmentService calls NotificationsService.notify directly (injected via NotificationsModule import); this is a direct call, not an event, so no events or contracts are modelled.",
+          "moduleId": "mod-enrollment",
+          "parentId": "prj-course-desk",
+          "irPath": "modules[0]",
+          "distance": 1,
+          "via": "container",
+          "dependencyPath": [
+            {
+              "from": "rul-announce-every-decision",
+              "relation": "owner",
+              "to": "mod-enrollment"
+            }
+          ],
+          "reason": "module mod-enrollment owns rule rul-announce-every-decision"
+        },
+        {
+          "id": "mod-notifications",
+          "kind": "module",
+          "name": "Notifications",
+          "description": "server/src/notifications/ (NotificationsModule). Exports NotificationsService; has no dependencies.",
+          "moduleId": "mod-notifications",
+          "parentId": "prj-course-desk",
+          "irPath": "modules[1]",
+          "distance": 1,
+          "via": "container",
+          "dependencyPath": [
+            {
+              "from": "dat-notification",
+              "relation": "owner",
+              "to": "mod-notifications"
+            }
+          ],
+          "reason": "module mod-notifications owns data dat-notification"
+        },
+        {
+          "id": "mod-web",
+          "kind": "module",
+          "name": "Web",
+          "description": "web/src (App.tsx, api/client.ts, components/). Depends on the other modules only through their HTTP routes under /api (api/client.ts), not through imports.",
+          "moduleId": "mod-web",
+          "parentId": "prj-course-desk",
+          "irPath": "modules[2]",
+          "distance": 1,
+          "via": "container",
+          "dependencyPath": [
+            {
+              "from": "cap-use-ui",
+              "relation": "owner",
+              "to": "mod-web"
+            }
+          ],
+          "reason": "module mod-web owns capability cap-use-ui"
+        }
+      ],
+      "total": 3,
+      "truncated": false,
+      "impactClass": "structural-candidate",
+      "note": "Structural candidates from declared model references (@vcv/query analyzeImpact), not proof of semantic or code impact. Confirm each in the repository."
+    },
+    "bindings": {
+      "items": [
+        {
+          "bindingId": "impl.rul-announce-every-decision",
+          "modelObjectId": "rul-announce-every-decision",
+          "relation": "implements",
+          "locator": "server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll",
+          "why": "changed"
+        },
+        {
+          "bindingId": "persist.dat-notification",
+          "modelObjectId": "dat-notification",
+          "relation": "persists",
+          "locator": "server/src/notifications/notification.types.ts#symbol:Notification",
+          "why": "changed"
+        }
+      ],
+      "total": 2,
+      "truncated": false,
+      "note": "Claims are listed, not verified, here: run vcv evidence (or vcv_get_object_evidence) for their current state. After implementation they must be re-checked and reasserted explicitly."
+    },
+    "states": {
+      "snapshotStatus": "approved",
+      "change": "pending",
+      "approval": "none",
+      "implementation": "not-recorded"
+    },
+    "assumptions": [
+      "The impact list is structural: it follows declared model references only. It is not a code, test or runtime impact analysis, and an empty list does not mean nothing else is affected.",
+      "Whether the operations express the requested behavior is the proposer's interpretation; VCV checks types, references and invariants, not meaning.",
+      "The current source code has not been compared with this proposal. Approval approves model intent; the implementation comes afterwards and is checked separately.",
+      "The proposer identity \"agent:proposer\" is what the host asserted when the proposal was submitted; see docs/proposals.md for what that proves locally.",
+      "The change reaches more than one module: check each module's contracts and binding claims, not only the module that was asked about."
+    ]
+  }
+}
