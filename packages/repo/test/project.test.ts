@@ -243,6 +243,29 @@ test("merging diverged branches and resolving .vcv/HEAD to the common ancestor k
   assert.equal(git(repo, "status", "--porcelain"), "", "nothing in the checkout changed");
 });
 
+test("a writer left open across `git checkout` cannot overwrite the checked-out branch's model (PR #8 review, P1)", () => {
+  const repo = repoWithProject();
+  git(repo, "checkout", "-q", "-b", "feature-b");
+  const revB = engineFor(repo).propose(rename("ch-b", "rev-1", "Waiting (B)"), owner).record!.resultingRevision!;
+  commitAll(repo, "model: B");
+  git(repo, "checkout", "-q", "main");
+
+  const store = new FileStore(join(repo, VCV_DIR));
+  const e = new ModelEngine(store); // long-lived writer, opened on main at rev-1
+  assert.equal(e.current().project.modelRevision, "rev-1");
+  git(repo, "checkout", "-q", "feature-b");
+
+  const stale = e.propose(rename("ch-old-line", "rev-1", "Waiting (main)"), owner);
+  assert.equal(stale.status, "rejected");
+  assert.equal(stale.diagnostics[0]!.code, "STALE_REVISION");
+  assert.equal(projectStatus(repo).model!.revision, revB);
+  assert.equal(git(repo, "diff", "--", `${VCV_DIR}/HEAD`), "", "feature-b's HEAD was not overwritten");
+
+  const ok = e.propose(rename("ch-on-b", revB, "Waiting (B2)"), owner);
+  assert.equal(ok.status, "applied");
+  assert.deepEqual(projectStatus(repo).model!.history.slice(0, 2), ["rev-1", revB]);
+});
+
 test("model history survives restart and an ordinary checkout round trip", () => {
   const repo = repoWithProject();
   const e = engineFor(repo);

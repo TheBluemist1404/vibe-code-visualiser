@@ -46,7 +46,9 @@ export type StoreErrorCode =
   /** A store file contains Git conflict markers (an unresolved merge). */
   | "CONFLICTED"
   /** The store holds revisions that are not in HEAD's history and are not an interrupted commit. */
-  | "DIVERGED";
+  | "DIVERGED"
+  /** HEAD on disk moved under an open writer (Git checkout/pull, another process); nothing was written. */
+  | "HEAD_CHANGED";
 
 export class StoreError extends Error {
   readonly code: StoreErrorCode;
@@ -183,20 +185,37 @@ export class FileStore implements ModelStore {
     return new FileStore(dir, opts);
   }
 
+  // Read policy for long-lived writers (ADR 0007 §2): every read first follows HEAD on disk, so
+  // after a `git checkout` the engine validates against the checked-out line (a change based on
+  // the old line then fails its expectedRevision check). A moved HEAD is re-checked with
+  // recovery, so a conflicted or diverged checkout is refused here too.
   current(): Model {
+    this.sync();
     return this.revision(this.head.revision)!;
   }
 
   revision(rev: string): Model | undefined {
+    this.sync();
     if (!this.head.history.includes(rev)) return undefined; // uncommitted files do not exist
-    return readRevisionFile(this.dir, rev);
+    return readRevisionFile(this.dir, rev, this.head.history);
   }
 
   revisions(): string[] {
+    this.sync();
     return [...this.head.history];
   }
 
   commit(model: Model, record: ChangeRecord): void {
+    // Write guard: the change was validated against this.head. If HEAD on disk moved since then
+    // (checkout, pull, another process), writing would replace that line's HEAD. Refuse before
+    // touching any file.
+    const disk = readHeadFile(this.dir);
+    if (!sameLine(disk, this.head)) {
+      throw new StoreError(
+        "HEAD_CHANGED",
+        `HEAD moved from ${this.head.revision} to ${disk.revision} on disk since this change was validated (Git checkout, pull or another writer); nothing was written. Re-read the model and retry.`,
+      );
+    }
     assertCommittable(model, record, this.head.history);
     const rev = model.project.modelRevision;
     const next: Head = { format: 1, revision: rev, history: [...this.head.history, rev], lastCommit: record };
@@ -293,6 +312,7 @@ export class FileStore implements ModelStore {
       if (!existsSync(join(this.dir, "revisions", `${rev}.yaml`))) {
         throw new StoreError("CORRUPT", `HEAD lists revision ${rev} but its file is missing`);
       }
+      readRevisionFile(this.dir, rev, this.head.history); // parses and verifies branch-safe digests
     }
 
     // 3. An "applied" record must point at a committed revision.
@@ -319,6 +339,14 @@ export class FileStore implements ModelStore {
 
   private readHead(): Head {
     return readHeadFile(this.dir);
+  }
+
+  /** Adopt HEAD as it is on disk now, re-running the open-time checks if it moved. */
+  private sync(): void {
+    const disk = readHeadFile(this.dir);
+    if (sameLine(disk, this.head)) return;
+    this.head = disk;
+    this.recover();
   }
 
   private changePath(id: string): string {
@@ -355,7 +383,7 @@ export class FileStoreReader {
   current(): Model {
     const head = readHeadFile(this.dir);
     if (this.cached?.revision !== head.revision) {
-      this.cached = { revision: head.revision, model: readRevisionFile(this.dir, head.revision) };
+      this.cached = { revision: head.revision, model: readRevisionFile(this.dir, head.revision, head.history) };
     }
     // Callers get their own copy, as with MemoryStore, so nothing can alter the cached revision.
     return structuredClone(this.cached.model);
@@ -525,7 +553,7 @@ export function inspectStore(dir: string): StoreInspection {
   let head: Head;
   try {
     head = readHeadFile(dir);
-    for (const rev of head.history) readRevisionFile(dir, rev);
+    for (const rev of head.history) readRevisionFile(dir, rev, head.history);
   } catch (e) {
     return { state: "invalid", dir, message: e instanceof Error ? e.message : String(e) };
   }
@@ -536,7 +564,15 @@ export function inspectStore(dir: string): StoreInspection {
   return foreign.length ? { state: "diverged", ...base, foreign } : { state: "ok", ...base };
 }
 
-function readRevisionFile(dir: string, rev: string): Model {
+const sameLine = (a: Head, b: Head) => a.revision === b.revision && a.history.length === b.history.length && a.history.every((r, i) => b.history[i] === r);
+
+/**
+ * Read a committed revision. With `history`, also check that the file still is the revision its
+ * ID names: project.modelRevision matches, and for branch-safe IDs past the first entry the
+ * content digest verifies against the previous entry as parent at that position. A failed check
+ * is CORRUPT and nothing is rewritten (ADR 0007 §3).
+ */
+function readRevisionFile(dir: string, rev: string, history?: readonly string[]): Model {
   if (persistedIdProblem(rev)) throw new StoreError("CORRUPT", `HEAD lists an invalid revision ID "${rev}"`);
   let text: string;
   try {
@@ -547,6 +583,18 @@ function readRevisionFile(dir: string, rev: string): Model {
   if (hasConflictMarkers(text)) throw conflictError([`revisions/${rev}.yaml`]);
   const r = loadModel(text);
   if (!r.model) throw new StoreError("CORRUPT", `committed revision ${rev} is unreadable: ${r.diagnostics.map((d) => d.message).join("; ")}`);
+  if (history) {
+    if (r.model.project.modelRevision !== rev) {
+      throw new StoreError("CORRUPT", `revisions/${rev}.yaml says it is ${r.model.project.modelRevision}`);
+    }
+    const i = history.indexOf(rev);
+    if (i > 0 && parseRevisionId(rev).scheme === "branch-safe" && !isChildRevision(rev, r.model, history[i - 1]!, i + 1)) {
+      throw new StoreError(
+        "CORRUPT",
+        `revisions/${rev}.yaml does not match its ID: its content digest does not verify as revision ${i + 1} after ${history[i - 1]} (edited after commit, or listed out of place in HEAD)`,
+      );
+    }
+  }
   return r.model;
 }
 

@@ -201,3 +201,79 @@ test("a single verified child is still foreign when an applied change record nam
   assert.throws(() => new FileStore(merged), storeErr("DIVERGED"));
   assert.ok(existsSync(join(merged, "revisions", `${revA}.yaml`)));
 });
+
+// Review on PR #8, round 2.
+test("P2: a committed branch-safe revision edited in place is CORRUPT everywhere, and is not rewritten", () => {
+  const dir = join(tmp(), "store");
+  FileStore.init(dir, baseModel());
+  const rev = new ModelEngine(new FileStore(dir)).propose(timeoutChange(), owner).record!.resultingRevision!;
+  const file = join(dir, "revisions", `${rev}.yaml`);
+  // A valid model, same modelRevision, different content: the ID would now mean two things.
+  const edited = loadModel(readFileSync(file, "utf8")).model!;
+  edited.project.name = "LMS (edited by hand)";
+  writeFileSync(file, dumpModel(edited));
+  const tampered = readFileSync(file, "utf8");
+
+  const inspected = inspectStore(dir);
+  assert.equal(inspected.state, "invalid");
+  assert.match(inspected.state === "invalid" ? inspected.message : "", /does not match its ID/);
+  assert.throws(() => new FileStore(dir), storeErr("CORRUPT"));
+  assert.throws(() => new FileStoreReader(dir), storeErr("CORRUPT"));
+  assert.equal(readFileSync(file, "utf8"), tampered, "corruption is reported, never repaired by rewriting");
+});
+
+test("P2: a revision file whose modelRevision disagrees with its name is CORRUPT; legacy content is not digest-checked", () => {
+  const dir = join(tmp(), "store");
+  FileStore.init(dir, baseModel());
+  const legacy = baseModel();
+  legacy.project.modelRevision = "rev-2";
+  writeFileSync(join(dir, "revisions", "rev-2.yaml"), dumpModel(legacy));
+  writeFileSync(join(dir, "HEAD"), JSON.stringify({ format: 1, revision: "rev-2", history: ["rev-1", "rev-2"] }) + "\n");
+  assert.equal(inspectStore(dir).state, "ok", "legacy IDs carry no digest, so their content cannot be checked");
+  legacy.project.modelRevision = "rev-7";
+  writeFileSync(join(dir, "revisions", "rev-2.yaml"), dumpModel(legacy));
+  assert.equal(inspectStore(dir).state, "invalid");
+});
+
+test("P1: an open writer follows HEAD on disk; a change based on the old line is rejected, not written over the new HEAD", () => {
+  const { a, b, revB } = divergedPair();
+  // Writer opened on a store at rev-1 ... then the checkout switches to b's line (rev-2-B).
+  const root = join(a, "..", "checkout");
+  cpSync(join(a, "..", "base"), root, { recursive: true });
+  const store = new FileStore(root);
+  const e = new ModelEngine(store);
+  assert.equal(e.current().project.modelRevision, "rev-1");
+  cpSync(join(b, "revisions"), join(root, "revisions"), { recursive: true });
+  cpSync(join(b, "changes"), join(root, "changes"), { recursive: true });
+  cpSync(join(b, "HEAD"), join(root, "HEAD"));
+  const headAfterCheckout = readFileSync(join(root, "HEAD"), "utf8");
+
+  const stale = e.propose(renamePending("ch-from-old-line", "rev-1"), owner);
+  assert.equal(stale.status, "rejected");
+  assert.equal(stale.diagnostics[0]!.code, "STALE_REVISION");
+  assert.equal(readFileSync(join(root, "HEAD"), "utf8"), headAfterCheckout, "the checked-out line's HEAD is intact");
+
+  const ok = e.propose({ ...renamePending("ch-on-new-line", revB), operations: [{ type: "renameObject", objectId: "mod-notifications", name: "Notify" }] }, owner);
+  assert.equal(ok.status, "applied", JSON.stringify(ok.diagnostics));
+  assert.deepEqual(store.revisions().slice(0, 2), ["rev-1", revB], "the new revision extends the checked-out line");
+});
+
+test("P1: commit refuses with HEAD_CHANGED if HEAD moves between validation and write, and writes nothing", () => {
+  const { a, b } = divergedPair();
+  const root = join(a, "..", "race");
+  cpSync(join(a, "..", "base"), root, { recursive: true });
+  const store = new FileStore(root);
+  const model = store.current(); // validated against rev-1
+  model.project.name = "LMS next";
+  const id = branchSafeRevisionId(model, "rev-1", 2);
+  model.project.modelRevision = id;
+  cpSync(join(b, "revisions"), join(root, "revisions"), { recursive: true });
+  cpSync(join(b, "HEAD"), join(root, "HEAD")); // the checkout happens right now
+  const before = readdirSync(join(root, "revisions")).sort();
+  const head = readFileSync(join(root, "HEAD"), "utf8");
+  const record = { changeId: "ch-race", projectId: "prj-lms", proposerId: "user:hoang", status: "applied" as const, baseRevision: "rev-1", resultingRevision: id, validationResults: [], change: renamePending("ch-race") };
+  assert.throws(() => store.commit(model, record), storeErr("HEAD_CHANGED"));
+  assert.deepEqual(readdirSync(join(root, "revisions")).sort(), before);
+  assert.equal(readFileSync(join(root, "HEAD"), "utf8"), head);
+  assert.ok(!existsSync(join(root, "changes", "ch-race.json")));
+});
