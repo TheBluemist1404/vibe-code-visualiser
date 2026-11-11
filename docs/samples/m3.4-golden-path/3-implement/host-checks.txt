@@ -1,0 +1,7 @@
+typecheck: passed
+ Test Files  3 passed (3)
+      Tests  9 passed (9)
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+build: passed
+smoke: ok

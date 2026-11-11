@@ -1,0 +1,102 @@
+{
+  "ok": true,
+  "context": {
+    "projectId": "prj-course-desk",
+    "modelRevision": "rev-3-a5c764161201",
+    "snapshotStatus": "approved",
+    "source": "repository-evidence",
+    "implementationChecked": false,
+    "meaning": "unverified",
+    "observed": {
+      "commit": "f8e3e2d5479998e7eaa67e54956226f079e30d37",
+      "branch": "feature/rejection-reason",
+      "dirty": false,
+      "resolver": "vcv-ts-subset-1/typescript-6.0.3",
+      "fingerprintAlgorithm": "vcv-fp-1"
+    }
+  },
+  "data": {
+    "observationToken": "b881dd152746367189b853e8e0967c8fd1bd82f6f7167530f129b147563c8b62",
+    "changedSince": null,
+    "counts": {
+      "resolved": 5,
+      "stale": 3,
+      "missing": 0,
+      "ambiguous": 0,
+      "unchecked": 0,
+      "indeterminate": 0,
+      "invalid": 0,
+      "total": 8,
+      "disputed": 0
+    },
+    "bindings": [
+      {
+        "bindingId": "expose.cap-enroll",
+        "state": "resolved",
+        "modelObjectId": "cap-enroll",
+        "relation": "exposes",
+        "locator": "server/src/enrollment/enrollment.controller.ts#route:POST /enrollments",
+        "disputed": false
+      },
+      {
+        "bindingId": "impl.cap-enroll",
+        "state": "stale",
+        "modelObjectId": "cap-enroll",
+        "relation": "implements",
+        "locator": "server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll",
+        "disputed": false
+      },
+      {
+        "bindingId": "impl.cap-list-notifications",
+        "state": "resolved",
+        "modelObjectId": "cap-list-notifications",
+        "relation": "implements",
+        "locator": "server/src/notifications/notifications.service.ts#symbol:NotificationsService.forRecipient",
+        "disputed": false
+      },
+      {
+        "bindingId": "impl.rul-announce-every-decision",
+        "state": "resolved",
+        "modelObjectId": "rul-announce-every-decision",
+        "relation": "implements",
+        "locator": "server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll",
+        "disputed": false
+      },
+      {
+        "bindingId": "impl.rul-seat-limit",
+        "state": "stale",
+        "modelObjectId": "rul-seat-limit",
+        "relation": "implements",
+        "locator": "server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll",
+        "disputed": false
+      },
+      {
+        "bindingId": "persist.dat-enrollment",
+        "state": "resolved",
+        "modelObjectId": "dat-enrollment",
+        "relation": "persists",
+        "locator": "server/src/enrollment/enrollment.types.ts#symbol:Enrollment",
+        "disputed": false
+      },
+      {
+        "bindingId": "persist.dat-notification",
+        "state": "resolved",
+        "modelObjectId": "dat-notification",
+        "relation": "persists",
+        "locator": "server/src/notifications/notification.types.ts#symbol:Notification",
+        "disputed": false
+      },
+      {
+        "bindingId": "test.rul-seat-limit",
+        "state": "stale",
+        "modelObjectId": "rul-seat-limit",
+        "relation": "tests",
+        "locator": "server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > rejects an enrollment into a full course and notifies the student",
+        "disputed": false
+      }
+    ],
+    "matched": 8,
+    "truncated": false,
+    "writes": "none"
+  }
+}

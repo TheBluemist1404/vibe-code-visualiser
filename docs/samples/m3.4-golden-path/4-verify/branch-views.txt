@@ -1,0 +1,30 @@
+feature branch (feature/rejection-reason): rev-3-a5c764161201
+main:                       rev-2-a21d7aa4915e
+main after a simulated local merge (no model regeneration): rev-3-a5c764161201
+
+$ vcv project status <feature>
+project: ready (<repo>/.vcv)
+model:   prj-course-desk at rev-3-a5c764161201 [approved], 3 revision(s)
+git:     feature/rejection-reason f8e3e2d54799, clean
+$ vcv project status <main>
+project: ready (<work>/view-main/.vcv)
+model:   prj-course-desk at rev-2-a21d7aa4915e [approved], 2 revision(s)
+git:     main 5a65d6570f9e, clean
+$ vcv project status <merged>
+project: ready (<work>/view-merged/.vcv)
+model:   prj-course-desk at rev-3-a5c764161201 [approved], 3 revision(s)
+git:     main 2472806e4831, clean
+$ vcv integrity <merged> --base <old main> --trust-ref <old main> --trust-commit <old main> --require-attestation
+integrity: ok (prj-course-desk at rev-3-a5c764161201)
+  base:  5a65d6570f9eae9deb902cd6faf1380b4df0adea 5a65d6570f9e at rev-2-a21d7aa4915e
+  trust: .vcv/reviewers.json at 5a65d6570f9eae9deb902cd6faf1380b4df0adea (5a65d6570f9e), 1 reviewer(s); commit 5a65d6570f9e pinned by the caller: an immutability pin, not proof of origin; that it is the protected branch is caller-asserted and unverified
+  authorization: caller-asserted: ok means consistent and attested under the trust anchor given here; it authorizes a change only when that anchor (and --base) is supplied by the host from the hosting service's protected branch, in a check the change under review cannot edit
+  1. rev-1: initial; approval not-applicable (initial revision (created by init; provenance not provable))
+  2. rev-2-a21d7aa4915e: verified by chg-baseline; approval attested (signed by user:reviewer (key c9ecc67163802d0d), trusted per .vcv/reviewers.json at 5a65d6570f9eae9deb902cd6faf1380b4df0adea (5a65d6570f9e))
+  3. rev-3-a5c764161201 (new): verified by chg-notification-rejection-reason; approval attested (signed by user:reviewer (key c9ecc67163802d0d), trusted per .vcv/reviewers.json at 5a65d6570f9eae9deb902cd6faf1380b4df0adea (5a65d6570f9e))
+  not provable here:
+    - An attestation proves that the holder of a trusted reviewer key signed this exact change; it does not prove which person held the key, or that the key was not shared or stolen.
+    - Trust is only as strong as its source. A trust list in the checkout under review can be changed by that same change; in CI, read it from the protected base branch (--trust-ref) and protect who may change it there. Git pins the commit the list was read from; it cannot prove that the branch is protected. An unpinned --trust-ref is a local name anyone with a shell in the checkout can create or move: rely on it only where the host provides the ref (a CI checkout), or pin it with --trust-commit.
+    - The initial revision has no recorded derivation: who created it, and from what, is not provable from the repository.
+    - Derivation replays the recorded typed operations; it says nothing about whether the source code implements the model (that is M4's reconciliation).
+    - The local audit log (.vcv/audit.jsonl) is not shared through Git and is not evidence here.

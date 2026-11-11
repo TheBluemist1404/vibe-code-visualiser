@@ -45,3 +45,6 @@ jobs:
       - run: examples/reference-app/check.sh "$RUNNER_TEMP/course-desk"
       # M2.5: the controlled waitlist change applies to a fresh checkout and the app's own checks pass on it.
       - run: examples/reference-app/maintenance/setup.sh "$RUNNER_TEMP/course-desk-waitlist" --app-tests
+      # M3.4: the recorded model-first golden path, replayed from a fresh checkout and a fresh reviewer key
+      # (proposal, separate approval, implementation, host gate, branch views, negative paths), with the app's checks.
+      - run: examples/reference-app/golden-path/replay.sh "$RUNNER_TEMP/golden-path" --app-tests

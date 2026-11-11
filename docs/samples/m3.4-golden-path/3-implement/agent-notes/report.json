@@ -1,0 +1,26 @@
+{
+  "changeId": "chg-notification-rejection-reason",
+  "baseCommit": "b0eff0016fd6ca32a77ed5e1e4442adc1a95f1d1",
+  "handoffDigest": "7b07682ff911ee2b575110ba722b257a08308b282258c139be7b5d8836d52715",
+  "testsRun": [
+    { "command": "npm run typecheck", "outcome": "passed", "summary": "tsc --noEmit clean in server and web" },
+    { "command": "npm test", "outcome": "passed", "summary": "server 9 passed (3 files, includes e2e spec); web 3 passed" }
+  ],
+  "acceptance": [
+    { "criterion": "A COURSE_FULL rejection produces a notification with reason COURSE_FULL, and the message text is unchanged", "status": "met", "evidence": "enrollment.service.spec.ts full-course test asserts reason and unchanged message" },
+    { "criterion": "An ALREADY_ENROLLED rejection produces a notification with reason ALREADY_ENROLLED", "status": "met", "evidence": "enrollment.service.spec.ts repeat-enrollment test" },
+    { "criterion": "A confirmed enrollment's notification has no reason field and is otherwise unchanged", "status": "met", "evidence": "existing toEqual assertion on the confirmed notification still passes; notifications.service.spec.ts asserts no reason property" },
+    { "criterion": "GET /api/notifications returns the reason for rejected notifications", "status": "met", "evidence": "server/test/app.e2e-spec.ts asserts reason COURSE_FULL for stu-bob" },
+    { "criterion": "The web page shows the reason next to a rejected notification and nothing extra for confirmed ones", "status": "met", "evidence": "NotificationList.tsx; App.test.tsx asserts no reason element after confirmation and (COURSE_FULL) after rejection (against a fake API, not a real browser)" },
+    { "criterion": "The notifications module does not import from the enrollment module (no new module dependency)", "status": "met", "evidence": "reason is typed string in notification.types.ts; grep finds no enrollment import in server/src/notifications" }
+  ],
+  "gaps": [
+    "Bindings test.rul-seat-limit and impl.rul-seat-limit are stale because enroll() and the spec test changed; they were not flagged reassertAfterImplementing and I did not reassert them, a person should review them.",
+    "The web UI was only tested with a fake API, not in a browser."
+  ],
+  "outOfScope": [
+    { "path": ".vcv/bindings/impl.rul-announce-every-decision.json", "reason": "required reassertion of a claim on a changed object, done through vcv binding reassert" },
+    { "path": ".vcv/bindings/persist.dat-notification.json", "reason": "required reassertion of a claim on a changed object, done through vcv binding reassert" }
+  ],
+  "confidence": "high"
+}

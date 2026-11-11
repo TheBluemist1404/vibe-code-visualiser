@@ -1,0 +1,21 @@
+{
+  "changeId": "chg-baseline",
+  "projectId": "prj-course-desk",
+  "proposerId": "agent:bootstrap",
+  "baseRevision": "rev-1",
+  "status": "applied",
+  "validationResults": [],
+  "change": {
+    "changeId": "chg-baseline",
+    "projectId": "prj-course-desk",
+    "expectedRevision": "rev-1",
+    "operations": [
+      {
+        "type": "approveDraft"
+      }
+    ],
+    "rationale": "The bootstrapped draft was reviewed against the code; it becomes the agreed baseline."
+  },
+  "approverId": "user:reviewer",
+  "resultingRevision": "rev-2-a21d7aa4915e"
+}

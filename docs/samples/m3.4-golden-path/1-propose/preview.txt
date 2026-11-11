@@ -1,0 +1,52 @@
+proposal chg-notification-rejection-reason (pending, proposed by agent:proposer)
+  digest:   eb632d5c7f6ca1653af3eb93e5b2d86d710ad9d639d288d2b8a9f30fd41c8f68
+  base:     rev-2-a21d7aa4915e; this checkout is at rev-2-a21d7aa4915e (applies)
+  why:      Rejected students only get the reason inside the message text. Enrollment already stores the machine-readable reason (enrollment.types.ts Enrollment.reason; enrollment.service.ts enroll()), but Notification (notification.types.ts) has no such field, so the web page cannot show it. Add a nullable reason attribute to the Notification data, set only on enrollment-rejected notifications, and describe the web page showing it. Left unchanged on purpose: Enrollment data, seat-limit rule, module dependencies (mod-notifications stays dependency-free, so the reason is typed string there like Enrollment.reason, not a reference), no events/contracts, confirmed enrollments and their notifications, capabilities, and the message texts.
+
+  states:   change pending; approval none; snapshot approved; implementation not-recorded
+operations:
+  1. add attribute att-ntf-reason (reason: string) to dat-notification
+  2. change the description of dat-notification
+  3. change the statement of rule rul-announce-every-decision
+  4. change the description of cap-use-ui
+implementation requested (approved together with the operations):
+  behavior: When an enrollment is rejected, the notification created for the student carries the rejection reason (COURSE_FULL or ALREADY_ENROLLED) in a new optional `reason` field, returned by GET /notifications, and the web page shows that reason next to the rejected notification. Confirmed notifications have no reason.
+
+  ✓? A COURSE_FULL rejection produces a notification with reason COURSE_FULL, and the message text is unchanged
+  ✓? An ALREADY_ENROLLED rejection produces a notification with reason ALREADY_ENROLLED
+  ✓? A confirmed enrollment's notification has no reason field and is otherwise unchanged
+  ✓? GET /api/notifications returns the reason for rejected notifications
+  ✓? The web page shows the reason next to a rejected notification and nothing extra for confirmed ones
+  ✓? The notifications module does not import from the enrollment module (no new module dependency)
+  test: EnrollmentService: rejects an enrollment into a full course and notifies the student
+  test: NotificationsService: keeps each recipient's notifications separate, in order
+  test: App: shows the outcome and the student's notification after enrolling, then a rejection when full
+  scope: server/src/notifications/**, server/src/enrollment/enrollment.service.ts, server/src/enrollment/enrollment.service.spec.ts, server/test/app.e2e-spec.ts, web/src/api/client.ts, web/src/components/NotificationList.tsx, web/src/App.test.tsx
+model delta (against current rev-2-a21d7aa4915e; 4 object(s)):
+  + attribute att-ntf-reason [mod-notifications]
+  ~ capability cap-use-ui [mod-web]
+      description: App.tsx: submit the form, show outcome, then reload that student's notifications and the course seat counts.
+        → App.tsx: submit the form, show outcome, then reload that student's notifications and the course seat counts. A rejected notification is shown with its rejection reason next to it.
+
+  ~ data dat-notification [mod-notifications]
+      description: notification.types.ts, in-memory outbox; ids ntf-N. kind is enrollment-confirmed|enrollment-rejected. enrollmentId points at an Enrollment in another module, so it is typed id rather than reference.
+        → notification.types.ts, in-memory outbox; ids ntf-N. kind is enrollment-confirmed|enrollment-rejected. reason is COURSE_FULL|ALREADY_ENROLLED, set only on enrollment-rejected notifications and absent on confirmed ones; it duplicates the rejected Enrollment's reason as its own field in addition to the…
+  ~ rule rul-announce-every-decision [mod-enrollment]
+      statement: Each enrollment decision, confirmed or rejected, is recorded and results in exactly one notification to the student.
+        → Each enrollment decision, confirmed or rejected, is recorded and results in exactly one notification to the student. A rejection notification also carries the rejection reason (COURSE_FULL or ALREADY_ENROLLED) as its own field.
+
+impact (structural candidates only): CROSS-MODULE:
+  modules:   mod-enrollment (changed), mod-notifications (changed), mod-web (changed)
+  contracts: (none)
+  · module mod-enrollment: module mod-enrollment owns rule rul-announce-every-decision
+  · module mod-notifications: module mod-notifications owns data dat-notification
+  · module mod-web: module mod-web owns capability cap-use-ui
+binding claims to revisit (2):
+  impl.rul-announce-every-decision: rul-announce-every-decision implements server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll (changed)
+  persist.dat-notification: dat-notification persists server/src/notifications/notification.types.ts#symbol:Notification (changed)
+not verified by anyone yet:
+  - The impact list is structural: it follows declared model references only. It is not a code, test or runtime impact analysis, and an empty list does not mean nothing else is affected.
+  - Whether the operations express the requested behavior is the proposer's interpretation; VCV checks types, references and invariants, not meaning.
+  - The current source code has not been compared with this proposal. Approval approves model intent; the implementation comes afterwards and is checked separately.
+  - The proposer identity "agent:proposer" is what the host asserted when the proposal was submitted; see docs/proposals.md for what that proves locally.
+  - The change reaches more than one module: check each module's contracts and binding claims, not only the module that was asked about.

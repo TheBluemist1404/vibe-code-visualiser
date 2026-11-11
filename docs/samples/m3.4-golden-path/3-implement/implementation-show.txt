@@ -1,0 +1,5 @@
+.vcv/implementations/chg-notification-rejection-reason.json (digest c24b43f20748eee2f0a570af923d198bb9732d7b05feed85c540fcea403f271d): change chg-notification-rejection-reason at rev-3-a5c764161201; not reconciled
+  observed now: 9 source file(s) changed, 0 out of scope; same as recorded
+  ! GAP: Bindings test.rul-seat-limit and impl.rul-seat-limit are stale because enroll() and the spec test changed; they were not flagged reassertAfterImplementing and I did not reassert them, a person should review them.
+  ! GAP: The web UI was only tested with a fake API, not in a browser.
+  ! CLAIMS_UNVERIFIED: tests, outcomes and acceptance are the agent's claims: VCV ran nothing and verified none of them

@@ -172,3 +172,5 @@ already-dirty file counts), and `warningsNow` lists the warnings as they stand n
 - No reconciliation (M4).
 
 The report is evidence for a human reviewer of the PR, not a gate.
+
+The whole model-first path, end to end on Course Desk, is in [golden-path.md](golden-path.md).

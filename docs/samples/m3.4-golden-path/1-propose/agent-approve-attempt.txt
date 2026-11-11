@@ -1,0 +1,8 @@
+$ vcv approve .vcv chg-notification-rejection-reason   # as agent:proposer
+chg-notification-rejection-reason: denied (proposed by agent:proposer; record is pending)
+  ✗ NOT_AUTHORIZED at (root): agent:proposer may not approve changes
+  note: developer approval (identity asserted by --as/--perm or VCV_HOST_*); no attestation. Use `vcv review approve` for a trusted reviewer approval.
+$ vcv approve .vcv chg-notification-rejection-reason --as user:reviewer --perm approve
+✗ INPUT: identity and permissions are fixed by this host (VCV_HOST_PRINCIPAL / VCV_HOST_PERMISSIONS); --as and --perm are not accepted
+$ vcv review approve . chg-notification-rejection-reason --digest <d> --key <keys>/reviewer.pem --trust-commit <main>
+✗ INPUT: vcv review approve takes no --as/--perm and refuses to run under VCV_HOST_PRINCIPAL/VCV_HOST_PERMISSIONS (an agent host); the reviewer's identity comes from --key and the trust list

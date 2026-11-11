@@ -1,0 +1,153 @@
+diff --git a/server/src/enrollment/enrollment.service.spec.ts b/server/src/enrollment/enrollment.service.spec.ts
+index 3509e1a..0aaca7b 100644
+--- a/server/src/enrollment/enrollment.service.spec.ts
++++ b/server/src/enrollment/enrollment.service.spec.ts
+@@ -31,15 +31,22 @@ describe("EnrollmentService", () => {
+     const e = enrollment.enroll({ studentId: "stu-bob", courseId: "crs-poetry" });
+     expect(e).toMatchObject({ status: "rejected", reason: "COURSE_FULL" });
+     expect(notifications.forRecipient("stu-bob")).toEqual([
+-      expect.objectContaining({ kind: "enrollment-rejected", enrollmentId: e.id }),
++      expect.objectContaining({
++        kind: "enrollment-rejected",
++        enrollmentId: e.id,
++        reason: "COURSE_FULL",
++        message: "Modern Poetry is full; your enrollment was not accepted.",
++      }),
+     ]);
+   });
+ 
+   it("rejects a repeat enrollment without taking a second seat", async () => {
+-    const { enrollment } = await setup();
++    const { enrollment, notifications } = await setup();
+     enrollment.enroll({ studentId: "stu-ada", courseId: "crs-algebra" });
+     expect(enrollment.enroll({ studentId: "stu-ada", courseId: "crs-algebra" })).toMatchObject({ status: "rejected", reason: "ALREADY_ENROLLED" });
+     expect(enrollment.courses().find((c) => c.id === "crs-algebra")?.seatsLeft).toBe(1);
++    expect(notifications.forRecipient("stu-ada")[1]).toMatchObject({ kind: "enrollment-rejected", reason: "ALREADY_ENROLLED" });
++    expect(notifications.forRecipient("stu-ada")[0]).not.toHaveProperty("reason");
+   });
+ 
+   it("refuses an unknown course without recording or notifying anything", async () => {
+diff --git a/server/src/enrollment/enrollment.service.ts b/server/src/enrollment/enrollment.service.ts
+index 753840a..636fcef 100644
+--- a/server/src/enrollment/enrollment.service.ts
++++ b/server/src/enrollment/enrollment.service.ts
+@@ -45,6 +45,7 @@ export class EnrollmentService {
+         "enrollment-rejected",
+         enrollment.id,
+         reason === "COURSE_FULL" ? `${course.title} is full; your enrollment was not accepted.` : `You are already enrolled in ${course.title}.`,
++        reason,
+       );
+     } else {
+       this.notifications.notify(enrollment.studentId, "enrollment-confirmed", enrollment.id, `You are enrolled in ${course.title}.`);
+diff --git a/server/src/notifications/notification.types.ts b/server/src/notifications/notification.types.ts
+index 099eb80..7a146c9 100644
+--- a/server/src/notifications/notification.types.ts
++++ b/server/src/notifications/notification.types.ts
+@@ -8,4 +8,6 @@ export interface Notification {
+   message: string;
+   /** The enrollment this notification is about. */
+   enrollmentId: string;
++  /** Why the enrollment was rejected (e.g. COURSE_FULL, ALREADY_ENROLLED). Only set on enrollment-rejected notifications. */
++  reason?: string;
+ }
+diff --git a/server/src/notifications/notifications.service.spec.ts b/server/src/notifications/notifications.service.spec.ts
+index 37f74f2..6f61523 100644
+--- a/server/src/notifications/notifications.service.spec.ts
++++ b/server/src/notifications/notifications.service.spec.ts
+@@ -14,4 +14,10 @@ describe("NotificationsService", () => {
+     ]);
+     expect(service.forRecipient("stu-nobody")).toEqual([]);
+   });
++
++  it("carries a reason only when one is given", () => {
++    const service = new NotificationsService();
++    expect(service.notify("stu-ada", "enrollment-confirmed", "enr-1", "ok")).not.toHaveProperty("reason");
++    expect(service.notify("stu-bob", "enrollment-rejected", "enr-2", "no", "COURSE_FULL").reason).toBe("COURSE_FULL");
++  });
+ });
+diff --git a/server/src/notifications/notifications.service.ts b/server/src/notifications/notifications.service.ts
+index 917732f..4b84f95 100644
+--- a/server/src/notifications/notifications.service.ts
++++ b/server/src/notifications/notifications.service.ts
+@@ -9,8 +9,15 @@ import type { Notification, NotificationKind } from "./notification.types.js";
+ export class NotificationsService {
+   private readonly outbox: Notification[] = [];
+ 
+-  notify(recipientId: string, kind: NotificationKind, enrollmentId: string, message: string): Notification {
+-    const notification: Notification = { id: `ntf-${this.outbox.length + 1}`, recipientId, kind, message, enrollmentId };
++  notify(recipientId: string, kind: NotificationKind, enrollmentId: string, message: string, reason?: string): Notification {
++    const notification: Notification = {
++      id: `ntf-${this.outbox.length + 1}`,
++      recipientId,
++      kind,
++      message,
++      enrollmentId,
++      ...(reason ? { reason } : {}),
++    };
+     this.outbox.push(notification);
+     return notification;
+   }
+diff --git a/server/test/app.e2e-spec.ts b/server/test/app.e2e-spec.ts
+index f732136..821c8ad 100644
+--- a/server/test/app.e2e-spec.ts
++++ b/server/test/app.e2e-spec.ts
+@@ -40,7 +40,7 @@ describe("Course Desk API (e2e)", () => {
+     expect(ada.body).toEqual([{ id: "ntf-1", recipientId: "stu-ada", kind: "enrollment-confirmed", enrollmentId: "enr-1", message: "You are enrolled in Modern Poetry." }]);
+     const bob = await request(server).get("/api/notifications").query({ recipientId: "stu-bob" }).expect(200);
+     expect(bob.body).toEqual([
+-      { id: "ntf-2", recipientId: "stu-bob", kind: "enrollment-rejected", enrollmentId: "enr-2", message: "Modern Poetry is full; your enrollment was not accepted." },
++      { id: "ntf-2", recipientId: "stu-bob", kind: "enrollment-rejected", enrollmentId: "enr-2", message: "Modern Poetry is full; your enrollment was not accepted.", reason: "COURSE_FULL" },
+     ]);
+   });
+ 
+diff --git a/web/src/App.test.tsx b/web/src/App.test.tsx
+index 0752268..1e74633 100644
+--- a/web/src/App.test.tsx
++++ b/web/src/App.test.tsx
+@@ -23,6 +23,7 @@ function fakeApi(): CourseDeskApi {
+         kind: full ? "enrollment-rejected" : "enrollment-confirmed",
+         enrollmentId: e.id,
+         message: full ? "Modern Poetry is full; your enrollment was not accepted." : "You are enrolled in Modern Poetry.",
++        ...(full ? { reason: "COURSE_FULL" as const } : {}),
+       });
+       return e;
+     },
+@@ -38,12 +39,14 @@ describe("App", () => {
+     fireEvent.click(screen.getByRole("button", { name: "Enroll" }));
+     expect((await screen.findByRole("status")).textContent).toBe("Enrollment enr-1: confirmed");
+     expect(await screen.findByText("You are enrolled in Modern Poetry.")).toBeTruthy();
++    expect(screen.queryByTestId("reason")).toBeNull();
+     await screen.findByRole("option", { name: "Modern Poetry (0 of 1 seats left)" });
+ 
+     fireEvent.change(screen.getByLabelText("Student ID"), { target: { value: "stu-bob" } });
+     fireEvent.click(screen.getByRole("button", { name: "Enroll" }));
+     await screen.findByText("Enrollment enr-2: rejected (COURSE_FULL)");
+     expect(await screen.findByText("Modern Poetry is full; your enrollment was not accepted.")).toBeTruthy();
++    expect((await screen.findByTestId("reason")).textContent).toBe("(COURSE_FULL)");
+     expect(screen.getByRole("heading", { name: "Notifications for stu-bob" })).toBeTruthy();
+   });
+ });
+diff --git a/web/src/api/client.ts b/web/src/api/client.ts
+index ff4747e..b58d436 100644
+--- a/web/src/api/client.ts
++++ b/web/src/api/client.ts
+@@ -20,6 +20,7 @@ export interface Notification {
+   kind: "enrollment-confirmed" | "enrollment-rejected";
+   message: string;
+   enrollmentId: string;
++  reason?: "COURSE_FULL" | "ALREADY_ENROLLED";
+ }
+ 
+ export interface CourseDeskApi {
+diff --git a/web/src/components/NotificationList.tsx b/web/src/components/NotificationList.tsx
+index 5c9114b..88f5df3 100644
+--- a/web/src/components/NotificationList.tsx
++++ b/web/src/components/NotificationList.tsx
+@@ -11,6 +11,7 @@ export function NotificationList({ recipientId, items }: { recipientId: string;
+           {items.map((n) => (
+             <li key={n.id} data-kind={n.kind}>
+               {n.message}
++              {n.reason ? <> <span data-testid="reason">({n.reason})</span></> : null}
+             </li>
+           ))}
+         </ul>

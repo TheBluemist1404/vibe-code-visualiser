@@ -1,0 +1,17 @@
+ .vcv/HEAD                                          |  68 ++++++--
+ .../chg-notification-rejection-reason.json         |  14 ++
+ .../bindings/impl.rul-announce-every-decision.json |  15 +-
+ .vcv/bindings/persist.dat-notification.json        |  15 +-
+ .../changes/chg-notification-rejection-reason.json |  68 ++++++++
+ .../chg-notification-rejection-reason.json         | 186 +++++++++++++++++++++
+ .vcv/revisions/rev-3-a5c764161201.yaml             | 173 +++++++++++++++++++
+ server/src/enrollment/enrollment.service.spec.ts   |  11 +-
+ server/src/enrollment/enrollment.service.ts        |   1 +
+ server/src/notifications/notification.types.ts     |   2 +
+ .../notifications/notifications.service.spec.ts    |   6 +
+ server/src/notifications/notifications.service.ts  |  11 +-
+ server/test/app.e2e-spec.ts                        |   2 +-
+ web/src/App.test.tsx                               |   3 +
+ web/src/api/client.ts                              |   1 +
+ web/src/components/NotificationList.tsx            |   1 +
+ 16 files changed, 546 insertions(+), 31 deletions(-)

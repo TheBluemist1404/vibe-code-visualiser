@@ -1,0 +1,15 @@
+f8e3e2d5479998e7eaa67e54956226f079e30d37 feat: rejection reason on notifications (chg-notification-rejection-reason)
+
+ .../bindings/impl.rul-announce-every-decision.json |  15 +-
+ .vcv/bindings/persist.dat-notification.json        |  15 +-
+ .../chg-notification-rejection-reason.json         | 186 +++++++++++++++++++++
+ server/src/enrollment/enrollment.service.spec.ts   |  11 +-
+ server/src/enrollment/enrollment.service.ts        |   1 +
+ server/src/notifications/notification.types.ts     |   2 +
+ .../notifications/notifications.service.spec.ts    |   6 +
+ server/src/notifications/notifications.service.ts  |  11 +-
+ server/test/app.e2e-spec.ts                        |   2 +-
+ web/src/App.test.tsx                               |   3 +
+ web/src/api/client.ts                              |   1 +
+ web/src/components/NotificationList.tsx            |   1 +
+ 12 files changed, 233 insertions(+), 21 deletions(-)

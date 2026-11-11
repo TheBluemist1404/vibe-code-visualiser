@@ -1,0 +1,6 @@
+$ vcv review approve <repo> chg-notification-rejection-reason --digest eb632d5c7f6ca1653af3eb93e5b2d86d710ad9d639d288d2b8a9f30fd41c8f68 --key <keys>/reviewer.pem --trust-ref main --trust-commit 5a65d6570f9eae9deb902cd6faf1380b4df0adea
+reviewer: user:reviewer (key c9ecc67163802d0d, trusted per .vcv/reviewers.json at main (5a65d6570f9e))
+  trust anchor: commit 5a65d6570f9e pinned by the caller: an immutability pin, not proof of origin; that it is the protected branch is caller-asserted and unverified
+  ! authorization not established by this command: the trust anchor is caller-asserted, and a shell in this checkout can supply its own. The authorization gate is `vcv integrity --base <protected base> --trust-ref <protected base> --require-attestation` run by the host (CI) on the hosting service's protected branch
+chg-notification-rejection-reason: applied → rev-3-a5c764161201 (proposed by agent:proposer, approved by user:reviewer; record is applied)
+  attestation: .vcv/approvals/chg-notification-rejection-reason.json (commit it with the change record and the new revision)

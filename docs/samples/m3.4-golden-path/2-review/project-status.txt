@@ -1,0 +1,3 @@
+project: ready (<repo>/.vcv)
+model:   prj-course-desk at rev-3-a5c764161201 [approved], 3 revision(s)
+git:     feature/rejection-reason b0eff0016fd6, clean
