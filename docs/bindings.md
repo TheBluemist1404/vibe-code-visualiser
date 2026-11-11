@@ -176,14 +176,18 @@ Reported as `unchecked` (never guessed):
 - `describe.each` / `it.each` and non-literal test titles;
 - namespaces and destructuring declarations, where they could hide the named symbol.
 
-Not done by design (or deferred to M2.5):
+Read-only evidence queries over these claims (by object, by claim, an overview and an explicit
+refresh), through the CLI and MCP with one schema, are M2.5: [evidence.md](evidence.md).
+
+Not done by design:
 - **Route paths are controller-relative.** A global prefix (`app.setGlobalPrefix("api")`),
   versioning or `RouterModule` is not applied, so `GET /courses` is the locator for a route
   served at `/api/courses`.
 - **Test titles are matched syntactically.** `describe`/`it`/`test` calls are recognized by
   name, without checking where they are imported from.
-- **No rename following.** Hints (Git rename detection, same-fingerprint declarations), a rich
-  query or MCP surface for claims, and a full revalidation workflow are M2.5.
+- **No rename following.** VCV reports `missing` and leaves the claim alone; an agent or a
+  person finds the new location and reasserts it. (M2.5 added read-only evidence queries, not
+  rename hints.)
 - **No resolver cache.** Everything is recomputed on each call. A cache, if added, goes under the
   git-ignored `.vcv/cache/`.
 - **No audit entries for binding writes.** Git history is the record of who changed a claim.

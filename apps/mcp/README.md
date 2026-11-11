@@ -2,12 +2,16 @@
 
 A thin [MCP](https://modelcontextprotocol.io) adapter over VCV's Semantic Query API
 (`@vcv/query`). It lets any MCP-compatible coding agent (Claude Code, Codex, others) read the
-versioned declared model (draft or approved) of **one** local model store. Single user, local, stdio only.
+versioned declared model (draft or approved) of **one** local model store, or of one
+repository checkout's `.vcv/` project together with its read-only source evidence (`--repo`,
+M2.5). Single user, local, stdio only.
 
 It is transport only: each tool forwards its arguments to one `@vcv/query` operation and
 returns that operation's result unchanged. Validation, limits, revision checks, cursors, errors
 and diagnostics come from `@vcv/query`; the advertised input schemas are generated from its zod
-request contracts. The server behaves the same whichever client calls it. See ADR 0006.
+request contracts. The evidence tools forward to `@vcv/repo`'s evidence API in the same way, and
+`vcv evidence` in the CLI calls the same functions. The server behaves the same whichever client
+calls it. See ADR 0006.
 
 ## Tools
 
@@ -40,6 +44,22 @@ Error codes are the query package's `INVALID_REQUEST`, `UNKNOWN_ID`, `REVISION_M
 `INVALID_REQUEST` for an unknown tool name. Errors are returned as tool results with
 `isError: true`; the server keeps running.
 
+### Source-evidence tools (`--repo` only)
+
+| MCP tool | Evidence operation | CLI |
+|---|---|---|
+| `vcv_get_evidence_overview` | `getEvidenceOverview` | `vcv evidence <path> overview` |
+| `vcv_get_object_evidence` | `getObjectEvidence` | `vcv evidence <path> object <id>` |
+| `vcv_get_binding_evidence` | `getBindingEvidence` | `vcv evidence <path> binding <bindingId>` |
+| `vcv_refresh_evidence` | `refreshEvidence` | `vcv evidence <path> refresh` |
+
+Read-only too (`vcv_refresh_evidence` is marked not idempotent because the working tree may have
+changed between calls, but it never writes). Results, error codes (`UNKNOWN_BINDING`,
+`PROJECT_NOT_READY`, `UNSAFE_PATH`, `STATE_CHANGED` in addition to the query codes) and limits
+are described in [docs/evidence.md](../../docs/evidence.md). A claim is never presented as
+verified meaning or approval: `context.meaning` is `"unverified"` and every claim has
+`approval.approved: false`.
+
 ## Run it
 
 Node 22.18+. From a VCV checkout:
@@ -50,8 +70,10 @@ npm run vcv -- init /path/to/your-repo/.vcv-store examples/enrollment/model.rev-
 node --experimental-strip-types apps/mcp/src/main.ts --store /path/to/your-repo/.vcv-store
 ```
 
-- `--store <dir>` (or `VCV_STORE=<dir>`) is **required**. There is no discovery of stores in
-  the working directory or repository; one server serves one store.
+- `--store <dir>` (or `VCV_STORE=<dir>`), or `--repo <checkout>` (or `VCV_REPO=<checkout>`), is
+  **required**. There is no discovery of stores in the working directory or repository; one
+  server serves one store. With `--repo`, the server serves the checkout's `.vcv/` (which must be
+  `ready`, see `vcv project status`) and adds the four evidence tools.
 - The server exits with status 2 and a message on stderr if the store is missing, not
   initialized or unreadable.
 - stdout carries JSON-RPC only; all diagnostics go to stderr. Launch it with `node`
@@ -110,7 +132,11 @@ never certifies the repository.
 - `apps/mcp/demo/run-claude-demo.sh` runs the manual Claude Code demo; a recorded run is in
   [`docs/samples/mcp-agent-demo.md`](../../docs/samples/mcp-agent-demo.md).
 
-## Not included (M1 boundaries)
+- `apps/mcp/test/evidence.test.ts` checks that the CLI and the MCP evidence tools give identical
+  results for the same requests on Course Desk, including malformed requests, conflicted and
+  symlinked claim storage, and a project that stops being ready.
+
+## Not included
 
 No write, propose or approve tools; no HTTP or remote transport; no authentication; no source
-indexing or repository-to-model mapping.
+indexing or repository-to-model mapping; no watcher (evidence is computed per call).

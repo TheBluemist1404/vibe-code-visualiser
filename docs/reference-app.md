@@ -92,3 +92,22 @@ controller that calls it `stale`); a person reasserts it with `--expect`; and `.
 moves. The recorded output is [samples/m2.4-bindings/demo.txt](samples/m2.4-bindings/demo.txt).
 `packages/repo/test/bindings.test.ts` runs the demo, the planned controlled changes C1–C3 from
 `ORACLE.md`, and the cross-branch and path-safety scenarios. See [bindings.md](bindings.md).
+
+## Evidence and agent-led maintenance (M2.5)
+
+`examples/reference-app/maintenance/setup.sh <dir> [--app-tests]` materializes Course Desk,
+creates `.vcv/` from the M2.3 draft, records eight claims as the bootstrap agent, commits that as
+the Git baseline, and applies the controlled change
+[`changes/waitlist.patch`](../examples/reference-app/changes/waitlist.patch) to the working
+tree (uncommitted; ORACLE.md's C3: a full course waitlists instead of rejecting, with the app's
+tests, types and README updated). `--app-tests` runs the app's `npm ci`, typecheck, tests, build
+and smoke run on the changed tree.
+
+`maintenance/run-agent.sh <out>` then runs an isolated agent (as in M2.3) that reads the evidence
+([evidence.md](evidence.md)), inspects the diff, and submits a typed proposal as
+`agent:maintainer` with propose rights only; `maintenance/evaluate.sh <out>` has a second, fresh
+read-only session review the result against the patch and the oracle. The recorded run and its
+evaluation are in [samples/m2.5-maintenance/](samples/m2.5-maintenance/evaluation.md).
+`packages/repo/test/maintenance.test.ts` checks the guide and prompt vocabulary, the expected
+evidence after setup, the host-fixed agent identity, and replays the recorded proposal as a
+pending change; it needs neither `claude` nor npm.

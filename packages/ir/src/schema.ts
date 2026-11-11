@@ -85,4 +85,4 @@ export const modelSchema = z
   })
   .strict();
 
-export const schemas = { state, transition: transitionSchema, attribute, module, event };
+export const schemas = { state, transition: transitionSchema, attribute, module, event, rule };

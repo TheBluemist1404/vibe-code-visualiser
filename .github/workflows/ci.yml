@@ -43,3 +43,5 @@ jobs:
             examples/reference-app/template/package-lock.json
       - run: npm ci
       - run: examples/reference-app/check.sh "$RUNNER_TEMP/course-desk"
+      # M2.5: the controlled waitlist change applies to a fresh checkout and the app's own checks pass on it.
+      - run: examples/reference-app/maintenance/setup.sh "$RUNNER_TEMP/course-desk-waitlist" --app-tests

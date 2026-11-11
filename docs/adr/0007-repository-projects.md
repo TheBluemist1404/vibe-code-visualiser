@@ -354,6 +354,46 @@ Settled in the M2.4 PR, where they differ from or refine the proposal above:
   hints, and claims do not affect project status (a broken claim file is `invalid` in
   verification; the model is still served).
 
+### M2.5 decisions
+
+Settled in the M2.5 PR ([#15](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/15);
+reference: [evidence.md](../evidence.md)):
+
+- **VCV stays observational.** Evidence is computed when a caller asks, against the working tree
+  at that moment. There is no watcher, daemon, cache, drift interpretation, model edit, VCV-made
+  proposal or auto-approval. An agent or a person reads evidence, inspects the code and proposes;
+  a person approves.
+- **One shared evidence API in `@vcv/repo`** (`createEvidenceApi(path)`:
+  `getEvidenceOverview`, `getObjectEvidence`, `getBindingEvidence`, `refreshEvidence`), with zod
+  request schemas, limits, cursors, `expectedRevision` and every error code. The CLI
+  (`vcv evidence`) and MCP (`vcv-mcp --repo`) only forward; MCP input schemas are generated from
+  the same contracts, and a parity test compares the two. `@vcv/query` stays model-only: Git and
+  source inspection never enter it.
+- **One observation per call.** The project status, the claims and their verification are read
+  once, then the store fingerprint, Git commit, claim digests and the fingerprint (or absence
+  reason) of every bound source file are checked again; a change in between, including an
+  uncommitted edit, is `STATE_CHANGED` (nothing mixed; review of PR #16). `verifyBinding` takes
+  the shared status for this.
+- **Four concerns, four sections** in each item: `claim` (interpretation, provenance,
+  confidence), `locator` (existence now), `freshness` (source/model/git with causes) and
+  `approval` (always `approved: false`). The model's own `snapshotStatus` is in the context,
+  separate from pointer verification.
+- **Cursors** are `<revision>:<scope>:<offset>` as in `@vcv/query`, with the scope bound to the
+  request filters *and* the claim set (IDs and digests), so editing a claim invalidates a cursor
+  rather than skipping one.
+- **Refresh** is the explicit full recheck. It returns an `observationToken` (hash of the model
+  revision and every reported item); `since` reports whether anything changed. It writes nothing.
+- **No absolute paths or source text** in results; the checkout path is replaced by `.` in
+  messages.
+- **Host-fixed identity.** `VCV_HOST_PRINCIPAL` / `VCV_HOST_PERMISSIONS` let a host (an agent
+  wrapper) fix who the CLI acts as; `--as`/`--perm` are then refused. The maintenance demo uses
+  `agent:maintainer` with `model:propose` only.
+- **Three general operations**, because the existing ones could not change a rule's meaning or
+  a description without remove-and-recreate (which breaks IDs and references): `createRule`,
+  `setRuleStatement`, `setDescription` (any object with a description, and the project; not
+  attributes, states or transitions). They go through the same propose/approve path and
+  validation as every other operation.
+
 ## 6. Locator resolution and optional analyzers (resolver implemented in M2.4; no cache or inventory tool yet)
 
 VCV needs exactly one source capability: **resolving and fingerprinting the locators in
@@ -383,5 +423,6 @@ meaning.
   stays free of Git and process spawning. The locator resolver and the claim store (M2.4) live
   there too; Core only defines the claim and locator types.
 - CLI: `vcv project status [path] [--json]`, `vcv project init <path> <model.yaml>`,
-  `vcv binding add|reassert|remove|dispute|list|verify` (M2.4).
+  `vcv binding add|reassert|remove|dispute|list|verify` (M2.4), `vcv evidence` (M2.5).
+- MCP: `vcv-mcp --repo <checkout>` serves the checkout's model plus four evidence tools (M2.5).
 - Tests that asserted the literal `rev-2` now assert the `rev-2-<digest>` shape.

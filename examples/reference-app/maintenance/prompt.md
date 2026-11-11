@@ -1,0 +1,9 @@
+The code in this repository has changed since its VCV model and binding claims were last reviewed. Bring the model back in line with the code by proposing a model change for a person to review.
+
+Follow the VCV maintenance guide at `$VCV_GUIDE`. The `vcv` command is on your PATH. It acts as you: an agent that may propose model changes but not apply or approve them.
+
+- Use VCV's evidence to find what to look at, then inspect the code, the tests and the Git history yourself.
+- Write your change file and your report under `vcv-maintenance/` in this repository. Do not change source code, tests, binding claims or anything under `.vcv/` directly, and do not commit.
+- Stop once your proposal is pending, or explain why you could not make one.
+
+When you are done, summarise what changed in the code, what you proposed and why, how confident you are, and what is left for a person.

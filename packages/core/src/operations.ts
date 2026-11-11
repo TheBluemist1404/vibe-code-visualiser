@@ -18,6 +18,11 @@ export const operationSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("linkContract"), moduleId: id, contractId: id }).strict(),
   z.object({ type: z.literal("setModuleDependencies"), moduleId: id, dependsOn: z.array(id) }).strict(),
   z.object({ type: z.literal("removeObject"), objectId: id }).strict(),
+  // Text-only edits of existing objects (M2.5): the smallest general additions that let a
+  // maintainer record a changed rule or a corrected description without remove-and-recreate.
+  z.object({ type: z.literal("createRule"), rule: schemas.rule }).strict(),
+  z.object({ type: z.literal("setRuleStatement"), ruleId: id, statement: z.string().min(1) }).strict(),
+  z.object({ type: z.literal("setDescription"), objectId: id, description: z.string().min(1) }).strict(),
   z.object({ type: z.literal("approveDraft") }).strict(),
 ]);
 
@@ -119,6 +124,22 @@ function applyOne(m: Model, op: ModelOperation): void {
     case "removeObject":
       removeObject(m, op.objectId);
       return;
+    case "createRule":
+      fresh(op.rule.id);
+      m.rules.push(op.rule);
+      return;
+    case "setRuleStatement": {
+      const r = m.rules.find((x) => x.id === op.ruleId) ?? fail("TARGET_MISSING", `rule "${op.ruleId}" not found`);
+      r.statement = op.statement;
+      return;
+    }
+    case "setDescription": {
+      const entry = index.byId.get(op.objectId) ?? fail("TARGET_MISSING", `"${op.objectId}" not found`);
+      if (isNested(entry.kind)) fail("NOT_DESCRIBABLE", `${entry.kind}s have no description`);
+      if (entry.kind === "project") m.project.description = op.description;
+      else (findRecord(m, op.objectId) as { description?: string }).description = op.description;
+      return;
+    }
     case "approveDraft":
       if (m.project.status === "approved") fail("ALREADY_APPROVED", "snapshot is already approved");
       m.project.status = "approved";

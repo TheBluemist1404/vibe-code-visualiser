@@ -83,3 +83,26 @@ test("binding add → list → verify → reassert --expect on Course Desk, with
   assert.equal(vcv("binding", "verify", repo).status, 0);
   assert.match(vcv("project", "status", repo).stdout, /at rev-1 \[draft\], 1 revision/);
 });
+
+test("evidence: flags build the same request as --request, and the result is JSON with exit 1 on an error", async () => {
+  const { baseline, SERVICE, edit } = await import("../../../packages/repo/test/course-desk.ts");
+  const repo = baseline();
+  edit(repo, SERVICE, "taken.length >= course.capacity", "taken.length > course.capacity");
+  const json = (r: ReturnType<typeof vcv>) => JSON.parse(r.stdout);
+  const same = (flags: string[], request: unknown) => {
+    const a = vcv("evidence", repo, ...flags);
+    const b = vcv("evidence", repo, flags[0]!, "--request", JSON.stringify(request));
+    assert.equal(a.status, b.status);
+    assert.deepEqual(json(a), json(b));
+    return json(a);
+  };
+  assert.equal(same(["overview", "--states", "stale,missing", "--limit", "1"], { states: ["stale", "missing"], limit: 1 }).data.matched, 2);
+  same(["object", "cap-enroll", "--relations", "implements", "--selector-kinds", "symbol", "--expected-revision", "rev-1"], { id: "cap-enroll", relations: ["implements"], selectorKinds: ["symbol"], expectedRevision: "rev-1" });
+  same(["binding", "impl.cap-enroll"], { bindingId: "impl.cap-enroll" });
+  const token = same(["refresh"], {}).data.observationToken;
+  assert.equal(same(["refresh", "test.rul-seat-limit", "--since", token], { bindingIds: ["test.rul-seat-limit"], since: token }).data.changedSince, true);
+  const missing = vcv("evidence", repo, "object", "cap-nope");
+  assert.equal(missing.status, 1);
+  assert.equal(json(missing).error.code, "UNKNOWN_ID");
+  assert.equal(vcv("evidence", repo, "object", "--request", "{nope").stderr.trim(), "✗ INPUT: --request must be a JSON object");
+});

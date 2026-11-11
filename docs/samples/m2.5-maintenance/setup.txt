@@ -1,0 +1,33 @@
+== materialize and create the draft project
+project: ready (<repo>/.vcv)
+model:   prj-course-desk at rev-1 [draft], 1 revision(s)
+git:     main adb423c256ca, working tree dirty
+  · UNCOMMITTED_MODEL_CHANGES: 3 .vcv/ path(s) differ from Git HEAD adb423c256ca72cf8242da855e6cb433655dbd1a
+== binding claims (made by the bootstrap agent)
+impl.cap-enroll: recorded (resolved: symbol EnrollmentService.enroll resolves to method EnrollmentService.enroll at line 23)
+impl.rul-seat-limit: recorded (resolved: symbol EnrollmentService.enroll resolves to method EnrollmentService.enroll at line 23)
+impl.rul-no-double-enroll: recorded (resolved: symbol EnrollmentService.enroll resolves to method EnrollmentService.enroll at line 23)
+impl.cap-list-courses: recorded (resolved: symbol EnrollmentService.courses resolves to method EnrollmentService.courses at line 19)
+expose.cap-enroll: recorded (resolved: route POST /enrollments resolves to route POST /enrollments → EnrollmentController.enroll at line 16)
+test.rul-seat-limit: recorded (resolved: test "EnrollmentService > rejects an enrollment into a full course and notifies the student" resolves to test EnrollmentService > rejects an enrollment into a full course and notifies the student at line 28)
+persist.dat-enrollment: recorded (resolved: symbol Enrollment resolves to interface Enrollment at line 15)
+persist.dat-notification: recorded (resolved: symbol NotificationKind resolves to type NotificationKind at line 1)
+baseline: a580bd7fbede50b228c62f2c1ae2dcc2a90eec54 (model and claims committed; working tree clean)
+== controlled source change (uncommitted): changes/waitlist.patch
+   M README.md
+   M scripts/smoke.mjs
+   M server/src/enrollment/enrollment.repository.ts
+   M server/src/enrollment/enrollment.service.spec.ts
+   M server/src/enrollment/enrollment.service.ts
+   M server/src/enrollment/enrollment.types.ts
+   M server/src/notifications/notification.types.ts
+   M server/test/app.e2e-spec.ts
+   M web/src/App.test.tsx
+   M web/src/App.tsx
+   M web/src/api/client.ts
+== the app's own checks on the changed tree
+ Test Files  3 passed (3)
+      Tests  9 passed (9)
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+smoke: ok

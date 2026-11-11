@@ -1,0 +1,68 @@
+{
+  "changeId": "ch-maint-01",
+  "projectId": "prj-course-desk",
+  "proposerId": "agent:maintainer",
+  "baseRevision": "rev-1",
+  "status": "pending",
+  "validationResults": [],
+  "change": {
+    "changeId": "ch-maint-01",
+    "projectId": "prj-course-desk",
+    "expectedRevision": "rev-1",
+    "operations": [
+      {
+        "type": "setRuleStatement",
+        "ruleId": "rul-seat-limit",
+        "statement": "Confirmed enrollments for a course never exceed its capacity; a request for a full course is not confirmed but waitlisted (status waitlisted, with a 1-based waitlistPosition in request order) and takes no seat."
+      },
+      {
+        "type": "setDescription",
+        "objectId": "rul-seat-limit",
+        "description": "enrollment.service.ts enroll(). Check-then-save is synchronous, so no race in this in-memory setup. Waitlisted requests are never promoted; the code has no cancellation."
+      },
+      {
+        "type": "createRule",
+        "rule": {
+          "id": "rul-no-double-waitlist",
+          "kind": "rule",
+          "owner": "mod-enrollment",
+          "name": "One waitlist place per student per course",
+          "description": "enrollment.service.ts enroll(). Checked after ALREADY_ENROLLED and before capacity, so a repeat request is rejected rather than waitlisted again.",
+          "ruleKind": "invariant",
+          "statement": "A student already waitlisted for a course is rejected with ALREADY_WAITLISTED and takes no seat and no waitlist place."
+        }
+      },
+      {
+        "type": "setRuleStatement",
+        "ruleId": "rul-announce-every-decision",
+        "statement": "Each enrollment decision, confirmed, waitlisted or rejected, is recorded and results in exactly one notification to the student."
+      },
+      {
+        "type": "setDescription",
+        "objectId": "cap-enroll",
+        "description": "POST /enrollments {studentId, courseId}. Always 201 with the recorded decision (confirmed, waitlisted with a waitlistPosition when the course is full, or rejected with a reason); 400 for a malformed body, 404 for an unknown course. Not every test was read in full."
+      },
+      {
+        "type": "setDescription",
+        "objectId": "dat-enrollment",
+        "description": "enrollment.types.ts, in-memory EnrollmentRepository; ids enr-N. status is confirmed|waitlisted|rejected; reason is ALREADY_ENROLLED|ALREADY_WAITLISTED, set only when rejected; waitlistPosition is set only when waitlisted. Rejections and waitlisted requests are stored too."
+      },
+      {
+        "type": "addDataAttribute",
+        "dataId": "dat-enrollment",
+        "attribute": {
+          "id": "att-enr-waitlist-position",
+          "name": "waitlistPosition",
+          "type": "integer",
+          "nullable": true
+        }
+      },
+      {
+        "type": "setDescription",
+        "objectId": "dat-notification",
+        "description": "notification.types.ts, in-memory outbox; ids ntf-N. kind is enrollment-confirmed|enrollment-waitlisted|enrollment-rejected. enrollmentId points at an Enrollment in another module, so it is typed id rather than reference."
+      }
+    ],
+    "rationale": "Uncommitted working-tree changes add a waitlist. In server/src/enrollment/enrollment.service.ts enroll(), a request for a full course is no longer rejected with COURSE_FULL; it is saved with status \"waitlisted\" and a 1-based waitlistPosition (waitlistedFor().length + 1), takes no seat, and triggers an \"enrollment-waitlisted\" notification. A repeat request from an already-waitlisted student is rejected with the new reason ALREADY_WAITLISTED. enrollment.types.ts drops COURSE_FULL from RejectionReason, adds \"waitlisted\" to EnrollmentStatus and optional waitlistPosition to Enrollment; notification.types.ts adds \"enrollment-waitlisted\". The unit spec, e2e spec, smoke script and README were updated consistently and agree with the code. Left unchanged on purpose: rul-request-valid, rul-recipient-required, dat-course (seatsLeft still counts only confirmed enrollments), module dependencies, and the web module (not examined for this change). No promotion from the waitlist exists in code (README: enrollments cannot be cancelled), so none is modelled.\n"
+  }
+}

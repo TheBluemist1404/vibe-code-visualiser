@@ -40,3 +40,21 @@ Rules:
 - Use model IDs (e.g. `mod-enrollment`) when you refer to model objects.
 - These tools cannot change the model. Do not edit files in the model store (`.vcv-store/`
   or wherever it lives) by hand.
+
+### Source evidence (when the server runs with `--repo`)
+
+Binding claims say that some code implements, exposes, persists or tests a model object. Read
+them with `mcp__vcv__vcv_get_evidence_overview`, `mcp__vcv__vcv_get_object_evidence`,
+`mcp__vcv__vcv_get_binding_evidence` and `mcp__vcv__vcv_refresh_evidence`.
+
+- A claim is someone's interpretation (see `claim.provenance`), not a fact. `resolved` only
+  means the pointer resolves and neither the code nor the model object changed since the claim;
+  it does not mean the code is correct. Every claim has `approval.approved: false`.
+- `stale` means the selected code or the model object changed (read `freshness.*.cause`),
+  `missing` that the pointer no longer resolves (VCV never follows renames), `unchecked` that it
+  is outside the supported TypeScript subset, `indeterminate` that some evidence is unknown
+  (never a pass), `invalid` that the claim file is unreadable.
+- Evidence is recomputed on each call against the working tree; nothing watches the repository.
+  Inspect the code yourself before concluding anything, and propose model changes through VCV's
+  change operations (`vcv propose`) for a person to approve. Never edit `.vcv/` by hand.
+- Routes are controller-relative (no global prefix); only syntax is read.
