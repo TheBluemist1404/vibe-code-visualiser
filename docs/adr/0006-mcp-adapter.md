@@ -56,6 +56,8 @@ which, and guidance tells agents not to treat a draft as agreed intent); it must
 - **File-store lifecycle.** Single writer is still assumed (ADR 0003). A reader racing a writer
   is safe for the reasons above, but each call re-reads `HEAD` and may parse a new revision file;
   for very large models a cheaper change check (mtime) may be needed.
-- **Dependency floor.** Tool arguments reach zod validation (`kinds`/`relations` arrays have no
-  max length), so the zod minimum is `^4.6.6` in every package that imports it, past
-  GHSA-mrhx-c7xc-m3w5 (memory exhaustion validating oversized collections).
+- **Input budgets.** Tool arguments reach zod validation, so the zod minimum is `^4.6.6` in
+  every package that imports it (past GHSA-mrhx-c7xc-m3w5, memory exhaustion validating
+  oversized collections), and every request array is capped in `@vcv/query`: `kinds` ≤ 11 and
+  `relations` ≤ 19 (one entry per value), `ids` ≤ 20. An oversized array is refused with one
+  `INVALID_REQUEST` detail before its elements are checked.
