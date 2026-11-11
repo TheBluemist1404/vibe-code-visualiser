@@ -72,6 +72,74 @@ what a proposal changes before deciding.
   a file over 1 MB before parsing. Oversized proposals are rejected without a record and, unlike
   engine refusals, without an audit line (they never reach the engine).
 
+## M3.2 decisions
+
+- **Identity is a key, not a claim.** Flags (`--as`, `--perm`), `VCV_HOST_*` and principal IDs in
+  change records are all writable by a shell agent in the same checkout. `vcv review approve`
+  refuses the first two outright and derives the approver from the trust-list entry whose
+  Ed25519 public key matches the reviewer's private key. `node:crypto` only; no new dependency.
+- **Trust needs an explicit anchor outside the candidate branch** (review round 1).
+  `.vcv/reviewers.json` is read from `--trust-ref <base>` or `--trust <file outside the
+  checkout>`; there is no default. `HEAD`, `@`, the checked-out branch, a commit only it
+  contains, and any file whose resolved path (parent symlinks followed) is in the checkout are
+  refused for approval (`UNPROTECTED_TRUST`) and are an error for a strict integrity check
+  (`TRUST_FROM_CHECKOUT`). A ref is reported as a pinned commit with protection *asserted by the
+  caller*: Git cannot verify branch protection. `--trust-working-tree` remains as an explicit
+  unsafe development mode that cannot produce a trusted approval.
+- **Approval authority is established outside the checkout, never inferred from refs** (review
+  round 2). Any local ref (tag, branch, remote-tracking ref) can be created or moved by a shell
+  agent, so reachability from "another ref" is not independence. `vcv review approve|finalize`
+  accept only `pinned-commit` (`--trust-commit <full ID>` copied from the hosting service; the
+  ref, if given, must resolve to it: `TRUST_PIN_MISMATCH`) or `external-file` (a reviewer-owned
+  list outside the checkout). An unpinned `--trust-ref` is `local-ref` authority: accepted by
+  `vcv integrity`, whose CI use relies on the host providing the base ref, and reported as such.
+- **Local approval is caller-asserted; the host gate authorizes** (review round 3). A standalone
+  CLI cannot authenticate where a pin or a file came from: an agent can commit its own key, tag
+  it, and pass that tag with that SHA. So every local anchor is labelled `caller-asserted`, each
+  approval result carries `authorization: not established by this command…`, and each
+  integrity report says `ok` authorizes only when the host supplied the anchor. With `--base`,
+  a Git trust anchor must be the base or an ancestor of it (`TRUST_NOT_FROM_BASE`), so the gate
+  cannot be pointed at a branch-chosen list. The documented gate is a required CI check on the
+  protected branch whose workflow and trust list are code-owner protected.
+- **The host gate runs a trusted verifier on candidate data** (review round 4). A gate that
+  installs and runs the PR's own checkout executes candidate-controlled code (`package.json`
+  scripts, dependencies, the verifier itself). `scripts/vcv-host-gate.sh` runs VCV from a
+  base checkout (installed with `--ignore-scripts`) against the candidate as data, with the
+  host-supplied base commit as both `--base` and the pinned trust anchor;
+  `docs/ci/vcv-gate.example.yml` wires it into `pull_request_target`. A pinned anchor skips the
+  "only reachable from the checked-out branch" heuristic, since a CI checkout may hold the base
+  by ID only; that heuristic only ever refused, and pins are caller-asserted anyway.
+- **Preflight, exclusive write, explicit repair** (review round 1). The attestation destination
+  is checked before the model commit; the file is created exclusively (link, never rename over).
+  If the write still fails after the commit, `ATTESTATION_NOT_WRITTEN` names `vcv review
+  finalize`, which lets only the recorded approver, with a trusted key and the reviewed digest,
+  write the missing attestation for an applied change in the current history; idempotent, never
+  overwriting. A two-file transaction was considered and rejected: it would change FileStore's
+  commit protocol for one file, and recovery is still needed after a crash.
+- **The base's evidence is preserved** (review round 1). With `--base`, every base attestation
+  and every settled (applied/rejected) base change record must be byte-identical in the checkout,
+  so a branch cannot delete the proof of an earlier approval while integrity passes.
+- **Approval binds to `proposalDigest`.** `ModelEngine.approve` takes `expectedDigest`; a
+  mismatch is a refusal (`DIGEST_MISMATCH`) that leaves the record pending and is audited, so a
+  proposal re-submitted or edited after preview cannot ride on an earlier review. The digest
+  stays derived, never stored (M3.1).
+- **Attestation beside the record, not inside it.** `.vcv/approvals/<changeId>.json` signs
+  `"vcv-approval-v1\0" + canonicalJson(body)` and repeats the record's fields so integrity can
+  compare them. Keeping it separate leaves the change-record format and revision IDs unchanged
+  and lets unattested history (legacy `vcv approve`, direct apply, all of M1/M2) stay readable,
+  reported as `missing` provenance.
+- **Integrity is a replay, read-only.** `vcv integrity` replays each applied record's typed
+  operations with `checkChange` on the parent revision and compares `revisionDigest`, so a
+  hand-written or edited revision fails regardless of signatures. With `--base`, the base's
+  history must be a prefix of the checkout's. An attestation that is present but does not
+  verify is always an error; a missing one is a warning unless `--require-attestation`. Reads
+  use the M2.4/M3.1 safe reader; nothing is written, not even an audit line.
+- **Honest limits in the output.** Every report lists what it cannot prove (who held a key, the
+  trust list's own correctness, the initial revision's origin, code vs model, the local audit
+  log), so a green check is not read as more than it is.
+- **No MCP approval tool**, no revocation list or key expiry (remove the entry on the protected
+  branch); both can come later without changing the attestation format (`format: 1`).
+
 ## Consequences
 
 - New: `readStoreFile` / `STORE_FILE_LIMITS` in core (now used by every store read), `packages/repo/src/proposals.ts` (`submitProposal`, `listProposals`, `previewProposal`,
@@ -79,3 +147,9 @@ what a proposal changes before deciding.
   `checkChange` / `proposalDigest` exported from the engine, CLI `vcv proposal submit|preview|list`,
   MCP `vcv_list_proposals` / `vcv_preview_proposal`.
 - Unchanged: `vcv propose` / `vcv approve`, the store format, change records, revision IDs.
+- M3.2 new: `packages/repo/src/approval.ts` (`createReviewerKey`, `addTrustedReviewer`,
+  `loadTrust`, `reviewApprove`, `readAttestation`), `packages/repo/src/integrity.ts`
+  (`checkIntegrity`), `reviewFinalize`, `ApproveOptions.expectedDigest` in the engine, `resolveCommit` /
+  `fileAtCommit` git helpers, CLI `vcv reviewer init`, `vcv review approve|finalize`, `vcv integrity`.
+  New store files: `.vcv/reviewers.json`, `.vcv/approvals/`. Unchanged: change records,
+  revision IDs, `vcv approve`.

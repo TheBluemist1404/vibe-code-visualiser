@@ -105,3 +105,57 @@ function gitOperation(root: string): GitOperation | null {
   if (marker("REVERT_HEAD")) return "revert";
   return null;
 }
+
+/** The commit a ref (branch, tag, SHA, `origin/main`, `HEAD~1`) names, or null. Read-only; refs starting with "-" are refused. */
+export function resolveCommit(root: string, ref: string): string | null {
+  if (!ref || ref.startsWith("-") || /[\0\s]/.test(ref)) return null;
+  return git(root, ["rev-parse", "--verify", "-q", "--end-of-options", `${ref}^{commit}`])?.trim() || null;
+}
+
+/**
+ * The bytes of a repository-relative file at a commit, or null if it does not exist there or is
+ * larger than `max` bytes. Read-only (`git cat-file`); never touches the working tree.
+ */
+export function fileAtCommit(root: string, commit: string, rel: string, max: number): Buffer | null {
+  if (!/^[0-9a-f]{40,64}$/.test(commit) || rel.startsWith("-") || rel.includes("\0")) return null;
+  const size = git(root, ["cat-file", "-s", `${commit}:${rel}`]);
+  if (size === null || Number(size.trim()) > max) return null;
+  try {
+    return execFileSync("git", ["-C", root, "cat-file", "blob", `${commit}:${rel}`], {
+      stdio: ["ignore", "pipe", "ignore"],
+      maxBuffer: max + 1,
+      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0", LC_ALL: "C" },
+    });
+  } catch {
+    return null;
+  }
+}
+
+/** The checked-out branch's full ref name (`refs/heads/x`), or null when HEAD is detached. */
+export function currentBranchRef(root: string): string | null {
+  return git(root, ["symbolic-ref", "-q", "HEAD"])?.trim() || null;
+}
+
+/** The full ref name a ref expression names (`main` → `refs/heads/main`), or null for a commit expression. */
+export function fullRefName(root: string, ref: string): string | null {
+  if (!ref || ref.startsWith("-") || /[\0\s]/.test(ref)) return null;
+  return git(root, ["rev-parse", "--symbolic-full-name", ref])?.trim() || null;
+}
+
+/** Full names of all refs (branches, remote-tracking branches, tags) whose history contains `commit`. */
+export function refsContaining(root: string, commit: string): string[] {
+  if (!/^[0-9a-f]{40,64}$/.test(commit)) return [];
+  return (git(root, ["for-each-ref", "--format=%(refname)", "--contains", commit]) ?? "").split("\n").filter(Boolean);
+}
+
+/** Repository-relative paths of the files under `dir` at a commit (recursive), sorted. */
+export function filesAtCommit(root: string, commit: string, dir: string): string[] {
+  if (!/^[0-9a-f]{40,64}$/.test(commit) || dir.startsWith("-") || dir.includes("\0")) return [];
+  return (git(root, ["ls-tree", "-r", "-z", "--name-only", commit, "--", dir]) ?? "").split("\0").filter(Boolean).sort();
+}
+
+/** Whether `ancestor` is `commit` or one of its ancestors (`git merge-base --is-ancestor`). */
+export function isAncestor(root: string, ancestor: string, commit: string): boolean {
+  if (!/^[0-9a-f]{40,64}$/.test(ancestor) || !/^[0-9a-f]{40,64}$/.test(commit)) return false;
+  return git(root, ["merge-base", "--is-ancestor", ancestor, commit]) !== null;
+}

@@ -1,0 +1,46 @@
+# Example VCV authorization gate for GitHub Actions (docs/approvals.md). Copy it to
+# .github/workflows/ on the protected branch and make the "vcv-gate" job a required status check.
+#
+# pull_request_target runs THIS file as it is on the base branch, with the base's permissions,
+# so a PR cannot edit the gate. The candidate (the PR head) is checked out only as data: nothing
+# from it is installed, imported or run. VCV itself comes from the base, installed without
+# lifecycle scripts. Do not add steps that run code from ./candidate.
+name: vcv-gate
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  vcv-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trusted VCV (the base branch)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+      - name: Install the trusted VCV build (no lifecycle scripts)
+        working-directory: trusted
+        run: npm ci --ignore-scripts
+      - name: Candidate as data (the PR head; never installed or run)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Make the base commit available to the candidate's object store
+        run: git -C candidate fetch --no-tags --quiet origin "$BASE_SHA"
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      - name: Integrity against the base's history and trust list
+        run: trusted/scripts/vcv-host-gate.sh "$PWD/trusted" "$PWD/candidate" "$BASE_SHA"
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
