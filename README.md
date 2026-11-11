@@ -7,11 +7,12 @@ fixture from *IR v0 — Conceptual Specification* (Draft v0.2).
 ```
 packages/ir     IR types, shape schema (zod), reference index, validation, YAML load/dump, tree/graph projections
 packages/query  read-only Semantic Query API: overview, search, context, impact (ADR 0005)
+packages/repo   repository-native .vcv/ projects: project loading, Git observation, branch tracking (ADR 0007)
 packages/core   typed operations, ModelEngine (propose/approve), Memory/File stores with crash recovery, audit log, bindings, layout store
 apps/cli        thin CLI over the engine (no domain logic)
 apps/mcp        local stdio MCP server exposing the four read-only queries to coding agents (ADR 0006)
 examples/enrollment   model.rev-1.yaml (valid fixture), change.timeout.yaml (the spec's 7-day timeout change)
-docs/adr        decision records 0001–0006
+docs/adr        decision records 0001–0007
 docs/samples    sample query results and the recorded agent demo on the Enrollment fixture
 ```
 
@@ -19,7 +20,7 @@ Requires Node 22.18+ (runs TypeScript directly, no build step).
 
 ```sh
 npm install
-npm test            # 74 tests
+npm test            # 92 tests
 npm run typecheck
 npm run vcv -- validate examples/enrollment/model.rev-1.yaml
 npm run vcv -- init .vcv-store examples/enrollment/model.rev-1.yaml
@@ -29,7 +30,18 @@ npm run vcv -- show .vcv-store --tree
 npm run vcv -- query .vcv-store search enrollment notifications --kind module
 npm run vcv -- query .vcv-store impact evt-enrollment-rejected
 node --experimental-strip-types apps/mcp/src/main.ts --store .vcv-store   # MCP over stdio
+npm run vcv -- project init <checkout> examples/enrollment/model.rev-1.yaml # create <checkout>/.vcv explicitly
+npm run vcv -- project status <checkout>                                    # model + Git state, read-only
 ```
+
+## Repository projects (M2)
+
+A project lives in `.vcv/` at the root of a Git checkout and is committed with the code.
+`vcv project status` finds it from any subdirectory and reports `ready`, `absent`,
+`uninitialized`, `conflicted`, `diverged` or `invalid`, with the checkout's commit, branch and
+dirty state as observation context. Nothing is created or repaired by looking. New model
+revisions are named `rev-<seq>-<digest>` so two branches never mint the same ID, and a merged
+or half-merged `.vcv/` is refused rather than silently reset. See ADR 0007.
 
 ## Agent access (MCP)
 
