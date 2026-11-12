@@ -18,8 +18,10 @@
 #                    (host-observed only if the PR head still has exactly that identity) and applies
 #                    the policy read from the BASE commit.
 #
-# What no job can change: the PR's own test code runs in candidate-tests and could fake its report.
-# CI is the test run (docs/premerge-gate.md); test and mapping changes are flagged for review.
+# candidate-tests is a validation execution whose report the gate collects through the host path;
+# record files from the candidate stay claims. VCV does not establish that the PR's test assertions
+# are sufficient or honest (that code runs in candidate-tests); test and mapping changes are flagged
+# for review (docs/premerge-gate.md).
 #
 # The gate's verdict is only as strong as this file: keep the PR from editing it (it runs from the
 # base under pull_request_target), require code-owner review for it, for .github/vcv-policy.json

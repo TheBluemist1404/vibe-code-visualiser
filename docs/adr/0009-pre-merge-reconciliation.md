@@ -216,10 +216,13 @@ post-merge rewrite and no inference.
   `identity` job, which runs no PR code). The gate checks that the candidate still has exactly that
   identity (`TEST_RUN_RACED` otherwise). Without `before`, the report is captured as a claim. The
   gate no longer reads an identity after the run and calls it the pre-run state.
-- **CI is the test run (owner decision, 2026-11-12).** The base-defined test job running the PR's
-  own tests is the project's test run. That the PR's test code could fake its own report is a
-  documented limit. Test and mapping changes are surfaced (`TEST_CHANGED`, `MAPPING_CHANGED`), and
-  routine test edits do not need an approval.
+- **CI and tests are both validation.** VCV has one category, validation against requirements and
+  acceptance criteria, whatever the development tooling calls it. A configured, base-owned CI job is
+  a validation execution, and its identifiable results are collected through the host path (in-process
+  capture bound to the pre-run identity). Record files an agent or the candidate supplies remain
+  claims. VCV does not establish that test assertions are sufficient or honest: the candidate's test
+  code runs in that job. Test and mapping changes are surfaced (`TEST_CHANGED`, `MAPPING_CHANGED`) for
+  the PR reviewer.
 - **Git reads treat the checkout as data.** Every Git command:
   - disables `core.fsmonitor` and hooks;
   - reads attributes from the empty tree (`GIT_ATTR_SOURCE`);

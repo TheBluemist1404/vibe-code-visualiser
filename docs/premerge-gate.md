@@ -99,11 +99,18 @@ captured itself and relabelled as host-observed. The trusted gate still blocks o
 failing case. The shipped record counts only as a claim, and the gate passes once the host's own run
 is green.
 
-**CI is the test run.** This was the owner's decision on 2026-11-12. The `candidate-tests` job
-defined by the base is the project's test run, as it is for any CI. VCV binds its report to the exact
-candidate, and to the identity read before the run, but it cannot make the PR's own test code honest.
-That code runs in that job and could weaken a mapped test, or make the runner print a passing report.
-The gate shows the cases it can see:
+**CI and tests are both validation.** For VCV, a test run and a CI run are the same thing:
+validation of the candidate against its requirements and acceptance criteria. The boundary is where
+a result comes from, not what it is called:
+- A configured, base-owned CI job (here `candidate-tests`) is a validation execution. Its report is
+  collected through the host path: the trusted gate captures it in-process, bound to the identity
+  the host read before the run, and only if the candidate still has that identity.
+- A record file that an agent or the candidate supplies is a claim, whatever it says about itself.
+  It never satisfies a required criterion.
+
+What VCV does not establish is that a test's assertions are sufficient, or honest. The PR's own
+test code runs in the validation job, so it could weaken a mapped test or make the runner print a
+passing report. The gate shows the changes it can see:
 - `TEST_CHANGED` makes the mapping stale when a mapped test's code changed;
 - `MAPPING_CHANGED` warns when a mapping is added or reasserted, or when its test file changes.
 
