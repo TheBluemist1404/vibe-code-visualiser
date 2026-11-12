@@ -114,11 +114,13 @@ const USAGE = `vcv <command> [options]
                                         missing / unknown per criterion (M4.3). --junit captures here, in this process:
                                         the only way a run is host-observed. --run records are claims, whatever they
                                         declare. Exit 0 whenever a report is produced.
-  gate <path> --base <full commit ID of the protected base> [--junit <report.xml> --runner <name> --invocation "<cmd>" [--root <dir>]]
+  gate <path> --base <full commit ID of the protected base> [--junit <report.xml> --runner <name> --invocation "<cmd>" [--root <dir>] --before <identityDigest>]
        [--run <test-run.json>]... [--observations <file>] [--policy <host file> | --policy-at-base <repo path>] [--coverage <f>] [--json]
                                         The pre-merge policy gate (M4.4): integrity pinned to the base with attestation
                                         required, structural and binding findings, every criterion's mapped test cases
-                                        in runs of this exact candidate (--junit captured here = host-observed), and
+                                        in runs of this exact candidate (--junit with --before, the identity the host
+                                        read before the tests ran: captured here = host-observed; without --before
+                                        a claim), and
                                         agent observations (claims; references checked). Decides pass / warn / block
                                         by the policy (vcv-policy-1; defaults block anything required that is not a
                                         host-observed pass). Exit 0 pass or warn, 1 block, 2 usage or setup error.
@@ -692,8 +694,9 @@ function gateCommand(): number {
     }
     policy = readJson(values.policy, "gate policy");
   }
-  const junit = values.junit ? [{ report: readBounded(values.junit, JUNIT_LIMITS.bytes), root: values.root ?? "", runner: captureInput().runner, invocation: captureInput().invocation }] : [];
-  if (values.before) throw new InputError("--before is not used by gate: the gate reads the candidate's identity itself and binds the capture to it");
+  // --before: the identity the host read BEFORE the tests ran. Without it the report is a claim.
+  const junit = values.junit ? [{ report: readBounded(values.junit, JUNIT_LIMITS.bytes), root: values.root ?? "", runner: captureInput().runner, invocation: captureInput().invocation, ...(values.before ? { before: values.before } : {}) }] : [];
+  if (values.before && !values.junit) throw new InputError("--before goes with --junit: it is the identity the host read before running the tests that wrote that report");
   const r = preMergeGate(path, {
     base,
     ...(junit.length ? { junit } : {}),

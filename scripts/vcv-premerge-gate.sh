@@ -8,7 +8,9 @@
 # nothing from the candidate is installed, imported or executed by this script. Only read-only git
 # commands run in the candidate. The tests were run by the host BEFORE this script, in a separate
 # job; pass their JUnit report with --junit (and --root, --runner, --invocation): it is captured
-# here, in this process, which is what makes the run host-observed.
+# here, in this process. Pass --before with the identity the host read BEFORE the tests ran (in a
+# step no candidate code had run in); only then, and only if the candidate still has exactly that
+# identity, is the run host-observed.
 #
 # The host identity is fixed here (VCV_HOST_PRINCIPAL, permission tests:observe), so options on
 # the command line cannot change it.

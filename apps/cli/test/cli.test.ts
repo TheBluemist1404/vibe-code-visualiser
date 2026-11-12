@@ -415,7 +415,8 @@ test("gate: exit 0 on a host-observed pass, 1 on a failed mapped case, 2 on setu
   git(repo, "checkout", "-qb", "feature");
   edit(repo, SERVICE, "Enrollment rules. Every decision", "Enrollment rules; every decision");
   git(repo, "commit", "-qam", "reword a comment");
-  const run = (report: string, ...more: string[]) => vcv("gate", repo, "--base", base, "--junit", join(fixtures, report), "--root", "server", "--runner", "vitest", "--invocation", "npx vitest run --reporter=junit", ...more);
+  const before = () => JSON.parse(vcv("tests", "identity", repo, "--json").stdout).identityDigest as string;
+  const run = (report: string, ...more: string[]) => vcv("gate", repo, "--base", base, "--junit", join(fixtures, report), "--root", "server", "--runner", "vitest", "--invocation", "npx vitest run --reporter=junit", "--before", before(), ...more);
 
   const pass = run("vitest-pass.xml");
   assert.equal(pass.status, 0, pass.stdout + pass.stderr);
@@ -446,9 +447,14 @@ test("gate: exit 0 on a host-observed pass, 1 on a failed mapped case, 2 on setu
   const hostPolicy = join(tmp(), "policy.json");
   writeFileSync(hostPolicy, JSON.stringify({ format: "vcv-policy-1", required: { failed: "warn" } }));
   rmSync(join(repo, "lax-policy.json"));
+  // A host policy cannot lower a required criterion either: that is approved intent (M3).
   const lax = run("vitest-fail-skip.xml", "--policy", hostPolicy);
-  assert.equal(lax.status, 0, lax.stdout + lax.stderr);
-  assert.match(lax.stdout, /vcv gate: WARN/);
+  assert.equal(lax.status, 2, lax.stdout + lax.stderr);
+  assert.match(lax.stdout, /POLICY_INVALID/);
+  // A report without --before is a claim: the required criterion blocks even on a green run.
+  const unbound = vcv("gate", repo, "--base", base, "--junit", join(fixtures, "vitest-pass.xml"), "--root", "server", "--runner", "vitest", "--invocation", "npx vitest run --reporter=junit");
+  assert.equal(unbound.status, 1, unbound.stdout + unbound.stderr);
+  assert.match(unbound.stdout, /run 0: CLAIMED/);
 });
 
 test("pre-merge gate script: a candidate that rewrites its own gate and ships a forged run still blocks on its failing case", async () => {
@@ -476,7 +482,9 @@ test("pre-merge gate script: a candidate that rewrites its own gate and ships a 
   assert.equal(spawnSync("node", [join(repo, "apps/cli/src/main.ts")], { encoding: "utf8" }).stdout.trim(), "vcv gate: PASS");
 
   const gate = (...more: string[]) => spawnSync("bash", [GATE, ROOT, repo, base, ...more], { encoding: "utf8" });
-  const junit = (report: string) => ["--junit", join(fixtures, report), "--root", "server", "--runner", "vitest", "--invocation", "npx vitest run --reporter=junit"];
+  // The identity the host read before the tests ran (the CI identity job).
+  const before = JSON.parse(vcv("tests", "identity", repo, "--json").stdout).identityDigest as string;
+  const junit = (report: string) => ["--junit", join(fixtures, report), "--root", "server", "--runner", "vitest", "--invocation", "npx vitest run --reporter=junit", "--before", before];
   // The host's real run failed the mapped case; the shipped record cannot outvote it.
   const red = gate(...junit("vitest-fail-skip.xml"), "--run", join(scratch, "run.json"));
   assert.equal(red.status, 1, red.stdout + red.stderr);

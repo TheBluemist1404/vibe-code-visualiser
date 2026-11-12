@@ -23,7 +23,7 @@ Design notes: [ADR 0009, M4.4 decisions](adr/0009-pre-merge-reconciliation.md#m4
 
 ```sh
 vcv gate <candidate> --base <full commit ID of the protected base> \
-  [--junit <report.xml> --root server --runner vitest --invocation "<command>"] \
+  [--junit <report.xml> --root server --runner vitest --invocation "<command>" --before <identityDigest>] \
   [--run <test-run.json>]... [--observations <file>] \
   [--policy <host-owned file> | --policy-at-base .github/vcv-policy.json] [--coverage <f>] [--json]
 ```
@@ -36,32 +36,42 @@ The exit code is what a CI check needs:
   checkout, a policy that does not parse, or a candidate that moved while the gate read it. Exit 2 is
   never a pass.
 
-`--junit` is captured inside the gate's own process. That is what makes a run host-observed, so the
-gate never takes a separate capture step for it. `--run` records are claims, whatever they declare,
+`--junit` is captured inside the gate's own process, against `--before`: the identity the host read
+before the tests ran. Only that combination makes a run host-observed. `--run` records are claims, whatever they declare,
 and so is a capture by a caller that lacks `tests:observe`.
 
 A candidate whose model cannot be loaded at all (a hand-edited revision file, a conflict, no `.vcv/`)
 is blocked with `PROJECT_NOT_READY`. It is not a setup error.
 
-## In CI: two jobs
+## In CI: three jobs
 
 The candidate's tests have to run its own code. The verifier must not run next to that code: a
 step in the same job could rewrite the installed VCV, or the report, before the gate reads them. So
-the supported recipe has two jobs. See
+the supported recipe has three jobs. See
 [`ci/vcv-premerge.example.yml`](ci/vcv-premerge.example.yml):
 
-1. **`candidate-tests`** checks out the PR head and runs the project's ordinary runner with its
+1. **`identity`** never executes PR code. The trusted VCV reads the PR head's identity before any
+   test runs: its commit, uncommitted and bound bytes, model revision and claims (`vcv tests
+   identity`). It hands the digest over as a job output, which no other job can write.
+2. **`candidate-tests`** checks out the PR head and runs the project's ordinary runner with its
    JUnit reporter. For Course Desk that is `npx vitest run --reporter=junit --outputFile=…`. This job
    executes PR code, so it gets no token permissions and no secrets. It uses no cache: under
    `pull_request_target`, a cache it wrote would belong to the base. It hands over exactly one file,
    the report.
-2. **`vcv-gate`** never executes PR code. It installs VCV from a commit pinned in the workflow file,
+3. **`vcv-gate`** never executes PR code. It installs VCV from a commit pinned in the workflow file,
    with `npm ci --ignore-scripts`. It checks out the PR head as data and fetches the base commit. It
    then runs [`scripts/vcv-premerge-gate.sh`](../scripts/vcv-premerge-gate.sh), which:
    - refuses a verifier inside the candidate, a base that is not a full commit ID, and `--as`,
      `--perm` or `--base` overrides;
    - fixes the host identity with `tests:observe`;
-   - runs `vcv gate`, which captures the report in-process and reads the policy from the base commit.
+   - runs `vcv gate --junit … --before <identity job's digest>`. The gate captures the report
+     in-process, and only if the candidate it reads now has exactly that identity. It also reads
+     the policy from the base commit.
+
+**A report is host-observed only with `--before`.** That is the identity the host read before the
+tests ran, in a step no PR code had run in. The gate never makes one up. A report from an earlier
+state of the code is refused (`TEST_RUN_RACED`), and a report given without `--before` is captured
+as a claim, so it blocks every required criterion.
 
 The workflow runs under `pull_request_target`, so the file comes from the base and a PR cannot edit
 it. Make **`vcv-gate` a required status check** on `main`. Require code-owner review for the
@@ -69,17 +79,30 @@ workflow, for `.github/vcv-policy.json` and for `.vcv/reviewers.json`. A gate th
 check enforces nothing. VCV cannot configure branch protection; a repository admin does that in the
 repository's settings, under Rules (or Branches).
 
+**The candidate checkout is data, and Git reads keep it that way.** Every Git command VCV runs:
+- disables `core.fsmonitor` and hooks;
+- reads attributes from the empty tree, so the checkout's `.gitattributes` cannot pick a filter;
+- empties every configured filter, diff and merge driver command;
+- uses no pager and no external diff.
+
+A candidate whose `.git/config` names commands, for example a checkout an agent prepared, therefore
+runs none of them in the verifier's process.
+
 [`apps/cli/test/cli.test.ts`](../apps/cli/test/cli.test.ts) has a regression test for this setup. A
 candidate rewrites its own CLI and gate code to print "pass", and ships a passing run record it
 captured itself and relabelled as host-observed. The trusted gate still blocks on the host run's
 failing case. The shipped record counts only as a claim, and the gate passes once the host's own run
 is green.
 
-What the two-job split cannot change: the PR controls its own tests. It can weaken a mapped test,
-or make the runner print a passing report. The gate shows when a mapped test changed:
-`TEST_CHANGED` makes the mapping stale, and `MAPPING_CHANGED` warns when a mapping is added or
-reasserted, or when its test file changes. Whether the new test still checks the criterion is the
-PR reviewer's judgement.
+**CI is the test run.** This was the owner's decision on 2026-11-12. The `candidate-tests` job
+defined by the base is the project's test run, as it is for any CI. VCV binds its report to the exact
+candidate, and to the identity read before the run, but it cannot make the PR's own test code honest.
+That code runs in that job and could weaken a mapped test, or make the runner print a passing report.
+The gate shows the cases it can see:
+- `TEST_CHANGED` makes the mapping stale when a mapped test's code changed;
+- `MAPPING_CHANGED` warns when a mapping is added or reasserted, or when its test file changes.
+
+Whether the new test still checks the criterion is the PR reviewer's judgement.
 
 ## The policy
 
@@ -88,7 +111,6 @@ A policy is JSON, format `vcv-policy-1`. Every key is optional, and a missing ke
 ```json
 {
   "format": "vcv-policy-1",
-  "required": { "failed": "block", "stale": "block", "missing": "block", "unknown": "block", "unverified": "block", "claimed": "block" },
   "optional": { "failed": "warn", "stale": "warn", "missing": "warn", "unknown": "warn", "unverified": "warn", "claimed": "warn" },
   "structural": "block",
   "bindings": { "related": "warn", "unrelated": "warn" },
@@ -105,19 +127,31 @@ A policy is JSON, format `vcv-policy-1`. Every key is optional, and a missing ke
 
 - **Integrity is not configurable.** An invalid, rewritten or unattested history always blocks, and
   so does an unreadable claim store.
-- **`required.*` can be `block` or `warn`, never off.** `unknown` and `unverified` are not `passed`.
-  `claimed` covers a criterion that passed only in runs that were not captured by the gate.
+- **Required criteria are not configurable.** Any result of a required criterion other than a
+  host-observed pass blocks: failed, stale, missing, unknown, unverified, or claimed (it passed only
+  in runs the gate did not capture). Whether a criterion is required is approved intent in the
+  model, and it changes only through an M3 proposal and a separate human approval. A policy file
+  is not that approval, so a `required` key is refused.
 - **`structural`** (a claim on an object the approved model does not have) is a checked
   contradiction: `block` or `warn`.
-- **`requireEvidence`** lists objects that need test evidence whenever a change touches them, through
-  the model delta, its impact, or the declared context of the changed code. At least one *required*
+- **`requireEvidence`** lists objects that need test evidence whenever a change touches them. An
+  object counts as touched through any of:
+  - the model delta, or its impact;
+  - the declared context of the changed code;
+  - the protected base's own claims: an object whose base-side claims point into a changed file, or
+    whose claims the candidate removed or reasserted.
+
+  Removing a claim does not take its object out of scope. At least one *required*
   criterion that verifies the object must have a host-observed pass, or the gate blocks with
-  `EVIDENCE_REQUIRED`. If an impact list was cut, every listed object counts as touched.
+  `EVIDENCE_REQUIRED`. If an impact, claim or file list was cut, or a base claim cannot be read,
+  every listed object counts as touched.
 - Unknown keys are refused (`POLICY_INVALID`). So is any attempt to switch integrity off.
 
 The policy is the host's, never the candidate's:
 
-- `--policy-at-base <path>` reads the file from the **base commit's** Git objects. If the candidate
+- `--policy-at-base <path>` reads the file from the **base commit's** Git objects. Only real
+  absence falls back to the defaults. An oversized file, an unreadable blob or a non-file entry is
+  `POLICY_INVALID` (exit 2). If the candidate
   changes that file, the gate reports `POLICY_CHANGED` (a warning by default). The change takes effect
   only after the merge, once it has been reviewed. If the base has no such file, the defaults apply,
   and the report says so.
@@ -160,13 +194,18 @@ An agent that reads the code can attach what it found (`--observations <file>`):
   - `none`.
 
 VCV checks every reference. It checks that each object exists in the candidate's model, and that each
-path is portable, exists and has the cited lines. For each test case, it reports whether the case is
-mapped and what it returned in the fresh runs. The observation then gets one of three labels:
+path is portable, exists and has the cited lines. It checks that each test case exists in its file,
+whether or not any run is available, and reports whether the case is mapped and what it returned in
+the fresh runs. Every cited file, ignored files included, is part of what the gate rechecks before
+answering. The observation then gets one of four labels:
 
 - `verified`: every reference holds;
 - `invalid`: some reference does not, reported as `OBSERVATION_REFERENCES_INVALID`;
 - `unsupported`: a contradiction that cites no source location, reported as
-  `OBSERVATION_WITHOUT_LOCATION`.
+  `OBSERVATION_WITHOUT_LOCATION`;
+- `not-checked`: some reference could not be checked (a file too large for the line check, a test
+  file the resolver does not parse), reported as `OBSERVATION_REFERENCES_NOT_CHECKED`. It is never
+  called verified.
 
 Every observation stays a **claim** (`basis: "claim"`). VCV never confirms or refutes what it says.
 By default, observations warn. A team can set `observations.contradiction` to `block` to stop any PR
@@ -196,9 +235,12 @@ anything is cut, and it covers every criterion: if the criteria report had to be
 evaluates the remaining criteria in batches. The checkout's path never appears in the report. The
 same candidate gives the same JSON.
 
-The gate reads the candidate's identity first, and again before it answers. If anything moved in
-between (a source edit, a claim, the model), it answers `STATE_CHANGED` (exit 2) instead of a
-decision.
+The gate reads everything it depends on first: the candidate's identity, every file in `.vcv/`
+(attestations and trust list included), the candidate's copy of the policy file, and every cited
+file. It reads them again after the history check, again after the test results, and once more
+before answering. If anything moved, it answers `STATE_CHANGED` (exit 2) instead of a decision. The
+policy is applied to every finding before any list in the report is cut, so adding lower-severity
+findings can never push a blocking one out of view.
 
 ## Not established here
 

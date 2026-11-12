@@ -187,8 +187,8 @@ post-merge rewrite and no inference.
 - **The policy is the host's.** It is a `vcv-policy-1` JSON file that is either supplied by the host
   (the CLI refuses one inside the candidate) or read from the base commit's Git objects
   (`--policy-at-base`). A candidate's edit to that file is reported as `POLICY_CHANGED` and applies
-  only after the merge. Integrity is fixed at block. Required evidence can be lowered to warn but
-  never switched off, because `unknown` is not `passed`. Unknown keys are refused.
+  only after the merge. Integrity is fixed at block. Required criteria are not configurable (review
+  round 1). Unknown keys are refused.
 - **Criterion intent is not policy.** Whether a criterion is required lives in the approved model
   (M3 approval). The policy only says how outcomes are treated. `requireEvidence` adds objects that
   need a host-observed required pass whenever a change touches them, and counts every listed object
@@ -208,6 +208,45 @@ post-merge rewrite and no inference.
   and `MAPPING_CHANGED` make that visible to the PR reviewer.
 - **A whole decision.** If the criteria report must be cut to fit, the gate evaluates the remaining
   criteria in batches before deciding. Hidden structural findings are counted from the summary.
+
+### Review round 1 (PR #26)
+
+- **Execution identity is the host's, not the verifier's.** A JUnit report is admitted as
+  host-observed only with `before`, the identity a host step read before the tests ran (the CI
+  `identity` job, which runs no PR code). The gate checks that the candidate still has exactly that
+  identity (`TEST_RUN_RACED` otherwise). Without `before`, the report is captured as a claim. The
+  gate no longer reads an identity after the run and calls it the pre-run state.
+- **CI is the test run (owner decision, 2026-11-12).** The base-defined test job running the PR's
+  own tests is the project's test run. That the PR's test code could fake its own report is a
+  documented limit. Test and mapping changes are surfaced (`TEST_CHANGED`, `MAPPING_CHANGED`), and
+  routine test edits do not need an approval.
+- **Git reads treat the checkout as data.** Every Git command:
+  - disables `core.fsmonitor` and hooks;
+  - reads attributes from the empty tree (`GIT_ATTR_SOURCE`);
+  - empties every configured filter, diff and merge driver command (which `$GIT_DIR/info/attributes`
+    could still select);
+  - uses no pager and no external diff, and drops inherited `GIT_DIR`-style variables.
+- **One snapshot across phases.** The gate's key covers:
+  - the candidate identity;
+  - every file in `.vcv/`, including attestations and the trust list;
+  - the candidate's copy of the policy;
+  - every cited file.
+
+  It is read first, after reconciliation, after the criteria, and again before answering.
+- **Decide before presenting.** Reconciliation hands the gate every finding before its lists are
+  cut, so adding lower-severity findings cannot hide a blocker. A cut claim list makes a blocking
+  `mappingChanged` setting block conservatively.
+- **Base-side scope for `requireEvidence`.** The base's claims also count: claims that point into
+  changed files, or that were removed or reasserted. Removing evidence cannot take an object out
+  of scope, and an unreadable base claim makes every listed object touched.
+- **Absent is not unreadable.** A base policy is read with `entryAtCommit` first. Only real absence
+  means defaults; an oversized, non-file or unreadable entry is `POLICY_INVALID`.
+- **Required criteria are not configurable.** Any outcome of a required criterion other than a
+  host-observed pass blocks. Changing that is an M3 model change with a separate human approval,
+  never a policy file.
+- **Observation references.** Cited test cases are resolved in the candidate whether or not any run
+  exists. A reference that could not be checked makes the observation `not-checked`, never
+  `verified`. Files are read nonblocking and bounded.
 
 ## Consequences
 

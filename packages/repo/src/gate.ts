@@ -24,20 +24,24 @@
 // The gate runs no tests and executes nothing from the candidate. One observation: the candidate's
 // identity is read before anything else and again before answering (STATE_CHANGED).
 import { createHash } from "node:crypto";
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readSync, readdirSync, readlinkSync } from "node:fs";
+import { join } from "node:path";
 import { z } from "zod";
 import { buildIndex } from "@vcv/ir";
 import type { Id } from "@vcv/ir";
 import { canonicalJson } from "@vcv/core";
 import { criteriaEvidence } from "./criteria.ts";
 import type { CriteriaReport, CriterionEvidence, RunSummary } from "./criteria.ts";
-import { currentBranchRef, fileAtCommit, findWorkTreeRoot, headCommit, mergeBase, resolveCommit } from "./git.ts";
+import { MAX_CLAIM_BYTES } from "./bindings.ts";
+import { currentBranchRef, entryAtCommit, fileAtCommit, filesAtCommit, findWorkTreeRoot, headCommit, mergeBase, resolveCommit } from "./git.ts";
 import { redact } from "./handoff.ts";
 import { caseKey } from "./junit.ts";
 import { pathProblem, resolveInside } from "./locator.ts";
 import { finish, observed } from "./proposals.ts";
-import type { ProposalError, ProposalHooks, ProposalResult } from "./proposals.ts";
+import type { Observation, ProposalError, ProposalHooks, ProposalResult } from "./proposals.ts";
+import { worktreeState } from "./worktree.ts";
 import { reconcile } from "./reconcile.ts";
+import { resolveLocator } from "./resolver.ts";
 import type { Reconciliation, ReconcileFinding } from "./reconcile.ts";
 import { candidateIdentityOf, captureTestRun, identityDigest } from "./testruns.ts";
 import type { TestRunHost, TestRunRecord } from "./testruns.ts";
@@ -57,17 +61,21 @@ export const GATE_LIMITS = {
   /** Criteria evaluated per call when the full criteria report had to be cut. */
   criteriaBatch: 25,
   bytes: 512 * 1024,
+  /** Entries of the .vcv/ store hashed into the snapshot. */
+  storeFiles: 50_000,
 } as const;
 
 // ---- policy ------------------------------------------------------------------------------------
 
 const level = z.enum(["block", "warn", "off"]);
-/** A required criterion's evidence can be lowered to warn, never ignored: `unknown` is not `passed`. */
+/** Settings that may be lowered to warn but never switched off. */
 const requiredLevel = z.enum(["block", "warn"]);
-const requiredEvidence = z
-  .object({ failed: requiredLevel.default("block"), stale: requiredLevel.default("block"), missing: requiredLevel.default("block"), unknown: requiredLevel.default("block"), unverified: requiredLevel.default("block"), claimed: requiredLevel.default("block") })
-  .strict()
-  .prefault({});
+/**
+ * Required criteria are not configurable here (M4.4 review): whether a criterion's evidence is
+ * mandatory is approved intent in the model, changed only through an M3 proposal and a separate
+ * human approval. Every outcome of a required criterion other than a host-observed pass blocks.
+ */
+export const REQUIRED_EVIDENCE = { failed: "block", stale: "block", missing: "block", unknown: "block", unverified: "block", claimed: "block" } as const;
 const optionalEvidence = z
   .object({ failed: level.default("warn"), stale: level.default("warn"), missing: level.default("warn"), unknown: level.default("warn"), unverified: level.default("warn"), claimed: level.default("warn") })
   .strict()
@@ -76,8 +84,6 @@ const optionalEvidence = z
 export const gatePolicySchema = z
   .object({
     format: z.literal("vcv-policy-1"),
-    /** Required criteria whose result is not a host-observed pass. */
-    required: requiredEvidence,
     /** Optional criteria likewise. */
     optional: optionalEvidence,
     /** Checked contradictions between claims and the approved model (CLAIM_ON_MISSING_OBJECT). */
@@ -161,9 +167,12 @@ export type VerifiedObservation = {
   author: string | null;
   objects: { id: string; exists: boolean; kind: string | null }[];
   locations: { path: string; startLine?: number; endLine?: number; check: "ok" | "missing" | "unsafe" | "line-out-of-range" | "not-checked"; lines: number | null }[];
-  tests: { path: string; name: string; mapped: boolean; result: "passed" | "failed" | "error" | "skipped" | "not-run" | "ambiguous" | null }[];
-  /** verified: every reference exists; invalid: some do not; unsupported: a contradiction without a source location. */
-  references: "verified" | "invalid" | "unsupported";
+  tests: { path: string; name: string; check: "ok" | "missing" | "ambiguous" | "unsafe" | "not-checked"; mapped: boolean; result: "passed" | "failed" | "error" | "skipped" | "not-run" | "ambiguous" | null }[];
+  /**
+   * verified: every reference was checked and holds; invalid: some do not hold; unsupported: a
+   * contradiction without a source location; not-checked: some reference could not be checked.
+   */
+  references: "verified" | "invalid" | "unsupported" | "not-checked";
   problems: string[];
 };
 
@@ -225,7 +234,18 @@ const LIMITS = [
   "Tests were run by the host's own runner, outside VCV. A run is host-observed only when this process captured its report; how far that report can be trusted is how far the job that produced it can be.",
 ];
 
-export type GateJUnit = { report: Uint8Array; root: string; runner: { name: string; version?: string }; invocation: string };
+export type GateJUnit = {
+  report: Uint8Array;
+  root: string;
+  runner: { name: string; version?: string };
+  invocation: string;
+  /**
+   * The candidate's identity digest as the HOST read it before the tests ran (`vcv tests
+   * identity`, in a step no candidate code had run in). Required for a host-observed result: the
+   * gate never makes one up. Without it the report is captured as a claim.
+   */
+  before?: string;
+};
 export type GateRequest = {
   /** The protected base, as a full commit ID supplied by the host. */
   base: string;
@@ -261,8 +281,12 @@ export function preMergeGate(path: string, req: GateRequest, host: TestRunHost, 
     observations = o.data;
   }
 
-  // 1. The candidate's identity, before anything else reads it.
-  const first = identityNow(path, hooks);
+  // 1. The candidate's identity and every other input the decision reads (the whole .vcv/ store,
+  //    attestations and trust list included, the candidate's copy of the policy file, every file an
+  //    observation cites), before anything else reads them. Checked again after every phase and
+  //    before answering: the parts of the answer describe one state.
+  const cited = citedPaths(observations, req.policyAtBase);
+  const first = snapshotNow(path, cited, hooks);
   if (!first.ok) {
     // A candidate whose model cannot be loaded (hand-edited revision, conflict, no project) is a
     // decision, not a setup error: it blocks, with the reason.
@@ -271,19 +295,34 @@ export function preMergeGate(path: string, req: GateRequest, host: TestRunHost, 
   }
   const root = first.data.root;
   if (!resolveCommit(root, req.base)) return { ok: false, error: { code: "UNKNOWN_COMMIT", message: `${req.base} is not a commit in this repository (fetch the base first)` } };
+  const moved = (phase: string): ProposalResult<GateReport> | null => {
+    const now = snapshotNow(path, cited, hooks);
+    if (now.ok && now.data.key === first.data.key) return null;
+    return { ok: false, error: { code: "STATE_CHANGED", message: `the candidate changed while the gate was reading it (${phase}: source, claims, model, approvals or cited files); run the gate again` } };
+  };
 
   // 2. The policy: the host's file, or the base commit's bytes. Never the candidate's working tree.
   const pol = policyOf(root, req);
   if ("error" in pol) return { ok: false, error: pol.error };
 
-  // 3. History, structure, bindings: M4.1, pinned to the base, attestation required.
-  const rec = reconcile(path, { base: req.base, trust: { kind: "git-ref", ref: req.base, pinnedCommit: req.base }, requireAttestation: true }, hooks);
+  // 3. History, structure, bindings: M4.1, pinned to the base, attestation required. The policy is
+  //    applied to every finding, before the report's lists are cut.
+  let allFindings: ReconcileFinding[] | null = null;
+  const rec = reconcile(path, { base: req.base, trust: { kind: "git-ref", ref: req.base, pinnedCommit: req.base }, requireAttestation: true }, hooks, (all) => (allFindings = all));
   if (!rec.ok) return { ok: false, ...(rec.context ? { context: rec.context } : {}), error: rec.error };
+  if (!allFindings) return { ok: false, error: { code: "STORE_ERROR", message: "the reconciliation produced no findings list" } };
+  const afterReconcile = moved("after the history and claims were checked");
+  if (afterReconcile) return afterReconcile;
+  const baseContext = baseClaimContext(root, rec.data);
 
-  // 4. Runs: captured here (bound to the identity read in step 1), and imported claims.
+  // 4. Runs. A report is admitted as host-observed only with the identity the HOST read before the
+  //    tests ran (`before`), and only if the candidate still has exactly that identity: an old
+  //    report cannot be rebound to new source. A report without it is captured as a claim.
   const captured: TestRunRecord[] = [];
+  const claimHost: TestRunHost = { principalId: host.principalId, permissions: [] };
   for (const [i, j] of (req.junit ?? []).entries()) {
-    const c = captureTestRun(path, j.report, { root: j.root, runner: j.runner, invocation: j.invocation, before: first.data.digest }, host, hooks);
+    const bound = typeof j.before === "string";
+    const c = captureTestRun(path, j.report, { root: j.root, runner: j.runner, invocation: j.invocation, ...(bound ? { before: j.before } : {}) }, bound ? host : claimHost, hooks);
     if (!c.ok) return { ok: false, ...(c.context ? { context: c.context } : {}), error: { ...c.error, message: `report ${i}: ${c.error.message}` } };
     captured.push(c.data);
   }
@@ -292,21 +331,132 @@ export function preMergeGate(path: string, req: GateRequest, host: TestRunHost, 
   // 5. Criteria and their results; batched by ID if the full report had to be cut.
   const crit = criteriaAll(path, runs, req.coverage, hooks);
   if (!crit.ok) return crit;
+  const afterCriteria = moved("after the criteria and test results were read");
+  if (afterCriteria) return afterCriteria;
 
-  // 6. Agent observations, checked against this candidate; then the identity again.
+  // 6. Agent observations, checked against this candidate; then every input again.
   return observed(path, hooks, (obs) => {
     const index = buildIndex(obs.model);
     const verified = (observations?.observations ?? []).map((o) => verifyObservation(o, obs.status.root, index, crit.data, runs as TestRunRecord[]));
-    const { candidate } = candidateIdentityOf(obs);
-    const digest = identityDigest(candidate);
-    if (digest !== first.data.digest) {
-      return { ok: false, error: { code: "STATE_CHANGED", message: "the candidate changed while the gate was reading it (source, claims or model); run the gate again" } } as ProposalResult<GateReport>;
-    }
-    const report = decide(rec.data, crit.data, verified, pol, digest);
+    const report = decide(rec.data, allFindings!, crit.data, verified, pol, first.data.identity, baseContext);
     const bounded = fitBudget(redact(report, root));
     if (!bounded) return { ok: false, error: { code: "REPORT_TOO_LARGE", message: `the gate report exceeds ${GATE_LIMITS.bytes} bytes even with every list cut` } } as ProposalResult<GateReport>;
-    return finish(obs, hooks, bounded, { key: digest, again: () => identityDigest(candidateIdentityOf(obs).candidate) });
+    return finish(obs, hooks, bounded, { key: first.data.key, again: () => snapshotKey(obs, cited) });
   });
+}
+
+/** Repository paths whose bytes the decision depends on beyond the candidate identity. */
+function citedPaths(observations: z.infer<typeof observationsSchema> | null, policyAtBase: string | undefined): string[] {
+  const out = new Set<string>();
+  for (const o of observations?.observations ?? []) {
+    for (const l of o.locations) if (!pathProblem(l.path)) out.add(l.path);
+    for (const t of o.tests) if (!pathProblem(t.path)) out.add(t.path);
+  }
+  if (policyAtBase) out.add(policyAtBase);
+  return [...out].sort();
+}
+
+function snapshotNow(path: string, cited: string[], hooks: ProposalHooks): ProposalResult<{ key: string; identity: string; root: string }> {
+  return observed(path, hooks, (obs) => {
+    const key = snapshotKey(obs, cited);
+    return finish(obs, hooks, { key, identity: identityDigest(candidateIdentityOf(obs).candidate), root: obs.status.root }, { key, again: () => snapshotKey(obs, cited) });
+  });
+}
+
+/**
+ * The candidate identity (commit, uncommitted and bound bytes, model revision, claims), plus the
+ * bytes of every file in the .vcv/ store (revisions, change records, attestations, the trust list:
+ * the integrity check's inputs) and of every cited path, ignored files included.
+ */
+function snapshotKey(obs: Observation, cited: string[]): string {
+  return canonicalJson([identityDigest(candidateIdentityOf(obs).candidate), storeDigest(obs.status.storeDir), worktreeState(obs.status.root, cited).digest]);
+}
+
+/** sha256 over every entry under the store directory: path, type, and bytes (or link text). */
+function storeDigest(dir: string): string {
+  const h = createHash("sha256");
+  let files = 0;
+  const walk = (abs: string, rel: string) => {
+    let names: string[];
+    try {
+      names = readdirSync(abs).sort();
+    } catch {
+      h.update(`unreadable-dir\0${rel}\0`);
+      return;
+    }
+    for (const n of names) {
+      const a = join(abs, n);
+      const r = rel ? `${rel}/${n}` : n;
+      if (++files > GATE_LIMITS.storeFiles) {
+        h.update(`too-many\0`);
+        return;
+      }
+      let st;
+      try {
+        st = lstatSync(a);
+      } catch {
+        h.update(`unreadable\0${r}\0`);
+        continue;
+      }
+      if (st.isDirectory()) walk(a, r);
+      else if (st.isSymbolicLink()) h.update(`link\0${r}\0${safeReadlink(a)}\0`);
+      else if (st.isFile()) h.update(`file\0${r}\0${st.size}\0${fileSha(a)}\0`);
+      else h.update(`other\0${r}\0`);
+    }
+  };
+  walk(dir, "");
+  return h.digest("hex");
+}
+const safeReadlink = (a: string) => {
+  try {
+    return readlinkSync(a);
+  } catch {
+    return "unreadable";
+  }
+};
+const fileSha = (a: string) => {
+  const b = boundedRead(a, 64 * 1024 * 1024);
+  return b ? createHash("sha256").update(b).digest("hex") : "unreadable";
+};
+
+type BaseContext = { objects: Set<Id>; complete: boolean; problem: string | null };
+
+/**
+ * What the protected base's claims say the change touches (M4.4 review): objects whose base-side
+ * claims point into a changed file, or whose claims the candidate removed or reasserted. Removing a
+ * claim must not take its object out of the policy's scope.
+ */
+function baseClaimContext(root: string, rec: Reconciliation): BaseContext {
+  const objects = new Set<Id>();
+  const changed = new Set(rec.source.files.map((f) => f.path));
+  const mb = rec.base.mergeBase;
+  const dir = ".vcv/bindings";
+  let complete = !rec.source.truncated;
+  let problem: string | null = rec.source.truncated ? "the changed-file list was cut" : null;
+  const files = filesAtCommit(root, mb, dir);
+  const touchedIds = new Set(rec.bindings.items.filter((b) => b.atBase === "removed" || b.atBase === "reasserted").map((b) => b.bindingId));
+  if (rec.bindings.truncated) {
+    complete = false;
+    problem = "the claim list was cut";
+  }
+  for (const rel of files) {
+    if (!rel.startsWith(`${dir}/`) || !rel.endsWith(".json") || rel.slice(dir.length + 1).includes("/")) continue;
+    const id = rel.slice(dir.length + 1, -".json".length);
+    const bytes = fileAtCommit(root, mb, rel, MAX_CLAIM_BYTES);
+    let claim: { modelObjectId?: unknown; locator?: { path?: unknown } } | null = null;
+    try {
+      claim = bytes ? JSON.parse(bytes.toString("utf8")) : null;
+    } catch {
+      claim = null;
+    }
+    if (!claim || typeof claim.modelObjectId !== "string" || typeof claim.locator?.path !== "string") {
+      complete = false;
+      problem = `claim ${id} at the merge base cannot be read`;
+      continue;
+    }
+    if (changed.has(claim.locator.path) || touchedIds.has(id)) objects.add(claim.modelObjectId);
+  }
+  return { objects, complete, problem };
 }
 
 function notReady(path: string, req: GateRequest, message: string): ProposalResult<GateReport> {
@@ -345,12 +495,6 @@ function notReady(path: string, req: GateRequest, message: string): ProposalResu
   return { ok: true, context, data: fitBudget(redact(report, root))! };
 }
 
-function identityNow(path: string, hooks: ProposalHooks): ProposalResult<{ digest: string; root: string }> {
-  return observed(path, hooks, (obs) => {
-    const d = identityDigest(candidateIdentityOf(obs).candidate);
-    return finish(obs, hooks, { digest: d, root: obs.status.root }, { key: d, again: () => identityDigest(candidateIdentityOf(obs).candidate) });
-  });
-}
 
 type ResolvedPolicy = { policy: GatePolicy; source: string; digest: string; changedByCandidate: boolean };
 
@@ -363,7 +507,14 @@ function policyOf(root: string, req: GateRequest): ResolvedPolicy | { error: Pro
   if (req.policy !== undefined) return parse(req.policy, "the host");
   if (req.policyAtBase === undefined) return { policy: DEFAULT_POLICY, source: "default", digest: sha256(canonicalJson(DEFAULT_POLICY)), changedByCandidate: false };
   const rel = req.policyAtBase;
-  const atBase = fileAtCommit(root, req.base, rel, GATE_LIMITS.policyBytes);
+  // Only real absence means "no policy": an oversized, non-file or unreadable entry is an error,
+  // never a silent fallback to the defaults.
+  const entry = entryAtCommit(root, req.base, rel);
+  if (entry === null) return { error: { code: "POLICY_INVALID", message: `${rel} at the base cannot be read from Git` } };
+  if (entry.kind === "other") return { error: { code: "POLICY_INVALID", message: `${rel} at the base is not a regular file (mode ${entry.mode})` } };
+  if (entry.kind === "blob" && entry.size > GATE_LIMITS.policyBytes) return { error: { code: "POLICY_INVALID", message: `${rel} at the base is ${entry.size} bytes, more than the ${GATE_LIMITS.policyBytes} read` } };
+  const atBase = entry.kind === "blob" ? fileAtCommit(root, req.base, rel, GATE_LIMITS.policyBytes) : null;
+  if (entry.kind === "blob" && atBase === null) return { error: { code: "POLICY_INVALID", message: `${rel} at the base cannot be read from Git` } };
   const now = readCandidate(root, rel);
   const changed = now === "unreadable" || (atBase === null ? now !== null : now === null || !atBase.equals(now));
   if (atBase === null) {
@@ -382,11 +533,28 @@ function policyOf(root: string, req: GateRequest): ResolvedPolicy | { error: Pro
 function readCandidate(root: string, rel: string): Buffer | null | "unreadable" {
   const where = resolveInside(root, rel);
   if (!where.ok) return where.reason === "missing" && !where.unreadable ? null : "unreadable";
+  return boundedRead(where.abs, GATE_LIMITS.policyBytes) ?? "unreadable";
+}
+
+/** A regular file of at most `max` bytes, opened nonblocking and without following a final link; null otherwise. */
+function boundedRead(abs: string, max: number): Buffer | null {
+  let fd: number;
   try {
-    if (statSync(where.abs).size > GATE_LIMITS.policyBytes) return "unreadable";
-    return readFileSync(where.abs);
+    fd = openSync(abs, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | (fsConstants.O_NONBLOCK ?? 0));
   } catch {
-    return "unreadable";
+    return null;
+  }
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile() || st.size > max) return null;
+    const buf = Buffer.alloc(max + 1);
+    let n = 0;
+    for (let r; n <= max && (r = readSync(fd, buf, n, max + 1 - n, null)) > 0; ) n += r;
+    return n > max ? null : buf.subarray(0, n);
+  } catch {
+    return null;
+  } finally {
+    closeSync(fd);
   }
 }
 
@@ -416,6 +584,8 @@ function allCriterionIds(path: string, hooks: ProposalHooks): ProposalResult<Id[
 
 function verifyObservation(o: z.infer<typeof observationsSchema>["observations"][number], root: string, index: ReturnType<typeof buildIndex>, crit: CriteriaReport, runs: TestRunRecord[]): VerifiedObservation {
   const problems: string[] = [];
+  /** References VCV could not check: never called verified. */
+  const unchecked: string[] = [];
   const objects = [...new Set(o.objects)].map((id) => {
     const hit = index.byId.get(id);
     if (!hit) problems.push(`${id} is not an object of the candidate's model`);
@@ -434,8 +604,9 @@ function verifyObservation(o: z.infer<typeof observationsSchema>["observations"]
     }
     if (l.startLine === undefined && l.endLine === undefined) return out;
     try {
-      if (statSync(where.abs).size > GATE_LIMITS.lineCheckBytes) return { ...out, check: "not-checked" as const };
-      const text = readFileSync(where.abs, "utf8");
+      const bytes = boundedRead(where.abs, GATE_LIMITS.lineCheckBytes);
+      if (!bytes) return { ...out, check: "not-checked" as const };
+      const text = bytes.toString("utf8");
       const lines = text.length === 0 ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
       const last = Math.max(l.startLine ?? 0, l.endLine ?? 0);
       const inRange = last <= lines && (l.startLine === undefined || l.endLine === undefined || l.startLine <= l.endLine);
@@ -448,13 +619,20 @@ function verifyObservation(o: z.infer<typeof observationsSchema>["observations"]
   const mapped = new Set(crit.tests.map((t) => `${t.test.path}\0${t.test.name}`));
   const fresh = new Set(crit.runs.filter((r) => r.fresh).map((r) => r.index));
   const tests = o.tests.map((t) => {
+    // The cited test case must exist in the candidate, whether or not any run is available.
+    const res = pathProblem(t.path) ? null : resolveLocator(root, { path: t.path, selector: { kind: "test", name: t.name } });
+    const check: VerifiedObservation["tests"][number]["check"] = !res ? "unsafe" : res.state === "resolved" ? "ok" : res.state === "ambiguous" ? "ambiguous" : res.state === "missing" ? "missing" : "not-checked";
+    if (check === "unsafe") problems.push(`${cut(t.path, 200)} is not a portable repository path`);
+    else if (check === "missing" || check === "ambiguous") problems.push(`test case "${cut(t.name, 200)}" in ${cut(t.path, 200)}: ${cut(res!.detail, 300)}`);
+    else if (check === "not-checked") unchecked.push(`test case "${cut(t.name, 200)}" in ${cut(t.path, 200)}: ${cut(res!.detail, 300)}`);
     const k = caseKey(t.path, t.name);
     const statuses = runs.flatMap((r, i) => (fresh.has(i) ? r.cases.filter((c) => c.key === k).map((c) => c.status) : []));
     const anyFresh = fresh.size > 0;
     const result = statuses.length > 1 ? ("ambiguous" as const) : statuses.length === 1 ? statuses[0]! : anyFresh ? ("not-run" as const) : null;
     if (anyFresh && !statuses.length) problems.push(`test case "${cut(t.name, 200)}" in ${cut(t.path, 200)} is in no fresh run`);
-    return { path: t.path, name: cut(t.name, 300), mapped: mapped.has(`${t.path}\0${t.name}`), result };
+    return { path: t.path, name: cut(t.name, 300), check, mapped: mapped.has(`${t.path}\0${t.name}`), result };
   });
+  for (const l of locations) if (l.check === "not-checked") unchecked.push(`${cut(l.path, 200)}: the cited lines could not be checked (unreadable or larger than ${GATE_LIMITS.lineCheckBytes} bytes)`);
   const invalid = problems.length > 0;
   const unsupported = o.kind === "contradiction" && o.locations.length === 0;
   if (unsupported) problems.push("a contradiction must cite at least one source location");
@@ -468,8 +646,8 @@ function verifyObservation(o: z.infer<typeof observationsSchema>["observations"]
     objects,
     locations,
     tests,
-    references: invalid ? "invalid" : unsupported ? "unsupported" : "verified",
-    problems: problems.slice(0, 20).map((p) => cut(p, 500)),
+    references: invalid ? "invalid" : unsupported ? "unsupported" : unchecked.length ? "not-checked" : "verified",
+    problems: [...problems, ...unchecked].slice(0, 20).map((p) => cut(p, 500)),
   };
 }
 
@@ -477,7 +655,7 @@ function verifyObservation(o: z.infer<typeof observationsSchema>["observations"]
 
 const BINDING_CODES = new Set(["CLAIM_STALE", "LOCATOR_MISSING", "LOCATOR_AMBIGUOUS", "CLAIM_INVALID", "CLAIM_REMOVED", "CLAIM_DISPUTED"]);
 
-function decide(rec: Reconciliation, crit: CriteriaReport, observations: VerifiedObservation[], pol: ResolvedPolicy, digest: string): GateReport {
+function decide(rec: Reconciliation, findings: ReconcileFinding[], crit: CriteriaReport, observations: VerifiedObservation[], pol: ResolvedPolicy, digest: string, baseContext: BaseContext): GateReport {
   const p = pol.policy;
   const reasons: GateReason[] = [];
   const add = (severity: GateSeverity | "off", r: Omit<GateReason, "severity">) => {
@@ -492,9 +670,9 @@ function decide(rec: Reconciliation, crit: CriteriaReport, observations: Verifie
     add("block", { code: "INTEGRITY_FAILED", rule: "integrity", basis: "checked", message: `${rec.model.integrity.errorsTotal - rec.model.integrity.errors.length} more integrity errors (list cut)` });
   }
 
-  // Reconciliation findings.
-  const listed = (cat: string) => rec.findings.filter((f) => f.category === cat).length;
-  for (const f of rec.findings) {
+  // Reconciliation findings: every one of them, before the report's lists are cut, so adding
+  // lower-severity findings can never push a blocking one out of view.
+  for (const f of findings) {
     const base = findingReason(f);
     if (f.category === "structural") add(p.structural, { ...base, rule: "structural" });
     else if (f.category === "binding" && BINDING_CODES.has(f.code)) add(f.related ? p.bindings.related : p.bindings.unrelated, { ...base, rule: f.related ? "bindings.related" : "bindings.unrelated" });
@@ -502,8 +680,6 @@ function decide(rec: Reconciliation, crit: CriteriaReport, observations: Verifie
     else if (f.category === "unsupported") add(p.unsupported, { ...base, rule: "unsupported" });
     else if (f.code === "BASE_NOT_CONTAINED") add(p.baseNotContained, { ...base, rule: "baseNotContained" });
   }
-  const hiddenStructural = rec.summary.structural - listed("structural");
-  if (hiddenStructural > 0) add(p.structural, { code: "CLAIM_ON_MISSING_OBJECT", rule: "structural", basis: "checked", message: `${hiddenStructural} more structural contradictions (the findings list was cut)` });
   if (!rec.bindings.available) {
     add("block", { code: "BINDINGS_UNAVAILABLE", rule: "integrity", basis: "not-checked", message: `the claim store cannot be read${rec.bindings.problem ? `: ${rec.bindings.problem}` : ""}; no claim or mapping can be assessed` });
   }
@@ -513,7 +689,7 @@ function decide(rec: Reconciliation, crit: CriteriaReport, observations: Verifie
   if (crit.counts.criteria === 0) add(p.noCriteria, { code: "NO_CRITERIA", rule: "noCriteria", basis: "observed", message: "the approved model has no acceptance criteria, so test evidence gates nothing" });
   if (crit.truncated) add("block", { code: "CRITERIA_NOT_ALL_ASSESSED", rule: "integrity", basis: "not-checked", message: `${crit.total - criteria.length} criteria could not be assessed within the report limits` });
   for (const c of criteria) {
-    const set = c.verification === "required" ? p.required : p.optional;
+    const set = c.verification === "required" ? REQUIRED_EVIDENCE : p.optional;
     const prefix = c.verification;
     if (c.result === "passed") {
       if (c.resultObservedBy !== "host") add(set.claimed, { code: "RESULT_CLAIMED", rule: `${prefix}.claimed`, basis: "claim", criterionId: c.id, objectIds: c.verifies, message: `${c.id} (${prefix}) passed only in runs that were not captured here: a claim, not host-observed evidence` });
@@ -540,9 +716,12 @@ function decide(rec: Reconciliation, crit: CriteriaReport, observations: Verifie
     const what = b.atBase === "removed" ? "was removed" : b.atBase === "added" ? "was added" : b.atBase === "reasserted" ? "was reasserted" : "is unchanged, but its test file changed";
     add(p.mappingChanged, { code: "MAPPING_CHANGED", rule: "mappingChanged", basis: "observed", criterionId: b.modelObjectId, objectIds: [b.modelObjectId], bindingId: b.bindingId, message: `the mapping ${b.bindingId} of ${b.modelObjectId} (${b.locator ?? "?"}) ${what} in this candidate; mappings change without approval, so check the test still checks the criterion` });
   }
+  if (rec.bindings.truncated && p.mappingChanged !== "off") {
+    add(p.mappingChanged, { code: "MAPPING_CHANGED", rule: "mappingChanged", basis: "not-checked", message: `the claim list was cut at ${rec.bindings.items.length} of ${rec.bindings.total}; mappings beyond it may have changed` });
+  }
 
   // Objects the policy says need evidence whenever a change touches them.
-  const touched = touchedObjects(rec);
+  const touched = touchedObjects(rec, baseContext);
   for (const r of p.requireEvidence) {
     if (!touched.all && !touched.ids.has(r.object)) continue;
     // Every criterion is assessed here (a cut criteria list blocks above), so this sees all of them.
@@ -562,7 +741,7 @@ function decide(rec: Reconciliation, crit: CriteriaReport, observations: Verifie
   // Agent observations: claims, checked for what they cite.
   for (const o of observations) {
     if (o.references !== "verified") {
-      add(p.observations.invalidReferences, { code: o.references === "unsupported" ? "OBSERVATION_WITHOUT_LOCATION" : "OBSERVATION_REFERENCES_INVALID", rule: "observations.invalidReferences", basis: "claim", observationId: o.id, message: `${o.id}: ${o.problems.join("; ")}` });
+      add(p.observations.invalidReferences, { code: o.references === "unsupported" ? "OBSERVATION_WITHOUT_LOCATION" : o.references === "not-checked" ? "OBSERVATION_REFERENCES_NOT_CHECKED" : "OBSERVATION_REFERENCES_INVALID", rule: "observations.invalidReferences", basis: "claim", observationId: o.id, message: `${o.id}: ${o.problems.join("; ")}` });
     }
     if (o.kind === "note") continue;
     add(p.observations[o.kind], {
@@ -640,8 +819,10 @@ function codeFor(result: CriterionEvidence["result"], status: string | null): st
 }
 
 /** Objects the change touches: the model delta and its impact, and the source impact's declared context. */
-function touchedObjects(rec: Reconciliation): { ids: Set<Id>; all: boolean } {
-  const ids = new Set<Id>();
+function touchedObjects(rec: Reconciliation, baseContext: BaseContext): { ids: Set<Id>; all: boolean } {
+  // The base side too: an object whose base claims pointed into changed code, or whose claims were
+  // removed or reasserted, stays in scope after its claims are gone.
+  const ids = new Set<Id>(baseContext.objects);
   for (const c of rec.model.delta.changes) ids.add(c.id);
   const imp = rec.model.impact;
   if (imp) {
@@ -654,7 +835,7 @@ function touchedObjects(rec: Reconciliation): { ids: Set<Id>; all: boolean } {
     for (const x of [...s.seeds.map((v) => v.objectId), ...s.modules.map((v) => v.id), ...s.contracts.map((v) => v.id), ...s.rules.map((v) => v.id), ...s.candidates.map((v) => v.id)]) ids.add(x);
   }
   // A cut list may hide a touched object: then every required-evidence object counts as touched.
-  const all = rec.model.delta.truncated || !!imp?.truncated || !!s?.truncated || s?.seedsTotal !== undefined && s.seedsTotal > s.seeds.length || (!rec.bindings.available && rec.summary.changedFiles > 0);
+  const all = !baseContext.complete || rec.model.delta.truncated || !!imp?.truncated || !!s?.truncated || s?.seedsTotal !== undefined && s.seedsTotal > s.seeds.length || (!rec.bindings.available && rec.summary.changedFiles > 0);
   return { ids, all };
 }
 
