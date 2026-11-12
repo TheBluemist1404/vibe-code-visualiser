@@ -53,3 +53,4 @@ jobs:
       - run: |
           examples/reference-app/premerge/setup.sh "$RUNNER_TEMP/premerge"
           examples/reference-app/premerge/scenarios.sh "$RUNNER_TEMP/premerge" "$RUNNER_TEMP/premerge-out"
+          examples/reference-app/premerge/selfcheck.sh "$RUNNER_TEMP/premerge" "$RUNNER_TEMP/premerge-selfcheck"

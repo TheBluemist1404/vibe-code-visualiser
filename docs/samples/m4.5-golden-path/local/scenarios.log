@@ -10,6 +10,13 @@ gate exit 1: vcv gate: BLOCK: blocked: 5 blocking reasons (crt-confirmation-noti
 == fixed: a later commit restores the announcement
 gate exit 0: vcv gate: PASS: passed: 2/2 required criteria passed, host-observed
   expected exit 0: ok
+== stale-report: a report left from an earlier run is never reused
+gate exit 1: vcv gate: BLOCK: blocked: 3 blocking reasons (crt-confirmation-notified, crt-rejection-notified, EVIDENCE_REQUIRED)
+  expected exit 1: ok
+  old report not reused: ok
+gate exit 1: vcv gate: BLOCK: blocked: 4 blocking reasons (crt-confirmation-notified, crt-rejection-notified, crt-rejection-notified, …)
+  expected exit 1: ok
+  new failing report used: ok
 == harmless: a comment-only edit of a bound file
 gate exit 0: vcv gate: PASS: passed: 2/2 required criteria passed, host-observed
   expected exit 0: ok
@@ -34,35 +41,37 @@ gate exit 0: vcv gate: WARN: passed with 6 warnings: 2/2 required criteria passe
 == negatives
 1 broken code + agent-supplied passing record              exit 1: vcv gate: BLOCK: blocked: 3 blocking reasons (crt-confirmation-notified, crt-rejection-notified, EVIDENCE_REQUIRED)
 2 relabelled record (observedBy: host)                     exit 2: ✗ RUN_INVALID: run 0: the record's digest does not match its content (edited after capture?)
-3 main's report with main's identity, on the broken commit exit 2: ✗ TEST_RUN_RACED: report 0: the candidate changed between testIdentity (7464cf2b9ce7) and capture (35826bff1c0a); the report may describe neither. Run the tests again
+3 main's report with main's identity, on the broken commit exit 2: ✗ TEST_RUN_RACED: report 0: the candidate changed between testIdentity (0d46ca03fd0b) and capture (7b349073d39e); the report may describe neither. Run the tests again
 4 main's report without a pre-run identity                 exit 1: vcv gate: BLOCK: blocked: 3 blocking reasons (crt-confirmation-notified, crt-rejection-notified, EVIDENCE_REQUIRED)
 5 revision file edited in place (no proposal, no approval) exit 1: vcv gate: BLOCK: blocked: the candidate's model cannot be loaded (PROJECT_NOT_READY)
 6 candidate relaxes .github/vcv-policy.json                exit 1: vcv gate: BLOCK: blocked: 4 blocking reasons (crt-confirmation-notified, crt-rejection-notified, crt-rejection-notified, …)
 7 intended change, proposal pending (see intent/)          exit 1: vcv gate: BLOCK: blocked: 4 blocking reasons (crt-confirmation-notified, crt-rejection-notified, crt-rejection-notified, …)
 8 behaviour change + remapped tests, no model change       exit 0: vcv gate: WARN: passed with 9 warnings: 2/2 required criteria passed, host-observed
 == merge: old base, candidate and a simulated merge, without regeneration
--- main (088ac36)
+-- main (cb1a5d7)
 project: ready (<repo>/.vcv)
 model:   prj-course-desk at rev-3-bd922e630c6e [approved], 3 revision(s)
-git:     main 088ac36f8c01, clean
+git:     main cb1a5d7301cb, clean
 integrity: ok (prj-course-desk at rev-3-bd922e630c6e)
-  base:  088ac36f8c018167159d2d285cdeaafa6d927cc8 088ac36f8c01 at rev-3-bd922e630c6e
-  trust: .vcv/reviewers.json at 088ac36f8c018167159d2d285cdeaafa6d927cc8 (088ac36f8c01), 1 reviewer(s); commit 088ac36f8c018167159d2d285cdeaafa6d927cc8 at 088ac36f8c01: a local ref, not pinned; anyone with a shell here can create or move it; branch protection is asserted by whoever chose this anchor, not verified by Git
--- code-first/quiet-rejections (8168685)
+  base:  cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2 cb1a5d7301cb at rev-3-bd922e630c6e
+  trust: .vcv/reviewers.json at cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2 (cb1a5d7301cb), 1 reviewer(s); commit cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2 at cb1a5d7301cb: a local ref, not pinned; anyone with a shell here can create or move it; branch protection is asserted by whoever chose this anchor, not verified by Git
+-- code-first/quiet-rejections (987e690)
 project: ready (<repo>/.vcv)
 model:   prj-course-desk at rev-3-bd922e630c6e [approved], 3 revision(s)
-git:     code-first/quiet-rejections 8168685d64c1, clean
+git:     code-first/quiet-rejections 987e69007c45, clean
 integrity: ok (prj-course-desk at rev-3-bd922e630c6e)
-  base:  088ac36f8c018167159d2d285cdeaafa6d927cc8 088ac36f8c01 at rev-3-bd922e630c6e
-  trust: .vcv/reviewers.json at 088ac36f8c018167159d2d285cdeaafa6d927cc8 (088ac36f8c01), 1 reviewer(s); commit 088ac36f8c018167159d2d285cdeaafa6d927cc8 at 088ac36f8c01: a local ref, not pinned; anyone with a shell here can create or move it; branch protection is asserted by whoever chose this anchor, not verified by Git
--- simulated merge of code-first/quiet-rejections into main (0eedf1b)
+  base:  cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2 cb1a5d7301cb at rev-3-bd922e630c6e
+  trust: .vcv/reviewers.json at cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2 (cb1a5d7301cb), 1 reviewer(s); commit cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2 at cb1a5d7301cb: a local ref, not pinned; anyone with a shell here can create or move it; branch protection is asserted by whoever chose this anchor, not verified by Git
+-- simulated merge of code-first/quiet-rejections into main (27c647e)
 project: ready (<repo>/.vcv)
 model:   prj-course-desk at rev-3-bd922e630c6e [approved], 3 revision(s)
-git:     simulated-merge 0eedf1b2a425, clean
+git:     simulated-merge 27c647e4b038, clean
 integrity: ok (prj-course-desk at rev-3-bd922e630c6e)
-  base:  088ac36f8c018167159d2d285cdeaafa6d927cc8 088ac36f8c01 at rev-3-bd922e630c6e
-  trust: .vcv/reviewers.json at 088ac36f8c018167159d2d285cdeaafa6d927cc8 (088ac36f8c01), 1 reviewer(s); commit 088ac36f8c018167159d2d285cdeaafa6d927cc8 at 088ac36f8c01: a local ref, not pinned; anyone with a shell here can create or move it; branch protection is asserted by whoever chose this anchor, not verified by Git
+  base:  cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2 cb1a5d7301cb at rev-3-bd922e630c6e
+  trust: .vcv/reviewers.json at cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2 (cb1a5d7301cb), 1 reviewer(s); commit cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2 at cb1a5d7301cb: a local ref, not pinned; anyone with a shell here can create or move it; branch protection is asserted by whoever chose this anchor, not verified by Git
 -- .vcv/ differences between main and the merge (none expected for a code-first fix)
-(end)
+(none)
+-- source differences between the candidate and the merge (none expected)
+(none)
 scenarios: 0 unexpected result(s)
-exit 0
+scen exit 0

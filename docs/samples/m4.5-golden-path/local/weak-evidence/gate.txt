@@ -1,6 +1,6 @@
 vcv gate: WARN: passed with 2 warnings: 2/2 required criteria passed, host-observed
-  candidate b927a78fe09f (code-first/error-wording) against base 088ac36f8c01; code-first change (1 file(s), 0 new model revision(s), lineage unchanged)
-  policy: .github/vcv-policy.json at the base (088ac36f8c01) (6b5096a4bad7)
+  candidate aa243f5966c0 (code-first/error-wording) against base cb1a5d7301cb; code-first change (1 file(s), 0 new model revision(s), lineage unchanged)
+  policy: .github/vcv-policy.json at the base (cb1a5d7301cb) (6b5096a4bad7)
   run 0: host-observed (captured here) vitest: 8 case(s), 8 passed, 0 failed, 0 error(s), 0 skipped; suite green
   ✓ crt-confirmation-notified [required] passed (host)  verifies rul-announce-every-decision, cap-enroll
   ✓ crt-rejection-notified [required] passed (host)  verifies rul-announce-every-decision, rul-seat-limit, cap-enroll

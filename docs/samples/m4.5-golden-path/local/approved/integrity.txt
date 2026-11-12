@@ -1,0 +1,14 @@
+integrity: ok (prj-course-desk at rev-4-d704dd46aee2)
+  base:  cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2 cb1a5d7301cb at rev-3-bd922e630c6e
+  trust: .vcv/reviewers.json at cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2 (cb1a5d7301cb), 1 reviewer(s); commit cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2 at cb1a5d7301cb: a local ref, not pinned; anyone with a shell here can create or move it; branch protection is asserted by whoever chose this anchor, not verified by Git
+  authorization: caller-asserted: ok means consistent and attested under the trust anchor given here; it authorizes a change only when that anchor (and --base) is supplied by the host from the hosting service's protected branch, in a check the change under review cannot edit
+  1. rev-1: initial; approval not-applicable (initial revision (created by init; provenance not provable))
+  2. rev-2-a21d7aa4915e: verified by chg-baseline; approval attested (signed by user:reviewer (key 1306c16d6bacd84e), trusted per .vcv/reviewers.json at cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2 (cb1a5d7301cb))
+  3. rev-3-bd922e630c6e: verified by chg-enrollment-criteria; approval attested (signed by user:reviewer (key 1306c16d6bacd84e), trusted per .vcv/reviewers.json at cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2 (cb1a5d7301cb))
+  4. rev-4-d704dd46aee2 (new): verified by chg-quiet-rejections; approval attested (signed by user:reviewer (key 1306c16d6bacd84e), trusted per .vcv/reviewers.json at cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2 (cb1a5d7301cb))
+  not provable here:
+    - An attestation proves that the holder of a trusted reviewer key signed this exact change; it does not prove which person held the key, or that the key was not shared or stolen.
+    - Trust is only as strong as its source. A trust list in the checkout under review can be changed by that same change; in CI, read it from the protected base branch (--trust-ref) and protect who may change it there. Git pins the commit the list was read from; it cannot prove that the branch is protected. An unpinned --trust-ref is a local name anyone with a shell in the checkout can create or move: rely on it only where the host provides the ref (a CI checkout), or pin it with --trust-commit.
+    - The initial revision has no recorded derivation: who created it, and from what, is not provable from the repository.
+    - Derivation replays the recorded typed operations; it says nothing about whether the source code implements the model (that is M4's reconciliation).
+    - The local audit log (.vcv/audit.jsonl) is not shared through Git and is not evidence here.

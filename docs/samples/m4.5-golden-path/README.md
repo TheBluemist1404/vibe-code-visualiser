@@ -45,7 +45,15 @@ The `npx vitest run` column shows what an ordinary CI would report. It is red on
 
 ## Local run and negative cases
 
-[local/](local/) holds a full `scenarios.sh` run of this checkout's VCV on a fresh fixture. It covers every step above plus the negatives that cannot be pull requests. The approval in that run is **simulated**: it uses the fixture's reviewer key and is labelled so in `approved/approval.txt`. [local/negatives/summary.txt](local/negatives/summary.txt) lists each negative case and its exit code:
+[local/](local/) holds a full `scenarios.sh` run of this checkout's VCV on a fresh fixture. It covers every step above plus the negatives that cannot be pull requests.
+
+The harness fails closed. Every required operation must succeed, or the run stops with exit 3 and never prints a success summary. Those operations are the edits, the Git steps, the proposal, the approval, the reassertions and the integrity checks. Each negative case must match its expected exit code and reason codes. The merge step asserts three things: the merged model equals the candidate's, `.vcv/` is unchanged, and the merged tree equals the candidate.
+
+The `stale-report` step leaves main's passing JUnit report in the output directory and then runs the broken commit twice:
+- with a runner that cannot start, it blocks with the required criteria unverified;
+- with the real, failing runner, it blocks with `TEST_FAILED` from the new report.
+
+[local/selfcheck.log](local/selfcheck.log) shows that a failed `git merge` and a failed approval each stop `scenarios.sh` with exit 3. The approval in that run is **simulated**: it uses the fixture's reviewer key and is labelled so in `approved/approval.txt`. [local/negatives/summary.txt](local/negatives/summary.txt) lists each negative case and its exit code:
 
 1. The broken code with an agent-supplied passing record: the gate **blocks**, because an agent's record is not host-observed.
 2. That record relabelled as host-observed: **refused** (exit 2), because the digest does not match.

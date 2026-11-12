@@ -3,17 +3,17 @@
   "decision": "block",
   "headline": "blocked: 4 blocking reasons (crt-confirmation-notified, crt-rejection-notified, crt-rejection-notified, …)",
   "base": {
-    "commit": "088ac36f8c018167159d2d285cdeaafa6d927cc8",
-    "mergeBase": "088ac36f8c018167159d2d285cdeaafa6d927cc8",
+    "commit": "cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2",
+    "mergeBase": "cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2",
     "containedInCandidate": true,
     "modelRevision": "rev-3-bd922e630c6e"
   },
   "candidate": {
-    "commit": "a9c443056274f9cb3b363280a9eebc958ba28d02",
+    "commit": "0f5f81a6f08c8f8db4084a6ccac6db662d771be9",
     "branch": "code-first/quiet-rejections",
     "dirty": false,
     "modelRevision": "rev-3-bd922e630c6e",
-    "identityDigest": "014f77c643b52920ce097470c19df2721e57062426088ea29a72bc6fe6ad133c"
+    "identityDigest": "2e573acf2becfc6c7a306530921dca51d64ba12f663e2a8e520487dcf32b890f"
   },
   "change": {
     "kind": "code-first",
@@ -22,7 +22,7 @@
     "introducedRevisions": 0
   },
   "policy": {
-    "source": ".github/vcv-policy.json at the base (088ac36f8c01)",
+    "source": ".github/vcv-policy.json at the base (cb1a5d7301cb)",
     "digest": "6b5096a4bad7e6a285593b491c7cdb5e1d5abb7027aa1980903a6f08c8ad64e9",
     "changedByCandidate": false,
     "effective": {
@@ -233,10 +233,10 @@
       "invocation": "npx vitest run --reporter=junit (job candidate-tests)",
       "report": {
         "format": "junit",
-        "sha256": "1c8d00debb6adf6e7c024b19dff2ab3522b605e2584621733347dc28ab10758c",
+        "sha256": "9bd70202c15af35b81a68bbddd2be8ec7496612552759774acee3cfa3e2c9b92",
         "bytes": 3363
       },
-      "digest": "a8426dd56b757d03e5efc8204fc5697a616a7610fe8d8d367ee598fa91cb9ac4",
+      "digest": "97f4a6f9a3d75cd8e3dd54e65969bc40af12087d0ee9c95f9e87ae9f3dec3303",
       "fresh": true,
       "staleBecause": [],
       "summary": {

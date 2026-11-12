@@ -1,25 +1,25 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<testsuites name="vitest tests" tests="8" failures="0" errors="0" time="0.211298228">
-    <testsuite name="src/enrollment/enrollment.service.spec.ts" timestamp="2026-11-12T15:12:26.447Z" hostname="vm" tests="4" failures="0" errors="0" skipped="0" time="0.075333724">
-        <testcase classname="src/enrollment/enrollment.service.spec.ts" name="EnrollmentService &gt; confirms an enrollment while seats are left and notifies the student" time="0.065214476">
+<testsuites name="vitest tests" tests="8" failures="0" errors="0" time="0.227671624">
+    <testsuite name="src/enrollment/enrollment.service.spec.ts" timestamp="2026-11-12T15:41:40.292Z" hostname="vm" tests="4" failures="0" errors="0" skipped="0" time="0.082780494">
+        <testcase classname="src/enrollment/enrollment.service.spec.ts" name="EnrollmentService &gt; confirms an enrollment while seats are left and notifies the student" time="0.072376267">
         </testcase>
-        <testcase classname="src/enrollment/enrollment.service.spec.ts" name="EnrollmentService &gt; rejects an enrollment into a full course without notifying the student" time="0.003063099">
+        <testcase classname="src/enrollment/enrollment.service.spec.ts" name="EnrollmentService &gt; rejects an enrollment into a full course without notifying the student" time="0.003545945">
         </testcase>
-        <testcase classname="src/enrollment/enrollment.service.spec.ts" name="EnrollmentService &gt; rejects a repeat enrollment without taking a second seat" time="0.002431828">
+        <testcase classname="src/enrollment/enrollment.service.spec.ts" name="EnrollmentService &gt; rejects a repeat enrollment without taking a second seat" time="0.002461533">
         </testcase>
-        <testcase classname="src/enrollment/enrollment.service.spec.ts" name="EnrollmentService &gt; refuses an unknown course without recording or notifying anything" time="0.003311328">
-        </testcase>
-    </testsuite>
-    <testsuite name="src/notifications/notifications.service.spec.ts" timestamp="2026-11-12T15:12:26.450Z" hostname="vm" tests="1" failures="0" errors="0" skipped="0" time="0.00643992">
-        <testcase classname="src/notifications/notifications.service.spec.ts" name="NotificationsService &gt; keeps each recipient&apos;s notifications separate, in order" time="0.002548854">
+        <testcase classname="src/enrollment/enrollment.service.spec.ts" name="EnrollmentService &gt; refuses an unknown course without recording or notifying anything" time="0.003028912">
         </testcase>
     </testsuite>
-    <testsuite name="test/app.e2e-spec.ts" timestamp="2026-11-12T15:12:26.450Z" hostname="vm" tests="3" failures="0" errors="0" skipped="0" time="0.129524584">
-        <testcase classname="test/app.e2e-spec.ts" name="Course Desk API (e2e) &gt; lists the seeded courses with free seats" time="0.080592689">
+    <testsuite name="src/notifications/notifications.service.spec.ts" timestamp="2026-11-12T15:41:40.294Z" hostname="vm" tests="1" failures="0" errors="0" skipped="0" time="0.003674472">
+        <testcase classname="src/notifications/notifications.service.spec.ts" name="NotificationsService &gt; keeps each recipient&apos;s notifications separate, in order" time="0.002334612">
         </testcase>
-        <testcase classname="test/app.e2e-spec.ts" name="Course Desk API (e2e) &gt; confirms, then rejects when full; only the confirmed student is notified" time="0.030753285">
+    </testsuite>
+    <testsuite name="test/app.e2e-spec.ts" timestamp="2026-11-12T15:41:40.295Z" hostname="vm" tests="3" failures="0" errors="0" skipped="0" time="0.141216658">
+        <testcase classname="test/app.e2e-spec.ts" name="Course Desk API (e2e) &gt; lists the seeded courses with free seats" time="0.090556201">
         </testcase>
-        <testcase classname="test/app.e2e-spec.ts" name="Course Desk API (e2e) &gt; answers 400 for an invalid request and 404 for unknown courses or enrollments" time="0.016862439">
+        <testcase classname="test/app.e2e-spec.ts" name="Course Desk API (e2e) &gt; confirms, then rejects when full; only the confirmed student is notified" time="0.033220849">
+        </testcase>
+        <testcase classname="test/app.e2e-spec.ts" name="Course Desk API (e2e) &gt; answers 400 for an invalid request and 404 for unknown courses or enrollments" time="0.015978299">
         </testcase>
     </testsuite>
 </testsuites>

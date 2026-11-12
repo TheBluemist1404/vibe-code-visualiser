@@ -3,17 +3,17 @@
   "decision": "pass",
   "headline": "passed: 2/2 required criteria passed, host-observed",
   "base": {
-    "commit": "088ac36f8c018167159d2d285cdeaafa6d927cc8",
-    "mergeBase": "088ac36f8c018167159d2d285cdeaafa6d927cc8",
+    "commit": "cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2",
+    "mergeBase": "cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2",
     "containedInCandidate": true,
     "modelRevision": "rev-3-bd922e630c6e"
   },
   "candidate": {
-    "commit": "088ac36f8c018167159d2d285cdeaafa6d927cc8",
+    "commit": "cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2",
     "branch": "main",
     "dirty": false,
     "modelRevision": "rev-3-bd922e630c6e",
-    "identityDigest": "7464cf2b9ce75f94a8f1c218be737fa483f65bdf6a4f973327ab7d655095162b"
+    "identityDigest": "0d46ca03fd0b783dc5fbe9d127986beebc1561aa9db136eba0cd529e7ba90543"
   },
   "change": {
     "kind": "no-change",
@@ -22,7 +22,7 @@
     "introducedRevisions": 0
   },
   "policy": {
-    "source": ".github/vcv-policy.json at the base (088ac36f8c01)",
+    "source": ".github/vcv-policy.json at the base (cb1a5d7301cb)",
     "digest": "6b5096a4bad7e6a285593b491c7cdb5e1d5abb7027aa1980903a6f08c8ad64e9",
     "changedByCandidate": false,
     "effective": {
@@ -133,10 +133,10 @@
       "invocation": "npx vitest run --reporter=junit (job candidate-tests)",
       "report": {
         "format": "junit",
-        "sha256": "552cbf6ab74531f1ea380369c22a350fd3b7f4e4ef99c0720dda8b5c55ba4654",
-        "bytes": 2327
+        "sha256": "69e05a2c15eecaee91f8ad0b02b495a29db5f1c8719a3a6d8fce748a49f794ac",
+        "bytes": 2326
       },
-      "digest": "6bdea390e0e85c4f9ec30a504fe9ff6ae3c3a8ab29905212b07b9c11b4556691",
+      "digest": "d2ad99a8fd56558ad01eed25b97a6785bc93945276526a4d695169d94e70a3da",
       "fresh": true,
       "staleBecause": [],
       "summary": {

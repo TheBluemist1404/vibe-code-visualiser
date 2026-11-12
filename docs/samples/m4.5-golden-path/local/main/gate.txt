@@ -1,6 +1,6 @@
 vcv gate: PASS: passed: 2/2 required criteria passed, host-observed
-  candidate 088ac36f8c01 (main) against base 088ac36f8c01; no-change change (0 file(s), 0 new model revision(s), lineage unchanged)
-  policy: .github/vcv-policy.json at the base (088ac36f8c01) (6b5096a4bad7)
+  candidate cb1a5d7301cb (main) against base cb1a5d7301cb; no-change change (0 file(s), 0 new model revision(s), lineage unchanged)
+  policy: .github/vcv-policy.json at the base (cb1a5d7301cb) (6b5096a4bad7)
   run 0: host-observed (captured here) vitest: 8 case(s), 8 passed, 0 failed, 0 error(s), 0 skipped; suite green
   ✓ crt-confirmation-notified [required] passed (host)  verifies rul-announce-every-decision, cap-enroll
   ✓ crt-rejection-notified [required] passed (host)  verifies rul-announce-every-decision, rul-seat-limit, cap-enroll

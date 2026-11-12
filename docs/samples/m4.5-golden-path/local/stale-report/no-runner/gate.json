@@ -1,0 +1,240 @@
+{
+  "format": "vcv-gate-1",
+  "decision": "block",
+  "headline": "blocked: 3 blocking reasons (crt-confirmation-notified, crt-rejection-notified, EVIDENCE_REQUIRED)",
+  "base": {
+    "commit": "cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2",
+    "mergeBase": "cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2",
+    "containedInCandidate": true,
+    "modelRevision": "rev-3-bd922e630c6e"
+  },
+  "candidate": {
+    "commit": "0f5f81a6f08c8f8db4084a6ccac6db662d771be9",
+    "branch": "negative/stale-report",
+    "dirty": false,
+    "modelRevision": "rev-3-bd922e630c6e",
+    "identityDigest": "525dd64d37667e940de4e97116a346823948e635d7f8e914df59c1a753753b14"
+  },
+  "change": {
+    "kind": "code-first",
+    "lineage": "unchanged",
+    "changedFiles": 1,
+    "introducedRevisions": 0
+  },
+  "policy": {
+    "source": ".github/vcv-policy.json at the base (cb1a5d7301cb)",
+    "digest": "6b5096a4bad7e6a285593b491c7cdb5e1d5abb7027aa1980903a6f08c8ad64e9",
+    "changedByCandidate": false,
+    "effective": {
+      "format": "vcv-policy-1",
+      "optional": {
+        "failed": "warn",
+        "stale": "warn",
+        "missing": "warn",
+        "unknown": "warn",
+        "unverified": "warn",
+        "claimed": "warn"
+      },
+      "structural": "block",
+      "bindings": {
+        "related": "warn",
+        "unrelated": "warn"
+      },
+      "coverage": "warn",
+      "unsupported": "warn",
+      "baseNotContained": "warn",
+      "mappingChanged": "warn",
+      "noCriteria": "warn",
+      "observations": {
+        "contradiction": "block",
+        "concern": "warn",
+        "invalidReferences": "warn"
+      },
+      "policyChanged": "warn",
+      "requireEvidence": [
+        {
+          "object": "rul-announce-every-decision",
+          "reason": "every enrollment decision must reach the student"
+        }
+      ]
+    }
+  },
+  "reasons": [
+    {
+      "severity": "block",
+      "code": "CRITERION_UNVERIFIED",
+      "rule": "required.unverified",
+      "basis": "checked",
+      "criterionId": "crt-confirmation-notified",
+      "objectIds": [
+        "rul-announce-every-decision",
+        "cap-enroll"
+      ],
+      "message": "crt-confirmation-notified (required) is unverified: no runs were supplied"
+    },
+    {
+      "severity": "block",
+      "code": "CRITERION_UNVERIFIED",
+      "rule": "required.unverified",
+      "basis": "checked",
+      "criterionId": "crt-rejection-notified",
+      "objectIds": [
+        "rul-announce-every-decision",
+        "rul-seat-limit",
+        "cap-enroll"
+      ],
+      "message": "crt-rejection-notified (required) is unverified: no runs were supplied"
+    },
+    {
+      "severity": "block",
+      "code": "EVIDENCE_REQUIRED",
+      "rule": "requireEvidence",
+      "basis": "checked",
+      "objectIds": [
+        "rul-announce-every-decision"
+      ],
+      "message": "rul-announce-every-decision is touched by this change and the policy requires a host-observed pass of a required criterion that verifies it (crt-confirmation-notified, crt-rejection-notified did not pass). every enrollment decision must reach the student"
+    },
+    {
+      "severity": "warn",
+      "code": "CLAIM_STALE",
+      "basis": "checked",
+      "message": "claim impl.cap-enroll (cap-enroll at server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll) is stale (code: the selected declaration's code differs from the recorded fingerprint). The code or object moved since the claim; whether it still does what the model says is for an agent or a person to judge",
+      "objectIds": [
+        "cap-enroll"
+      ],
+      "bindingId": "impl.cap-enroll",
+      "path": "server/src/enrollment/enrollment.service.ts",
+      "rule": "bindings.related"
+    },
+    {
+      "severity": "warn",
+      "code": "CLAIM_STALE",
+      "basis": "checked",
+      "message": "claim impl.rul-announce-every-decision (rul-announce-every-decision at server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll) is stale (code: the selected declaration's code differs from the recorded fingerprint). The code or object moved since the claim; whether it still does what the model says is for an agent or a person to judge",
+      "objectIds": [
+        "rul-announce-every-decision"
+      ],
+      "bindingId": "impl.rul-announce-every-decision",
+      "path": "server/src/enrollment/enrollment.service.ts",
+      "rule": "bindings.related"
+    },
+    {
+      "severity": "warn",
+      "code": "CLAIM_STALE",
+      "basis": "checked",
+      "message": "claim impl.rul-seat-limit (rul-seat-limit at server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll) is stale (code: the selected declaration's code differs from the recorded fingerprint). The code or object moved since the claim; whether it still does what the model says is for an agent or a person to judge",
+      "objectIds": [
+        "rul-seat-limit"
+      ],
+      "bindingId": "impl.rul-seat-limit",
+      "path": "server/src/enrollment/enrollment.service.ts",
+      "rule": "bindings.related"
+    },
+    {
+      "severity": "warn",
+      "code": "CRITERION_UNVERIFIED",
+      "rule": "optional.unverified",
+      "basis": "checked",
+      "criterionId": "crt-repeat-rejected",
+      "objectIds": [
+        "rul-no-double-enroll"
+      ],
+      "message": "crt-repeat-rejected (optional) is unverified: no runs were supplied"
+    }
+  ],
+  "reasonsTotal": 7,
+  "reasonsTruncated": false,
+  "counts": {
+    "block": 3,
+    "warn": 4
+  },
+  "criteria": {
+    "items": [
+      {
+        "id": "crt-confirmation-notified",
+        "verification": "required",
+        "result": "unverified",
+        "observedBy": null,
+        "verifies": [
+          "rul-announce-every-decision",
+          "cap-enroll"
+        ]
+      },
+      {
+        "id": "crt-rejection-notified",
+        "verification": "required",
+        "result": "unverified",
+        "observedBy": null,
+        "verifies": [
+          "rul-announce-every-decision",
+          "rul-seat-limit",
+          "cap-enroll"
+        ]
+      },
+      {
+        "id": "crt-repeat-rejected",
+        "verification": "optional",
+        "result": "unverified",
+        "observedBy": null,
+        "verifies": [
+          "rul-no-double-enroll"
+        ]
+      }
+    ],
+    "total": 3,
+    "truncated": false,
+    "results": {
+      "required": {
+        "passed": 0,
+        "failed": 0,
+        "stale": 0,
+        "missing": 0,
+        "unknown": 0,
+        "unverified": 2
+      },
+      "optional": {
+        "passed": 0,
+        "failed": 0,
+        "stale": 0,
+        "missing": 0,
+        "unknown": 0,
+        "unverified": 1
+      }
+    }
+  },
+  "runs": [],
+  "observations": [],
+  "observationsTruncated": false,
+  "reconciliation": {
+    "summary": {
+      "integrity": "ok",
+      "structural": 0,
+      "staleClaims": 3,
+      "locatorProblems": 0,
+      "removedClaims": 0,
+      "unboundObjects": 0,
+      "changedFiles": 1,
+      "unmappedFiles": 0,
+      "notChecked": 0,
+      "bindingsAssessed": true
+    },
+    "integrity": {
+      "ok": true,
+      "authorization": "caller-asserted: ok means consistent and attested under the trust anchor given here; it authorizes a change only when that anchor (and --base) is supplied by the host from the hosting service's protected branch, in a check the change under review cannot edit"
+    },
+    "findingsTotal": 4
+  },
+  "notes": [],
+  "budget": {
+    "limit": 524288,
+    "bytes": 8158,
+    "shrunk": false
+  },
+  "implementationChecked": false,
+  "limits": [
+    "A passing gate says the history is approved, the claims and the model agree where VCV can check them, and every required criterion's mapped test cases passed in a run captured here. It does not say those tests check the right thing: a mapping is an agent's or a person's claim.",
+    "Agent observations are interpretations. VCV checks that the objects, files, lines and test cases they cite exist; it never confirms or refutes what they say.",
+    "Tests were run by the host's own runner, outside VCV. A run is host-observed only when this process captured its report; how far that report can be trusted is how far the job that produced it can be."
+  ]
+}

@@ -1,6 +1,6 @@
 {
   "candidate": {
-    "commit": "b927a78fe09fc0a19a80e468f2498fd902a7aa4f",
+    "commit": "aa243f5966c08bff256af73aebaf707929559659",
     "branch": "code-first/error-wording",
     "uncommitted": {
       "paths": 0,
@@ -13,7 +13,7 @@
       "complete": true
     },
     "modelRevision": "rev-3-bd922e630c6e",
-    "claims": "2f03bd040cc593f27b6cd7806b508b201d76a2bc56b4f408b28ba090e046d027"
+    "claims": "39be4d3a2bd3560868d3f8da62a9a039744168f08e25bb862539edfa9d93cbef"
   },
-  "identityDigest": "8bfed03cc6ac1df0fd80cf4160dbfae65f9c6b31890c5c0e629703081db27237"
+  "identityDigest": "17a9b3956d8cd90e5e50842d438d38c9aebc479b6756092e94a0a63676e6b752"
 }

@@ -1,0 +1,3 @@
+npx: not available
+npx vitest run exited 127
+ci.sh: the runner wrote no JUnit report; this run is no test evidence

@@ -1,0 +1,4 @@
+selfcheck failed-merge: stopped with exit 3: ok (scenarios: FAILED at line 420: git -C "$repo" merge -q --no-ff -m "Merge $cand" "$cand")
+selfcheck failed-approval: stopped with exit 3: ok (scenarios: FAILED at line 282: scrub >> "$out/approved/approval.txt")
+selfcheck: ok
+sc exit 0

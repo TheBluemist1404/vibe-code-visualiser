@@ -34,14 +34,28 @@ before=$(json identityDigest < "$out/identity.json")
 [[ $before =~ ^[0-9a-f]{64}$ ]] || { echo "ci.sh: no identity" >&2; exit 2; }
 
 # 2. candidate-tests (the candidate's own runner; its exit code is not the decision)
+# Only a report written by this invocation is evidence. A report left in <out-dir> by an earlier run
+# is removed first, and the runner writes to a name that did not exist before it started; if it
+# writes nothing (it could not start, or crashed), there is no run and required criteria stay
+# unverified.
 junit=()
+rm -f "$out/junit.xml"
+[ ! -e "$out/junit.xml" ] || { echo "ci.sh: cannot clear $out/junit.xml" >&2; exit 2; }
 if [ "$tests" = 1 ]; then
-  (cd "$repo/server" && npx vitest run --reporter=default --reporter=junit --outputFile.junit="$out/junit.xml") > "$out/tests.raw" 2>&1
+  report="$out/junit.$$.$RANDOM.xml"
+  [ ! -e "$report" ] || { echo "ci.sh: $report already exists" >&2; exit 2; }
+  (cd "$repo/server" && npx vitest run --reporter=default --reporter=junit --outputFile.junit="$report") > "$out/tests.raw" 2>&1
   echo "npx vitest run exited $?" >> "$out/tests.raw"
+  if [ -s "$report" ]; then
+    mv "$report" "$out/junit.xml"
+    junit=(--junit "$out/junit.xml" --root server --runner vitest --invocation "npx vitest run --reporter=junit (job candidate-tests)" --before "$before")
+  else
+    rm -f "$report"
+    echo "ci.sh: the runner wrote no JUnit report; this run is no test evidence" >> "$out/tests.raw"
+  fi
   # The console summary as a developer sees it, without colour codes or timings.
-  sed -E 's/\x1b\[[0-9;]*m//g; s/ [0-9]+ms//g; s/\([0-9.]+m?s\)//g; /Start at|Duration/d; s|'"$out"'|<out>|g' "$out/tests.raw" | scrub > "$out/tests.txt"
+  sed -E 's/\x1b\[[0-9;]*m//g; s/ [0-9]+ms//g; s/\([0-9.]+m?s\)//g; /Start at|Duration/d; s|'"$out"'|<out>|g; s|<out>/junit\.[0-9]+\.[0-9]+\.xml|<out>/junit.xml|g' "$out/tests.raw" | scrub > "$out/tests.txt"
   rm "$out/tests.raw"
-  junit=(--junit "$out/junit.xml" --root server --runner vitest --invocation "npx vitest run --reporter=junit (job candidate-tests)" --before "$before")
 fi
 
 # 3. vcv-gate (trusted VCV; the candidate is data)
