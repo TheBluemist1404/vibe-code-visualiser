@@ -92,6 +92,9 @@ test("the server advertises the four read-only tools, their query-contract schem
       vcv_get_context: schemaOf(contextRequest),
       vcv_analyze_impact: schemaOf(impactRequest),
     };
+    // Every relation the snapshot emits, including the M4.2 criterion edge, is an accepted filter.
+    const ctxTool = tools.find((t) => t.name === "vcv_get_context")!;
+    assert.ok(JSON.stringify(ctxTool.inputSchema).includes('"verifies"'), "vcv_get_context accepts the verifies relation");
     for (const t of tools) {
       assert.deepEqual(t.inputSchema, expected[t.name], `${t.name} schema comes from @vcv/query`);
       assert.equal(t.annotations?.readOnlyHint, true);
@@ -197,7 +200,7 @@ test("bad queries return structured tool errors and the server keeps serving", a
     assert.deepEqual(manyKinds.error.details, [{ path: "kinds", message: "Too big: expected array to have <=12 items" }]);
     const manyRelations = await s.call("vcv_get_context", { id: "mod-enrollment", relations: Array(100_000).fill("consumes") });
     assert.ok(!manyRelations.ok && manyRelations.error.code === "INVALID_REQUEST");
-    assert.deepEqual(manyRelations.error.details, [{ path: "relations", message: "Too big: expected array to have <=19 items" }]);
+    assert.deepEqual(manyRelations.error.details, [{ path: "relations", message: "Too big: expected array to have <=20 items" }]);
     const allKinds = await s.call("vcv_search_objects", { text: "enrollment", kinds: ["actor", "module", "capability", "data", "attribute", "rule", "event", "contract", "behavior", "state", "transition"] });
     assert.ok(allKinds.ok, "a list of every kind once is within the cap");
 

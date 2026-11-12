@@ -76,8 +76,19 @@ vcv criteria . --json             # the full report (format vcv-criteria-1)
 ```
 
 For each criterion, the report gives its statement, policy and `verifies`, and every mapping as
-`verifyBinding` sees it now. `mapping` is `none`, `resolved` (every mapping resolves and is fresh),
-`partial`, `unresolved` or `unknown` (the claims could not be read). The problems are:
+`verifyBinding` sees it now. `mapping` is one of:
+
+- `resolved`: every readable mapping resolves and is fresh;
+- `partial`: some do;
+- `unresolved`: none does;
+- `none`: there is no mapping, and every claim file was read;
+- `unknown`: there is no readable mapping, but some claim files (or the whole store) could not be read.
+
+`assessment` is `complete` only when every claim file in `.vcv/bindings/` was read. An unreadable
+file is never attributed to a criterion by its name: binding IDs are arbitrary, and only the file's
+content says which object it is about. So one unreadable file makes every criterion's assessment
+`incomplete`. It is listed in the report-level `invalidClaims`, and `requiredNotResolved` counts
+every required criterion that is not both resolved and complete. The problems are:
 
 | Code | When |
 |---|---|
@@ -89,16 +100,30 @@ For each criterion, the report gives its statement, policy and `verifies`, and e
 | `MAPPING_NOT_CHECKED` | the mapping could not be checked (e.g. claimed at a revision from another branch) |
 | `DUPLICATE_MAPPING` | two claims map the same test case to the criterion |
 | `NOT_A_TEST_MAPPING` | a hand-written claim on the criterion that is not a test-case claim |
-| `MAPPING_INVALID` | a claim file about the criterion cannot be read, or the claim store cannot be read at all |
+| `MAPPING_INVALID` | a mapping does not verify, some claim file cannot be read (it may map this criterion), or the claim store cannot be read at all |
 
 The report also has a many-to-many `tests` index (each mapped test case and its criteria) and
-counts: `requiredUnmapped`, `requiredNotResolved`, `optionalUnmapped`. When `.vcv/bindings/` cannot
-be read, `mappingsAvailable` is false and every criterion is `unknown`, never `none`.
+counts: `requiredUnmapped`, `requiredNotResolved`, `requiredIncomplete`, `optionalUnmapped`. When
+`.vcv/bindings/` cannot be read, `mappingsAvailable` is false and every criterion is `unknown`,
+never `none`.
 
 The read is one observation: if the store, a claim file or a mapped test file changes while it
-runs, the answer is `STATE_CHANGED`. Lists are bounded (200 criteria, 50 mappings each, 500 tests).
-Long test names are cut to 300 characters, with the sha256 of the full name. The checkout's path
-never appears.
+runs, the answer is `STATE_CHANGED`.
+
+Every list is bounded, and every cut is visible:
+
+- 200 criteria (`total`, `truncated`);
+- 50 mappings and 100 problems per criterion (`mappingsTotal`/`mappingsTruncated`,
+  `problemsTotal`/`problemsTruncated`);
+- 20 other criteria per mapping (`alsoMapsTo`, `alsoMapsToTotal`) and per test in the index
+  (`criteriaTotal`, `criteriaTruncated`);
+- 500 tests and 50 invalid claim files.
+
+The many-to-many lists are capped because a test shared by many criteria would otherwise repeat
+every criterion ID in every row. The whole serialized report is then fitted to 512 KiB by halving
+the longest list (`budget.shrunk`), or refused with `REPORT_TOO_LARGE`. Counts always cover every
+criterion. Criterion IDs are never shortened. Long test names are cut to 300 characters, with the
+sha256 of the full name. The checkout's path never appears.
 
 In `vcv reconcile`, a criterion the candidate adds or revises without a mapping gives
 `OBJECT_UNBOUND` ("no test case is mapped to it").

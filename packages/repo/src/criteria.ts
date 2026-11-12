@@ -23,14 +23,26 @@ import { z } from "zod";
 import { buildIndex, refId } from "@vcv/ir";
 import type { Criterion, Id } from "@vcv/ir";
 import { canonicalJson } from "@vcv/core";
-import { verifyBinding } from "./bindings.ts";
+import { verifyBinding, verifyMemo } from "./bindings.ts";
 import type { ClaimEntry, Verification } from "./bindings.ts";
 import { redact } from "./handoff.ts";
 import { failFinal, finish, moduleOf, observed, readClaims } from "./proposals.ts";
 import type { ProposalHooks, ProposalResult } from "./proposals.ts";
 import { worktreeState } from "./worktree.ts";
 
-export const CRITERIA_LIMITS = { criteria: 200, mappingsPerCriterion: 50, tests: 500, textChars: 1000, testNameChars: 300 } as const;
+export const CRITERIA_LIMITS = {
+  criteria: 200,
+  mappingsPerCriterion: 50,
+  problemsPerCriterion: 100,
+  /** Other criteria listed per mapping (`alsoMapsTo`) and per test in the many-to-many index. */
+  relatedCriteria: 20,
+  tests: 500,
+  invalidClaims: 50,
+  textChars: 1000,
+  testNameChars: 300,
+  /** The whole serialized report (JSON, 2-space indent). Lists are cut further, and flagged, to fit; past that, REPORT_TOO_LARGE. */
+  bytes: 512 * 1024,
+} as const;
 
 export const criteriaRequest = z
   .object({
@@ -57,7 +69,10 @@ export type MappingProblemCode =
   | "DUPLICATE_MAPPING"
   /** A claim on this criterion that is not a `tests` claim on an individual test case. */
   | "NOT_A_TEST_MAPPING"
-  /** A claim file about this criterion that cannot be read. */
+  /**
+   * Some claim files cannot be read, or the claim store cannot be read at all. Which criterion an
+   * unreadable file is about is unknown, so every criterion's assessment is then incomplete.
+   */
   | "MAPPING_INVALID";
 
 export type TestIdentity = {
@@ -78,8 +93,9 @@ export type CriterionMapping = {
   model: { state: string; cause: string } | null;
   provenance: { source: string; principalId: string } | null;
   claimedAtRevision: string | null;
-  /** Other criteria mapped to the same test case (many-to-many). */
+  /** Other criteria mapped to the same test case (many-to-many), at most CRITERIA_LIMITS.relatedCriteria. */
   alsoMapsTo: Id[];
+  alsoMapsToTotal: number;
 };
 
 export type CriterionEvidence = {
@@ -90,13 +106,20 @@ export type CriterionEvidence = {
   verifies: Id[];
   moduleId: Id | null;
   /**
-   * none: no mapping; resolved: every mapping resolves and is fresh; partial: some do;
-   * unresolved: none does; unknown: the claims could not be read.
+   * Over the readable test-case mappings: resolved: every one resolves and is fresh; partial: some
+   * do; unresolved: none does; none: there is no mapping and every claim file was read; unknown:
+   * there is no readable mapping but some claim files (or the whole store) could not be read, so
+   * one of them may map this criterion.
    */
   mapping: "none" | "resolved" | "partial" | "unresolved" | "unknown";
+  /** incomplete: some claim files could not be read, so `mapping` may leave out mappings of this criterion. */
+  assessment: "complete" | "incomplete";
   mappings: CriterionMapping[];
   mappingsTotal: number;
+  mappingsTruncated: boolean;
   problems: { code: MappingProblemCode; message: string; bindingId?: string }[];
+  problemsTotal: number;
+  problemsTruncated: boolean;
 };
 
 export type CriteriaReport = {
@@ -105,14 +128,32 @@ export type CriteriaReport = {
   criteria: CriterionEvidence[];
   total: number;
   truncated: boolean;
-  /** Many-to-many index: each mapped test case and the criteria it is claimed to check. */
-  tests: { test: TestIdentity; criteria: Id[] }[];
+  /** Many-to-many index: each mapped test case and the criteria it is claimed to check (at most CRITERIA_LIMITS.relatedCriteria each). */
+  tests: { test: TestIdentity; criteria: Id[]; criteriaTotal: number; criteriaTruncated: boolean }[];
   testsTotal: number;
   testsTruncated: boolean;
-  counts: { criteria: number; required: number; optional: number; requiredUnmapped: number; requiredNotResolved: number; optionalUnmapped: number; mappings: number };
+  counts: {
+    criteria: number;
+    required: number;
+    optional: number;
+    /** Required criteria with no mapping, every claim file read. */
+    requiredUnmapped: number;
+    /** Required criteria not shown resolved with a complete assessment (unmapped, unresolved, partial, unknown or incomplete). */
+    requiredNotResolved: number;
+    /** Required criteria whose assessment is incomplete. */
+    requiredIncomplete: number;
+    optionalUnmapped: number;
+    /** Readable claims on criteria. */
+    mappings: number;
+  };
+  /** complete: every claim file was read. incomplete: some (or the store) could not be, see invalidClaims / mappingsProblem. */
+  assessment: "complete" | "incomplete";
   /** False when `.vcv/bindings/` could not be read: every criterion's mapping is then `unknown`. */
   mappingsAvailable: boolean;
   mappingsProblem?: string;
+  /** Every claim file that could not be read. Not attributed to a criterion: its content is what would say which. */
+  invalidClaims: { items: { bindingId: string; file: string; problem: string }[]; total: number; truncated: boolean };
+  budget: { limit: number; bytes: number; shrunk: boolean };
   meaning: string;
   implementationChecked: false;
 };
@@ -145,11 +186,15 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
     const claims = readClaims(root);
     const available = !claims.key.startsWith("unreadable:");
     const criterionIds = new Set(all.map((c) => c.id));
-    const about = claims.entries.filter((e) => (e.claim ? criterionIds.has(e.claim.modelObjectId) : false) || (!e.claim && [...criterionIds].some((id) => e.bindingId.includes(id))));
+    const about = claims.entries.filter((e) => !!e.claim && criterionIds.has(e.claim.modelObjectId));
+    // An unreadable claim file may be about any criterion (or none); its bytes are what would say.
+    const invalid = claims.entries.filter((e) => !e.claim).sort((a, b) => (a.bindingId < b.bindingId ? -1 : a.bindingId > b.bindingId ? 1 : 0));
+    const complete = available && invalid.length === 0;
     // The bytes of every mapped test file, before verification reads them and again before answering.
     const files = [...new Set(about.map((e) => e.claim?.locator.path).filter((p): p is string => !!p))].sort();
     const tree = worktreeState(root, files);
-    const verified = new Map(about.map((e) => [e.bindingId, verifyBinding(root, e, obs.status)] as const));
+    const memo = verifyMemo(); // one observation: the guard rechecks every input before answering
+    const verified = new Map(about.map((e) => [e.bindingId, verifyBinding(root, e, obs.status, memo)] as const));
 
     // Many-to-many: test identity → criteria.
     const key = (e: ClaimEntry) => (e.claim && e.claim.relation === "tests" && e.claim.locator.selector.kind === "test" ? `${e.claim.locator.path}\0${e.claim.locator.selector.name}` : null);
@@ -162,15 +207,16 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
     const evidence = all
       .filter((c) => !wanted || wanted.has(c.id))
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-      .map((c) => criterionOf(c, about, verified, byTest, key, available, claims.key, moduleOf(model, c.id)));
+      .map((c) => criterionOf(c, about, verified, byTest, key, available ? invalid.length : null, claims.key, moduleOf(model, c.id)));
     const shown = evidence.slice(0, CRITERIA_LIMITS.criteria);
     const tests = [...byTest.entries()]
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([k, ids]) => {
         const [p, n] = k.split("\0") as [string, string];
-        return { test: identityOf(p, n), criteria: [...ids].sort() };
+        const sorted = [...ids].sort();
+        return { test: identityOf(p, n), criteria: sorted.slice(0, CRITERIA_LIMITS.relatedCriteria), criteriaTotal: sorted.length, criteriaTruncated: sorted.length > CRITERIA_LIMITS.relatedCriteria };
       });
-    const notResolved = (e: CriterionEvidence) => e.mapping !== "resolved";
+    const notResolved = (e: CriterionEvidence) => e.mapping !== "resolved" || e.assessment !== "complete";
     const data: CriteriaReport = {
       format: "vcv-criteria-1",
       modelRevision: model.project.modelRevision,
@@ -186,11 +232,19 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
         optional: evidence.filter((e) => e.verification === "optional").length,
         requiredUnmapped: evidence.filter((e) => e.verification === "required" && e.mapping === "none").length,
         requiredNotResolved: evidence.filter((e) => e.verification === "required" && notResolved(e)).length,
+        requiredIncomplete: evidence.filter((e) => e.verification === "required" && e.assessment !== "complete").length,
         optionalUnmapped: evidence.filter((e) => e.verification === "optional" && e.mapping === "none").length,
-        mappings: about.filter((e) => e.claim).length,
+        mappings: about.length,
       },
+      assessment: complete ? "complete" : "incomplete",
       mappingsAvailable: available,
       ...(available ? {} : { mappingsProblem: cut(claims.key.slice("unreadable:".length)) }),
+      invalidClaims: {
+        items: invalid.slice(0, CRITERIA_LIMITS.invalidClaims).map((e) => ({ bindingId: cut(e.bindingId, 300), file: cut(e.file, 300), problem: cut(e.problem ?? "unreadable") })),
+        total: invalid.length,
+        truncated: invalid.length > CRITERIA_LIMITS.invalidClaims,
+      },
+      budget: { limit: CRITERIA_LIMITS.bytes, bytes: 0, shrunk: false },
       meaning: MEANING,
       implementationChecked: false,
     };
@@ -202,8 +256,43 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
         return canonicalJson([c.key, worktreeState(root, f.length ? f : files).digest]);
       },
     };
-    return finish(obs, hooks, redact(data, root), guard);
+    const bounded = fitBudget(redact(data, root));
+    if (!bounded) return failFinal({ code: "REPORT_TOO_LARGE", message: `the criteria report exceeds ${CRITERIA_LIMITS.bytes} bytes even with every list cut to one item; ask for fewer criteria with ids` }, obs, hooks);
+    return finish(obs, hooks, bounded, guard);
   });
+}
+
+/**
+ * Fit the serialized report into CRITERIA_LIMITS.bytes by halving the longest list (top-level or
+ * nested, across all rows) until it fits, flagging every cut. Null if even one item per list is too much.
+ */
+function fitBudget(r: CriteriaReport): CriteriaReport | null {
+  const size = (x: CriteriaReport) => Buffer.byteLength(JSON.stringify(x, null, 2));
+  const most = (xs: number[]) => xs.reduce((a, b) => Math.max(a, b), 0);
+  const lists: { get: () => number; set: (n: number) => void }[] = [
+    { get: () => r.criteria.length, set: (n) => ((r.criteria = r.criteria.slice(0, n)), (r.truncated = true)) },
+    { get: () => r.tests.length, set: (n) => ((r.tests = r.tests.slice(0, n)), (r.testsTruncated = true)) },
+    { get: () => r.invalidClaims.items.length, set: (n) => ((r.invalidClaims.items = r.invalidClaims.items.slice(0, n)), (r.invalidClaims.truncated = true)) },
+    { get: () => most(r.tests.map((t) => t.criteria.length)), set: (n) => r.tests.forEach((t) => t.criteria.length > n && ((t.criteria = t.criteria.slice(0, n)), (t.criteriaTruncated = true))) },
+    { get: () => most(r.criteria.map((c) => c.mappings.length)), set: (n) => r.criteria.forEach((c) => c.mappings.length > n && ((c.mappings = c.mappings.slice(0, n)), (c.mappingsTruncated = true))) },
+    { get: () => most(r.criteria.map((c) => c.problems.length)), set: (n) => r.criteria.forEach((c) => c.problems.length > n && ((c.problems = c.problems.slice(0, n)), (c.problemsTruncated = true))) },
+    // alsoMapsTo has its own total; cutting it is visible as alsoMapsTo.length < alsoMapsToTotal.
+    { get: () => most(r.criteria.flatMap((c) => c.mappings.map((m) => m.alsoMapsTo.length))), set: (n) => r.criteria.forEach((c) => c.mappings.forEach((m) => (m.alsoMapsTo = m.alsoMapsTo.slice(0, n)))) },
+  ];
+  let bytes = size(r);
+  let shrunk = false;
+  while (bytes > CRITERIA_LIMITS.bytes) {
+    const longest = lists.reduce((a, b) => (b.get() > a.get() ? b : a));
+    const n = longest.get();
+    if (n <= 1) return null;
+    longest.set(Math.floor(n / 2));
+    shrunk = true;
+    r.budget = { limit: CRITERIA_LIMITS.bytes, bytes: 0, shrunk };
+    bytes = size(r);
+  }
+  r.budget = { limit: CRITERIA_LIMITS.bytes, bytes, shrunk };
+  r.budget.bytes = size(r);
+  return r;
 }
 
 function criterionOf(
@@ -212,13 +301,24 @@ function criterionOf(
   verified: Map<string, Verification>,
   byTest: Map<string, Set<Id>>,
   key: (e: ClaimEntry) => string | null,
-  available: boolean,
+  /** Number of unreadable claim files, or null when the claim store itself could not be read. */
+  invalidCount: number | null,
   claimsKey: string,
   moduleId: Id | null,
 ): CriterionEvidence {
   const base = { id: c.id, name: cut(c.name, 200), statement: cut(c.statement), verification: c.verification, verifies: c.verifies.map(refId).filter((x): x is Id => !!x), moduleId };
-  if (!available) {
-    return { ...base, mapping: "unknown", mappings: [], mappingsTotal: 0, problems: [{ code: "MAPPING_INVALID", message: cut(`the binding claims could not be read (${claimsKey.slice("unreadable:".length)}); whether this criterion is mapped is unknown`) }] };
+  if (invalidCount === null) {
+    return {
+      ...base,
+      mapping: "unknown",
+      assessment: "incomplete",
+      mappings: [],
+      mappingsTotal: 0,
+      mappingsTruncated: false,
+      problems: [{ code: "MAPPING_INVALID", message: cut(`the binding claims could not be read (${claimsKey.slice("unreadable:".length)}); whether this criterion is mapped is unknown`) }],
+      problemsTotal: 1,
+      problemsTruncated: false,
+    };
   }
   const mine = about.filter((e) => e.claim?.modelObjectId === c.id).sort((a, b) => (a.bindingId < b.bindingId ? -1 : 1));
   const problems: CriterionEvidence["problems"] = [];
@@ -247,7 +347,8 @@ function criterionOf(
       else if (v.state === "stale") {
         if (v.model && (v.model.state === "changed" || v.model.state === "removed")) problems.push({ code: "CRITERION_CHANGED", bindingId: e.bindingId, message: cut(`${c.id} changed since the mapping was claimed (${v.model.cause}); check that ${at} still checks it, then reassert`) });
         if (v.source?.state === "changed") problems.push({ code: "TEST_CHANGED", bindingId: e.bindingId, message: cut(`the code of mapped test ${at} changed since the mapping was claimed; check it still checks ${c.id}, then reassert`) });
-      } else if (v.state !== "invalid") problems.push({ code: "MAPPING_NOT_CHECKED", bindingId: e.bindingId, message: cut(`mapping ${e.bindingId} is ${v.state}: ${[v.source?.cause, v.model?.cause, v.locator?.detail].filter(Boolean).join("; ")}`) });
+      } else if (v.state === "invalid") problems.push({ code: "MAPPING_INVALID", bindingId: e.bindingId, message: cut(`mapping ${e.bindingId} is invalid: ${[v.locator?.detail, v.source?.cause, v.model?.cause].filter(Boolean).join("; ") || "the claim does not verify"}`) });
+      else problems.push({ code: "MAPPING_NOT_CHECKED", bindingId: e.bindingId, message: cut(`mapping ${e.bindingId} is ${v.state}: ${[v.source?.cause, v.model?.cause, v.locator?.detail].filter(Boolean).join("; ")}`) });
     }
     mappings.push({
       bindingId: e.bindingId,
@@ -258,18 +359,26 @@ function criterionOf(
       model: v.model ? { state: v.model.state, cause: cut(v.model.cause) } : null,
       provenance: { source: cl.provenance.source, principalId: cl.provenance.principalId },
       claimedAtRevision: cl.modelRevision,
-      alsoMapsTo: k ? [...(byTest.get(k) ?? [])].filter((x) => x !== c.id).sort() : [],
+      ...(() => {
+        const others = k ? [...(byTest.get(k) ?? [])].filter((x) => x !== c.id).sort() : [];
+        return { alsoMapsTo: others.slice(0, CRITERIA_LIMITS.relatedCriteria), alsoMapsToTotal: others.length };
+      })(),
     });
   }
-  // Unreadable claim files whose name mentions the criterion may be its mappings.
-  for (const e of about) if (!e.claim && e.bindingId.includes(c.id)) problems.push({ code: "MAPPING_INVALID", bindingId: e.bindingId, message: cut(`claim file ${e.file} cannot be read (${e.problem ?? "unreadable"}); it may be a mapping of ${c.id}`) });
-  if (testMappings === 0) problems.unshift({ code: "NO_MAPPING", message: `no test case is mapped to ${c.verification} criterion ${c.id}` });
+  const incomplete = invalidCount > 0;
+  // Unreadable claim files are not attributed by name: any of them may be a mapping of this criterion.
+  if (incomplete) problems.unshift({ code: "MAPPING_INVALID", message: `${invalidCount} claim file(s) in .vcv/bindings/ cannot be read, and any of them may map ${c.id}; this assessment is incomplete (see invalidClaims)` });
+  if (testMappings === 0 && !incomplete) problems.unshift({ code: "NO_MAPPING", message: `no test case is mapped to ${c.verification} criterion ${c.id}` });
   return {
     ...base,
-    mapping: testMappings === 0 ? "none" : resolved === testMappings ? "resolved" : resolved > 0 ? "partial" : "unresolved",
+    mapping: testMappings === 0 ? (incomplete ? "unknown" : "none") : resolved === testMappings ? "resolved" : resolved > 0 ? "partial" : "unresolved",
+    assessment: incomplete ? "incomplete" : "complete",
     mappings: mappings.slice(0, CRITERIA_LIMITS.mappingsPerCriterion),
     mappingsTotal: mappings.length,
-    problems: problems.slice(0, CRITERIA_LIMITS.mappingsPerCriterion * 2),
+    mappingsTruncated: mappings.length > CRITERIA_LIMITS.mappingsPerCriterion,
+    problems: problems.slice(0, CRITERIA_LIMITS.problemsPerCriterion),
+    problemsTotal: problems.length,
+    problemsTruncated: problems.length > CRITERIA_LIMITS.problemsPerCriterion,
   };
 }
 

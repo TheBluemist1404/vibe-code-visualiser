@@ -96,6 +96,20 @@ post-merge rewrite and no inference.
   claim files and the bytes of every mapped test file (`STATE_CHANGED` otherwise). It is bounded,
   deterministic and redacted, and it is not a test result.
 
+### Review round 1 (PR #24)
+
+- **Unreadable claim files are never attributed by name.** Binding IDs are arbitrary, so an
+  unreadable file may be about any criterion. It is listed in `invalidClaims`, and every
+  criterion's `assessment` becomes `incomplete`. `none` becomes `unknown`, and
+  `requiredNotResolved` counts every required criterion that is not both resolved and complete.
+  A readable mapping that verifies as `invalid` is reported too (`MAPPING_INVALID`).
+- **Every nested list is bounded, plus a byte budget.** `alsoMapsTo` and the per-test criteria
+  lists are capped with totals. Per-criterion mappings and problems carry totals and truncation
+  flags. The serialized report is fitted to 512 KiB by halving the longest list, or refused with
+  `REPORT_TOO_LARGE`, as for reconciliation.
+- **`verifies` is a query filter.** `getContext` accepts the relation it returns. A compile-time
+  check now keeps the accepted relations equal to every relation the snapshot can emit.
+
 ## Consequences
 
 - A code-first PR that edits bound code shows stale claims and the exact declarations, but VCV

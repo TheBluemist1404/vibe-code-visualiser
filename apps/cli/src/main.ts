@@ -503,14 +503,19 @@ function criteriaCommand(): number {
   const c = d.counts;
   console.log(`acceptance criteria at ${d.modelRevision}: ${c.criteria} (${c.required} required, ${c.optional} optional); ${c.mappings} test mapping(s)`);
   if (!d.mappingsAvailable) console.log(`  ! mappings NOT ASSESSED: ${d.mappingsProblem}`);
-  else console.log(`  required: ${c.requiredUnmapped} unmapped, ${c.requiredNotResolved} not fully resolved; optional: ${c.optionalUnmapped} unmapped`);
+  else console.log(`  required: ${c.requiredUnmapped} unmapped, ${c.requiredNotResolved} not fully resolved${c.requiredIncomplete ? ` (${c.requiredIncomplete} with an incomplete assessment)` : ""}; optional: ${c.optionalUnmapped} unmapped`);
+  if (d.invalidClaims.total) {
+    console.log(`  ! ${d.invalidClaims.total} claim file(s) cannot be read; any of them may map a criterion, so the assessment is INCOMPLETE:`);
+    for (const x of d.invalidClaims.items) console.log(`    ${x.file}: ${x.problem}`);
+  }
   for (const e of d.criteria) {
     console.log(`  ${e.id} [${e.verification}] ${e.mapping}: ${e.statement}`);
     console.log(`    verifies ${e.verifies.join(", ")}`);
     for (const m of e.mappings) console.log(`    ${m.state.padEnd(13)} ${m.test ? `${m.test.path} > ${m.test.name}` : `(${m.relation} claim)`}  [${m.bindingId}]${m.alsoMapsTo.length ? `  also ${m.alsoMapsTo.join(", ")}` : ""}`);
     for (const p of e.problems) console.log(`    ! ${p.code}: ${p.message}`);
+    if (e.mappingsTruncated || e.problemsTruncated) console.log(`    ! cut: ${e.mappings.length}/${e.mappingsTotal} mappings, ${e.problems.length}/${e.problemsTotal} problems`);
   }
-  if (d.truncated || d.testsTruncated) console.log("  ! lists were cut; use --json for totals");
+  if (d.truncated || d.testsTruncated || d.invalidClaims.truncated || d.budget.shrunk) console.log(`  ! lists were cut (report ${d.budget.bytes}/${d.budget.limit} bytes); use --json for totals`);
   console.log(`  ${d.meaning}`);
   return 0;
 }

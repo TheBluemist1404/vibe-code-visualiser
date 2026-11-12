@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { canonicalJson } from "../../core/src/index.ts";
+import { FileStore, ModelEngine, canonicalJson } from "../../core/src/index.ts";
 import { loadModel } from "../../ir/src/index.ts";
 import { CRITERIA_LIMITS, BindingError, reconcile, checkIntegrity, criteriaEvidence, previewProposal, projectStatus, readClaims, recordBinding, reviewApprove, submitProposal, addTrustedReviewer, createReviewerKey } from "../src/index.ts";
 import type { CriteriaReport } from "../src/index.ts";
@@ -271,4 +271,125 @@ test("reconcile: a criterion the candidate adds without a test mapping is report
   const again = reconcile(repo, { base });
   assert.ok(again.ok);
   assert.ok(!again.data.findings.some((x) => x.code === "OBJECT_UNBOUND" && x.objectIds?.includes("crt-full-course")), "a mapping is a claim on the criterion");
+});
+
+// ---- review round 1 of PR #24 ---------------------------------------------------------------
+
+test("an unreadable mapping with an arbitrary ID makes the assessment incomplete, never 'none'", () => {
+  const repo = setup();
+  map(repo, "crt-full-course", FULL, "evidence-opaque");
+  writeFileSync(join(repo, ".vcv/bindings/evidence-opaque.json"), "{ corrupted");
+  const d = ok(repo);
+  assert.equal(d.assessment, "incomplete");
+  assert.equal(d.mappingsAvailable, true);
+  assert.deepEqual(d.invalidClaims.items.map((x) => x.bindingId), ["evidence-opaque"]);
+  assert.equal(d.invalidClaims.total, 1);
+  for (const c of d.criteria) {
+    assert.deepEqual([c.mapping, c.assessment], ["unknown", "incomplete"], c.id);
+    assert.ok(!c.problems.some((p) => p.code === "NO_MAPPING"), "absence is not asserted when a file could not be read");
+    assert.equal(c.problems[0]!.code, "MAPPING_INVALID");
+  }
+  assert.equal(d.counts.requiredUnmapped, 0, "unknown is not unmapped");
+  assert.equal(d.counts.requiredNotResolved, 1);
+  assert.equal(d.counts.requiredIncomplete, 1);
+});
+
+test("a valid mapping next to a corrupt one is resolved but incomplete, and counted as not resolved", () => {
+  const repo = setup();
+  map(repo, "crt-full-course", FULL); // default ID
+  map(repo, "crt-full-course", CONFIRM, "zz-opaque");
+  writeFileSync(join(repo, ".vcv/bindings/zz-opaque.json"), "[]");
+  const d = ok(repo);
+  const c = of(d, "crt-full-course");
+  assert.deepEqual([c.mapping, c.assessment, c.mappingsTotal], ["resolved", "incomplete", 1]);
+  assert.ok(c.problems.some((p) => p.code === "MAPPING_INVALID" && /1 claim file\(s\)/.test(p.message)), JSON.stringify(c.problems));
+  assert.equal(d.counts.requiredNotResolved, 1, "an incomplete assessment never counts as resolved");
+  assert.equal(d.invalidClaims.items[0]!.bindingId, "zz-opaque");
+
+  // A default-ID mapping corrupted: the same, without any naming convention.
+  const def = readClaims(repo).entries.find((e) => e.claim?.modelObjectId === "crt-full-course")!;
+  writeFileSync(join(repo, def.file), "{");
+  const d2 = ok(repo);
+  assert.deepEqual([of(d2, "crt-full-course").mapping, d2.invalidClaims.total], ["unknown", 2]);
+});
+
+/** Approve criteria straight through the engine (scale tests; the approval path is covered above). */
+function bulkCriteria(repo: string, ids: string[]) {
+  for (let i = 0; i < ids.length; i += 100) {
+    const out = new ModelEngine(new FileStore(join(repo, ".vcv"))).propose(
+      { changeId: `chg-bulk-${i}`, projectId: "prj-course-desk", expectedRevision: projectStatus(repo).model!.revision, operations: ids.slice(i, i + 100).map((id) => ({ type: "createCriterion", criterion: crit(id) })) },
+      { principalId: "user:dev", permissions: ["model:propose", "model:apply"] },
+    );
+    assert.equal(out.status, "applied", JSON.stringify(out).slice(0, 2000));
+  }
+}
+/** Hand-written mapping claims from a recorded template (as an agent's tool would write them). */
+function cloneMapping(repo: string, template: string, bindingId: string, criterionId: string, name: string) {
+  // The template was recorded at the current revision, so its modelRevision is kept.
+  const t = JSON.parse(readFileSync(join(repo, ".vcv/bindings", `${template}.json`), "utf8"));
+  writeFileSync(join(repo, ".vcv/bindings", `${bindingId}.json`), JSON.stringify({ ...t, bindingId, modelObjectId: criterionId, locator: { ...t.locator, selector: { kind: "test", name } } }, null, 2));
+}
+
+test("many criteria sharing one test: nested lists are capped with totals and the report stays bounded", () => {
+  const repo = baseline();
+  const ids = Array.from({ length: 80 }, (_, i) => `crt-${String(i).padStart(3, "0")}-${"x".repeat(100)}`);
+  bulkCriteria(repo, ids);
+  map(repo, ids[0]!, FULL, "tmpl");
+  ids.forEach((id, i) => cloneMapping(repo, "tmpl", `m-${i}`, id, FULL));
+  rmSync(join(repo, ".vcv/bindings/tmpl.json"));
+  const r = criteriaEvidence(repo);
+  assert.ok(r.ok, JSON.stringify(r).slice(0, 500));
+  const d = r.data;
+  const bytes = Buffer.byteLength(JSON.stringify(d, null, 2));
+  assert.ok(bytes <= CRITERIA_LIMITS.bytes, `${bytes} bytes`);
+  assert.ok(bytes < 906_410 / 2, `${bytes} bytes for 80 criteria and one test (906,410 before related lists were capped)`);
+  assert.equal(d.budget.bytes, bytes);
+  const m = d.criteria[0]!.mappings[0]!;
+  assert.equal(m.alsoMapsTo.length, CRITERIA_LIMITS.relatedCriteria);
+  assert.equal(m.alsoMapsToTotal, 79);
+  assert.equal(d.tests.length, 1);
+  assert.deepEqual([d.tests[0]!.criteria.length, d.tests[0]!.criteriaTotal, d.tests[0]!.criteriaTruncated], [CRITERIA_LIMITS.relatedCriteria, 80, true]);
+  assert.ok(d.criteria.every((c) => c.mapping === "resolved" && c.assessment === "complete"));
+});
+
+test("a report past the byte budget is cut, every cut flagged; per-criterion overflow has totals", () => {
+  const repo = baseline();
+  const ids = Array.from({ length: 200 }, (_, i) => `crt-${String(i).padStart(3, "0")}-${"y".repeat(240)}`);
+  bulkCriteria(repo, ids);
+  const names = [FULL, CONFIRM, "EnrollmentService > rejects a repeat enrollment without taking a second seat", "EnrollmentService > refuses an unknown course without recording or notifying anything"];
+  map(repo, ids[0]!, FULL, "tmpl");
+  ids.forEach((id, i) => names.forEach((n, j) => cloneMapping(repo, "tmpl", `m-${i}-${j}`, id, n)));
+  // One criterion with more mappings than a row shows (duplicates of real tests).
+  for (let k = 0; k < CRITERIA_LIMITS.mappingsPerCriterion + 5; k++) cloneMapping(repo, "tmpl", `dup-${String(k).padStart(2, "0")}`, ids[1]!, FULL);
+  rmSync(join(repo, ".vcv/bindings/tmpl.json"));
+  const r = criteriaEvidence(repo);
+  assert.ok(r.ok, JSON.stringify(r).slice(0, 500));
+  const d = r.data;
+  const bytes = Buffer.byteLength(JSON.stringify(d, null, 2));
+  assert.ok(bytes <= CRITERIA_LIMITS.bytes, `${bytes} bytes`);
+  assert.equal(d.budget.shrunk, true);
+  assert.equal(d.budget.bytes, bytes);
+  assert.equal(d.total, 200);
+  assert.equal(d.counts.criteria, 200, "counts cover every criterion, whatever is shown");
+  const cutSomewhere = d.truncated || d.testsTruncated || d.criteria.some((c) => c.mappingsTruncated || c.problemsTruncated || c.mappings.some((m) => m.alsoMapsTo.length < m.alsoMapsToTotal));
+  assert.ok(cutSomewhere);
+  const big = of(d, ids[1]!);
+  if (big) {
+    assert.equal(big.mappingsTotal, names.length + CRITERIA_LIMITS.mappingsPerCriterion + 5);
+    assert.equal(big.mappingsTruncated, true);
+    assert.ok(big.problemsTotal >= CRITERIA_LIMITS.mappingsPerCriterion, "every duplicate is a problem, counted");
+  }
+});
+
+test("the verifies relation is a query filter, both directions", async () => {
+  const repo = setup();
+  const { createQueryApi } = await import("../../query/src/index.ts");
+  const { FileStore: FS } = await import("../../core/src/index.ts");
+  const api = createQueryApi(new FS(join(repo, ".vcv")));
+  const out = api.getContext({ id: "crt-full-course", relations: ["verifies"] });
+  assert.ok(out.ok, JSON.stringify(out));
+  assert.ok(JSON.stringify(out.data).includes("rul-seat-limit"));
+  const back = api.getContext({ id: "rul-seat-limit", relations: ["verifies"], direction: "incoming" });
+  assert.ok(back.ok, JSON.stringify(back));
+  assert.ok(JSON.stringify(back.data).includes("crt-full-course"));
 });
