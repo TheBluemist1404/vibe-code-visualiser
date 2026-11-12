@@ -46,7 +46,7 @@ fi
 # 2. The approval fails: an approval command that prints a marker and refuses.
 printf '#!/bin/sh\necho "SELFCHECK-APPROVAL-REFUSED for $2 ($3)"\nexit 1\n' > "$out/bin/refuse-approval"
 chmod +x "$out/bin/refuse-approval"
-run failed-approval "APPROVE_CMD=$out/bin/refuse-approval" -- intent approved
+run failed-approval "PATH=$out/bin:$PATH" "APPROVE_CMD=refuse-approval" -- intent approved
 if stopped failed-approval; then
   if ! grep -q "== intent" "$out/failed-approval.log" || ! grep -q "expected exit 1: ok" "$out/failed-approval.log"; then bad failed-approval "the intent step (the prerequisite) did not complete"
   elif ! grep -q "^SELFCHECK-APPROVAL-REFUSED for chg-quiet-rejections ([0-9a-f]\{64\})" "$out/failed-approval/approved/approval.txt" 2>/dev/null; then bad failed-approval "the refusing approval command was never run"
