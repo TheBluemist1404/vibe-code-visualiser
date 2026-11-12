@@ -1,0 +1,239 @@
+{
+  "format": "vcv-gate-1",
+  "decision": "warn",
+  "headline": "passed with 2 warnings: 2/2 required criteria passed, host-observed",
+  "base": {
+    "commit": "d73c332d718e21d3a96283f5a3895ca45719ca31",
+    "mergeBase": "d73c332d718e21d3a96283f5a3895ca45719ca31",
+    "containedInCandidate": true,
+    "modelRevision": "rev-3-bd922e630c6e"
+  },
+  "candidate": {
+    "commit": "1d28906eeb0b7135f79939b27c557191f95271a7",
+    "branch": "code-first/error-wording",
+    "dirty": false,
+    "modelRevision": "rev-3-bd922e630c6e",
+    "identityDigest": "934a276a7924c4079c3813c5ba0bbaca937ee44c88b67ebb76c52d6941b9ba16"
+  },
+  "change": {
+    "kind": "code-first",
+    "lineage": "unchanged",
+    "changedFiles": 1,
+    "introducedRevisions": 0
+  },
+  "policy": {
+    "source": ".github/vcv-policy.json at the base (d73c332d718e)",
+    "digest": "6b5096a4bad7e6a285593b491c7cdb5e1d5abb7027aa1980903a6f08c8ad64e9",
+    "changedByCandidate": false,
+    "effective": {
+      "format": "vcv-policy-1",
+      "optional": {
+        "failed": "warn",
+        "stale": "warn",
+        "missing": "warn",
+        "unknown": "warn",
+        "unverified": "warn",
+        "claimed": "warn"
+      },
+      "structural": "block",
+      "bindings": {
+        "related": "warn",
+        "unrelated": "warn"
+      },
+      "coverage": "warn",
+      "unsupported": "warn",
+      "baseNotContained": "warn",
+      "mappingChanged": "warn",
+      "noCriteria": "warn",
+      "observations": {
+        "contradiction": "block",
+        "concern": "warn",
+        "invalidReferences": "warn"
+      },
+      "policyChanged": "warn",
+      "requireEvidence": [
+        {
+          "object": "rul-announce-every-decision",
+          "reason": "every enrollment decision must reach the student"
+        }
+      ]
+    }
+  },
+  "reasons": [
+    {
+      "severity": "warn",
+      "code": "UNMAPPED_CHANGES",
+      "basis": "not-checked",
+      "message": "1 changed file(s) outside .vcv/ are not pointed at by any claim, so VCV cannot relate them to the model: server/src/notifications/notifications.controller.ts",
+      "rule": "unsupported"
+    },
+    {
+      "severity": "warn",
+      "code": "AGENT_CONCERN",
+      "rule": "observations.concern",
+      "basis": "claim",
+      "observationId": "obs-error-wording",
+      "objectIds": [
+        "rul-recipient-required",
+        "cap-list-notifications"
+      ],
+      "path": "server/src/notifications/notifications.controller.ts",
+      "message": "obs-error-wording (agent claim, not checked by VCV; proposes inspect): The 400 message for a missing recipientId changed. A client that matches on the old text could break; no criterion covers this message and no test asserts it, so this is a judgement for the reviewer, not a checked fact."
+    }
+  ],
+  "reasonsTotal": 2,
+  "reasonsTruncated": false,
+  "counts": {
+    "block": 0,
+    "warn": 2
+  },
+  "criteria": {
+    "items": [
+      {
+        "id": "crt-confirmation-notified",
+        "verification": "required",
+        "result": "passed",
+        "observedBy": "host",
+        "verifies": [
+          "rul-announce-every-decision",
+          "cap-enroll"
+        ]
+      },
+      {
+        "id": "crt-rejection-notified",
+        "verification": "required",
+        "result": "passed",
+        "observedBy": "host",
+        "verifies": [
+          "rul-announce-every-decision",
+          "rul-seat-limit",
+          "cap-enroll"
+        ]
+      },
+      {
+        "id": "crt-repeat-rejected",
+        "verification": "optional",
+        "result": "passed",
+        "observedBy": "host",
+        "verifies": [
+          "rul-no-double-enroll"
+        ]
+      }
+    ],
+    "total": 3,
+    "truncated": false,
+    "results": {
+      "required": {
+        "passed": 2,
+        "failed": 0,
+        "stale": 0,
+        "missing": 0,
+        "unknown": 0,
+        "unverified": 0
+      },
+      "optional": {
+        "passed": 1,
+        "failed": 0,
+        "stale": 0,
+        "missing": 0,
+        "unknown": 0,
+        "unverified": 0
+      }
+    }
+  },
+  "runs": [
+    {
+      "index": 0,
+      "observedBy": "host",
+      "declaredObservedBy": "host",
+      "admittedAs": "captured-here",
+      "principalId": "ci:vcv-premerge-gate",
+      "runner": {
+        "name": "vitest"
+      },
+      "invocation": "npx vitest run --reporter=junit (job candidate-tests)",
+      "report": {
+        "format": "junit",
+        "sha256": "fe314c8cb2b979336da33664f57b2f50ba965eadd50695c2915d039a8004f3d5",
+        "bytes": 2325
+      },
+      "digest": "fc7505ad8b30386497f7ab618894e9a96cbd89fe6b859d6ac4c1b1dfcc795618",
+      "fresh": true,
+      "staleBecause": [],
+      "summary": {
+        "tests": 8,
+        "passed": 8,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "green": true
+    }
+  ],
+  "observations": [
+    {
+      "id": "obs-error-wording",
+      "kind": "concern",
+      "basis": "claim",
+      "statement": "The 400 message for a missing recipientId changed. A client that matches on the old text could break; no criterion covers this message and no test asserts it, so this is a judgement for the reviewer, not a checked fact.",
+      "resolution": "inspect",
+      "author": "agent:coder (scripted stand-in)",
+      "objects": [
+        {
+          "id": "rul-recipient-required",
+          "exists": true,
+          "kind": "rule"
+        },
+        {
+          "id": "cap-list-notifications",
+          "exists": true,
+          "kind": "capability"
+        }
+      ],
+      "locations": [
+        {
+          "path": "server/src/notifications/notifications.controller.ts",
+          "startLine": 11,
+          "endLine": 11,
+          "check": "ok",
+          "lines": 14
+        }
+      ],
+      "tests": [],
+      "references": "verified",
+      "problems": []
+    }
+  ],
+  "observationsTruncated": false,
+  "reconciliation": {
+    "summary": {
+      "integrity": "ok",
+      "structural": 0,
+      "staleClaims": 0,
+      "locatorProblems": 0,
+      "removedClaims": 0,
+      "unboundObjects": 0,
+      "changedFiles": 1,
+      "unmappedFiles": 1,
+      "notChecked": 1,
+      "bindingsAssessed": true
+    },
+    "integrity": {
+      "ok": true,
+      "authorization": "caller-asserted: ok means consistent and attested under the trust anchor given here; it authorizes a change only when that anchor (and --base) is supplied by the host from the hosting service's protected branch, in a check the change under review cannot edit"
+    },
+    "findingsTotal": 1
+  },
+  "notes": [],
+  "budget": {
+    "limit": 524288,
+    "bytes": 7295,
+    "shrunk": false
+  },
+  "implementationChecked": false,
+  "limits": [
+    "A passing gate says the history is approved, the claims and the model agree where VCV can check them, and every required criterion's mapped test cases passed in a run captured here. It does not say those tests check the right thing: a mapping is an agent's or a person's claim.",
+    "Agent observations are interpretations. VCV checks that the objects, files, lines and test cases they cite exist; it never confirms or refutes what they say.",
+    "Tests were run by the host's own runner, outside VCV. A run is host-observed only when this process captured its report; how far that report can be trusted is how far the job that produced it can be."
+  ]
+}

@@ -1,0 +1,13 @@
+diff --git a/server/src/notifications/notifications.controller.ts b/server/src/notifications/notifications.controller.ts
+index fb70d1a..4e064f1 100644
+--- a/server/src/notifications/notifications.controller.ts
++++ b/server/src/notifications/notifications.controller.ts
+@@ -8,7 +8,7 @@ export class NotificationsController {
+ 
+   @Get()
+   list(@Query("recipientId") recipientId?: string): Notification[] {
+-    if (!recipientId) throw new BadRequestException("recipientId is required");
++    if (!recipientId) throw new BadRequestException("the recipientId query parameter is required");
+     return this.notifications.forRecipient(recipientId);
+   }
+ }

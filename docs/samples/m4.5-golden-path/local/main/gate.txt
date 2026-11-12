@@ -1,0 +1,11 @@
+vcv gate: PASS: passed: 2/2 required criteria passed, host-observed
+  candidate d73c332d718e (main) against base d73c332d718e; no-change change (0 file(s), 0 new model revision(s), lineage unchanged)
+  policy: .github/vcv-policy.json at the base (d73c332d718e) (6b5096a4bad7)
+  run 0: host-observed (captured here) vitest: 8 case(s), 8 passed, 0 failed, 0 error(s), 0 skipped; suite green
+  ✓ crt-confirmation-notified [required] passed (host)  verifies rul-announce-every-decision, cap-enroll
+  ✓ crt-rejection-notified [required] passed (host)  verifies rul-announce-every-decision, rul-seat-limit, cap-enroll
+  ✓ crt-repeat-rejected [optional] passed (host)  verifies rul-no-double-enroll
+  not established here:
+    - A passing gate says the history is approved, the claims and the model agree where VCV can check them, and every required criterion's mapped test cases passed in a run captured here. It does not say those tests check the right thing: a mapping is an agent's or a person's claim.
+    - Agent observations are interpretations. VCV checks that the objects, files, lines and test cases they cite exist; it never confirms or refutes what they say.
+    - Tests were run by the host's own runner, outside VCV. A run is host-observed only when this process captured its report; how far that report can be trusted is how far the job that produced it can be.

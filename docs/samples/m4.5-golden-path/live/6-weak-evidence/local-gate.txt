@@ -1,0 +1,14 @@
+vcv gate: WARN: passed with 2 warnings: 2/2 required criteria passed, host-observed
+  candidate 075adb573549 (code-first/error-wording) against base 5afcc30de3fe; code-first change (1 file(s), 0 new model revision(s), lineage unchanged)
+  policy: .github/vcv-policy.json at the base (5afcc30de3fe) (6b5096a4bad7)
+  run 0: host-observed (captured here) vitest: 8 case(s), 8 passed, 0 failed, 0 error(s), 0 skipped; suite green
+  ✓ crt-confirmation-notified [required] passed (host)  verifies rul-announce-every-decision, cap-enroll
+  ✓ crt-rejection-notified [required] passed (host)  verifies rul-announce-every-decision, rul-seat-limit, cap-enroll
+  ✓ crt-repeat-rejected [optional] passed (host)  verifies rul-no-double-enroll
+  warn  UNMAPPED_CHANGES [unsupported; not-checked]: 1 changed file(s) outside .vcv/ are not pointed at by any claim, so VCV cannot relate them to the model: server/src/notifications/notifications.controller.ts
+  warn  AGENT_CONCERN [observations.concern; claim]: obs-error-wording (agent claim, not checked by VCV; proposes inspect): The 400 message for a missing recipientId changed. A client that matches on the old text could break; no criterion covers this message and no test asserts it, so this is a judgement for the reviewer, not a checked fact.
+  agent claim obs-error-wording (concern, references verified): The 400 message for a missing recipientId changed. A client that matches on the old text could break; no criterion covers this message and no test asserts it, so this is a judgement for the reviewer, 
+  not established here:
+    - A passing gate says the history is approved, the claims and the model agree where VCV can check them, and every required criterion's mapped test cases passed in a run captured here. It does not say those tests check the right thing: a mapping is an agent's or a person's claim.
+    - Agent observations are interpretations. VCV checks that the objects, files, lines and test cases they cite exist; it never confirms or refutes what they say.
+    - Tests were run by the host's own runner, outside VCV. A run is host-observed only when this process captured its report; how far that report can be trusted is how far the job that produced it can be.

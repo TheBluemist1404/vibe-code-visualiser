@@ -1,0 +1,18 @@
+vcv gate: BLOCK: blocked: 3 blocking reasons (crt-confirmation-notified, crt-rejection-notified, EVIDENCE_REQUIRED)
+  candidate 9cd217015588 (negative/broken-with-records) against base d73c332d718e; code-first change (1 file(s), 0 new model revision(s), lineage unchanged)
+  policy: .github/vcv-policy.json at the base (d73c332d718e) (6b5096a4bad7)
+  run 0: CLAIMED (imported) vitest: 8 case(s), 8 passed, 0 failed, 0 error(s), 0 skipped; suite green
+  ✗ crt-confirmation-notified [required] passed (claimed)  verifies rul-announce-every-decision, cap-enroll
+  ✗ crt-rejection-notified [required] passed (claimed)  verifies rul-announce-every-decision, rul-seat-limit, cap-enroll
+  ✗ crt-repeat-rejected [optional] passed (claimed)  verifies rul-no-double-enroll
+  BLOCK RESULT_CLAIMED [required.claimed; claim] crt-confirmation-notified: crt-confirmation-notified (required) passed only in runs that were not captured here: a claim, not host-observed evidence
+  BLOCK RESULT_CLAIMED [required.claimed; claim] crt-rejection-notified: crt-rejection-notified (required) passed only in runs that were not captured here: a claim, not host-observed evidence
+  BLOCK EVIDENCE_REQUIRED [requireEvidence; checked]: rul-announce-every-decision is touched by this change and the policy requires a host-observed pass of a required criterion that verifies it (crt-confirmation-notified, crt-rejection-notified did not pass). every enrollment decision must reach the student
+  warn  CLAIM_STALE [bindings.related; checked]: claim impl.cap-enroll (cap-enroll at server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll) is stale (code: the selected declaration's code differs from the recorded fingerprint). The code or object moved since the claim; whether it still does what the model says is for an agent or a person to judge
+  warn  CLAIM_STALE [bindings.related; checked]: claim impl.rul-announce-every-decision (rul-announce-every-decision at server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll) is stale (code: the selected declaration's code differs from the recorded fingerprint). The code or object moved since the claim; whether it still does what the model says is for an agent or a person to judge
+  warn  CLAIM_STALE [bindings.related; checked]: claim impl.rul-seat-limit (rul-seat-limit at server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll) is stale (code: the selected declaration's code differs from the recorded fingerprint). The code or object moved since the claim; whether it still does what the model says is for an agent or a person to judge
+  warn  RESULT_CLAIMED [optional.claimed; claim] crt-repeat-rejected: crt-repeat-rejected (optional) passed only in runs that were not captured here: a claim, not host-observed evidence
+  not established here:
+    - A passing gate says the history is approved, the claims and the model agree where VCV can check them, and every required criterion's mapped test cases passed in a run captured here. It does not say those tests check the right thing: a mapping is an agent's or a person's claim.
+    - Agent observations are interpretations. VCV checks that the objects, files, lines and test cases they cite exist; it never confirms or refutes what they say.
+    - Tests were run by the host's own runner, outside VCV. A run is host-observed only when this process captured its report; how far that report can be trusted is how far the job that produced it can be.

@@ -1,0 +1,11 @@
+run 43205722344 job vcv-gate 131140483925 (head 252acc5, base abc1b87, VCV df9452c): exit 1, BLOCK (4 blocking reasons); GitHub mergeable_state=blocked at 2026-11-12T11:04:12Z
+run 43206485285 job vcv-gate 131143123625 (head bbafb98 = chg-quiet-rejections-2 + main merged, base 5afcc30): BLOCK as expected (awaiting approval)
+
+approval: chg-quiet-rejections-2 digest d72e03ec...2f46c4; Hoang's instruction in his own words (thread, 2026-11-12T14:56Z), signed by Codex on his machine as user:hoang -> rev-4-d704dd46aee2, commit 5e5aef7 (trust-commit 5afcc30)
+run 43243270365 job 131269649053 (head 5e5aef7, approval only): BLOCK (mappings not yet reasserted)
+run 43243546237 job vcv-gate 131270353057 (head f8b94a3, base 5afcc30, VCV df9452c)
+vcv gate: WARN: passed with 6 warnings: 2/2 required criteria passed, host-observed
+  candidate f8b94a3ae6dc against base 5afcc30de3fe; model-and-code change (16 file(s), 1 new model revision(s), lineage extends)
+  run 0: host-observed (captured here) vitest: 8 case(s), 8 passed, 0 failed, 0 error(s), 0 skipped; suite green
+  warn UNMAPPED_CHANGES: README.md, scripts/smoke.mjs
+  warn MAPPING_CHANGED x5 (3 reasserted, 2 unchanged with changed test file)

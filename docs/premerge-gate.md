@@ -56,7 +56,7 @@ the supported recipe has three jobs. See
 2. **`candidate-tests`** starts only after `identity` has finished (`needs: identity`), so no PR
    code runs before the identity is read. It checks out the PR head and runs the project's
    ordinary runner with its JUnit reporter. For Course Desk that is `npx vitest run --reporter=junit --outputFile=…`. This job
-   executes PR code, so it gets no token permissions and no secrets. It uses no cache: under
+   executes PR code, so it gets nothing beyond a job-wide, read-only token (`contents: read`, needed to check out a private repository) and no secrets. The PR's code runs in that job, so treat that read access as available to it. `persist-credentials: false` means only that checkout does not store the credential in the checkout's Git config. It uses no cache: under
    `pull_request_target`, a cache it wrote would belong to the base. It hands over exactly one file,
    the report.
 3. **`vcv-gate`** never executes PR code. It installs VCV from a commit pinned in the workflow file,
@@ -173,6 +173,11 @@ Changing what a criterion means, or whether it is required, is a model change. I
 proposal and a separate human approval, never through the policy. A merged reviewer approval of the
 PR does not count as that approval.
 
+A candidate can carry such a proposal while it is still pending. The gate then warns
+`PROPOSAL_PENDING` for each one and checks the candidate against the approved model only. A pending
+proposal never changes what is required, so code that depends on it still fails the criteria it
+changes until a reviewer approves it (`vcv review approve`) and the approval is in the candidate.
+
 ## Agent observations
 
 An agent that reads the code can attach what it found (`--observations <file>`):
@@ -262,4 +267,8 @@ findings can never push a blocking one out of view.
   reviewer judges test changes.
 - That an agent observation is true or false.
 - Branch protection itself. VCV documents the required check; the repository's settings enforce it.
-- A demonstration on a real code-first PR. That is M4.5, on Course Desk.
+
+A recorded run on real pull requests, with the required check enforced by a GitHub ruleset, is in
+[samples/m4.5-golden-path](samples/m4.5-golden-path/README.md) (M4.5). It covers broken, explained
+and fixed; harmless related and unrelated edits; weak evidence; an intent change approved through M3;
+the negative cases; and a merge comparison.

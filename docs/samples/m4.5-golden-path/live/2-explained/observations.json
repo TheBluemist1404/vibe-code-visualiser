@@ -1,0 +1,18 @@
+{
+  "format": "vcv-observations-1",
+  "observations": [
+    {
+      "id": "obs-rejection-not-announced",
+      "kind": "contradiction",
+      "statement": "enroll() still records a rejected enrollment but no longer calls notifications.notify() for it, so a student turned away from a full course gets no enrollment-rejected notification. The approved rule rul-announce-every-decision says every decision, confirmed or rejected, results in exactly one notification; crt-rejection-notified requires it. Proposed resolution: restore the rejection notification in enroll().",
+      "objects": ["rul-announce-every-decision", "crt-rejection-notified", "cap-enroll"],
+      "locations": [{ "path": "server/src/enrollment/enrollment.service.ts", "startLine": 42, "endLine": 45 }],
+      "tests": [
+        { "path": "server/src/enrollment/enrollment.service.spec.ts", "name": "EnrollmentService > rejects an enrollment into a full course and notifies the student" },
+        { "path": "server/test/app.e2e-spec.ts", "name": "Course Desk API (e2e) > confirms, then rejects when full; each student is notified of their outcome" }
+      ],
+      "resolution": "fix-code",
+      "author": "agent:claude-code (implementer)"
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+941fa0d Announce rejected enrollments again (rul-announce-every-decision)
+9cd2170 Only announce confirmed enrollments

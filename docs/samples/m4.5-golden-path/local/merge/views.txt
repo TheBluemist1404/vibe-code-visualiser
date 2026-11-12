@@ -1,0 +1,25 @@
+-- main (d73c332)
+project: ready (<repo>/.vcv)
+model:   prj-course-desk at rev-3-bd922e630c6e [approved], 3 revision(s)
+git:     main d73c332d718e, clean
+integrity: ok (prj-course-desk at rev-3-bd922e630c6e)
+  base:  d73c332d718e21d3a96283f5a3895ca45719ca31 d73c332d718e at rev-3-bd922e630c6e
+  trust: .vcv/reviewers.json at d73c332d718e21d3a96283f5a3895ca45719ca31 (d73c332d718e), 1 reviewer(s); commit d73c332d718e21d3a96283f5a3895ca45719ca31 at d73c332d718e: a local ref, not pinned; anyone with a shell here can create or move it; branch protection is asserted by whoever chose this anchor, not verified by Git
+-- code-first/quiet-rejections (941fa0d)
+project: ready (<repo>/.vcv)
+model:   prj-course-desk at rev-3-bd922e630c6e [approved], 3 revision(s)
+git:     code-first/quiet-rejections 941fa0dfea7c, clean
+integrity: ok (prj-course-desk at rev-3-bd922e630c6e)
+  base:  d73c332d718e21d3a96283f5a3895ca45719ca31 d73c332d718e at rev-3-bd922e630c6e
+  trust: .vcv/reviewers.json at d73c332d718e21d3a96283f5a3895ca45719ca31 (d73c332d718e), 1 reviewer(s); commit d73c332d718e21d3a96283f5a3895ca45719ca31 at d73c332d718e: a local ref, not pinned; anyone with a shell here can create or move it; branch protection is asserted by whoever chose this anchor, not verified by Git
+-- simulated merge of code-first/quiet-rejections into main (cfb8073)
+project: ready (<repo>/.vcv)
+model:   prj-course-desk at rev-3-bd922e630c6e [approved], 3 revision(s)
+git:     simulated-merge cfb8073acc90, clean
+integrity: ok (prj-course-desk at rev-3-bd922e630c6e)
+  base:  d73c332d718e21d3a96283f5a3895ca45719ca31 d73c332d718e at rev-3-bd922e630c6e
+  trust: .vcv/reviewers.json at d73c332d718e21d3a96283f5a3895ca45719ca31 (d73c332d718e), 1 reviewer(s); commit d73c332d718e21d3a96283f5a3895ca45719ca31 at d73c332d718e: a local ref, not pinned; anyone with a shell here can create or move it; branch protection is asserted by whoever chose this anchor, not verified by Git
+-- .vcv/ differences between main and the merge (none expected for a code-first fix)
+(none)
+-- source differences between the candidate and the merge (none expected)
+(none)

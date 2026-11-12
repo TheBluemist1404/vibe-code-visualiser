@@ -1,0 +1,3 @@
+chg-quiet-rejections-2: pending (recorded); .vcv/HEAD stays at rev-3-bd922e630c6e
+  digest: d72e03ece0de06a8777c84f6f0ba14ef5bbec8fbdda27115b4fe0b3c602f46c4
+  Recorded as pending; .vcv/HEAD is still rev-3-bd922e630c6e. A separate reviewer must approve it before anything is implemented. Preview: vcv proposal preview <path> chg-quiet-rejections-2

@@ -1,0 +1,91 @@
+{
+  "format": "vcv-test-run-1",
+  "observedBy": "agent",
+  "principalId": "agent:coder",
+  "runner": {
+    "name": "vitest"
+  },
+  "invocation": "npx vitest run (claimed by the agent)",
+  "root": "server",
+  "report": {
+    "format": "junit",
+    "sha256": "aaabe9be29f244c484c41d68624ce83f3d651726e6d852ef97a82cbda6e52b7d",
+    "bytes": 2327
+  },
+  "candidate": {
+    "commit": "9cd217015588668ae4b2d4d3758658ead18442fa",
+    "branch": "negative/broken-with-records",
+    "uncommitted": {
+      "paths": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "complete": true
+    },
+    "bound": {
+      "paths": 7,
+      "digest": "27dc574842b9bae214de2aa50e7d9b562ca7cb2bb8f6448c423346547f8a968a",
+      "complete": true
+    },
+    "modelRevision": "rev-3-bd922e630c6e",
+    "claims": "1502ab0fdc148e3ef3b3b633a4fdec4e1213e1c47ad81c19103e1879c8aeb333"
+  },
+  "identityDigest": "0eb27673da1002b2f514119d1bdf9977c8643cd2ac96a2d9a179cb5385deeba1",
+  "summary": {
+    "tests": 8,
+    "passed": 8,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "cases": [
+    {
+      "key": "574b29467cd2fe82cae47f2ced2c555800d2d4ee9003d7a787fc2946f2a6af86",
+      "path": "server/src/enrollment/enrollment.service.spec.ts",
+      "name": "EnrollmentService > confirms an enrollment while seats are left and notifies the student",
+      "status": "passed"
+    },
+    {
+      "key": "e87035eff6a24d4c12637f3649b6388eb5a907bf547302f1e60bf06a7a441918",
+      "path": "server/src/enrollment/enrollment.service.spec.ts",
+      "name": "EnrollmentService > rejects an enrollment into a full course and notifies the student",
+      "status": "passed"
+    },
+    {
+      "key": "9d3c174ff4fa8b4fc8ae4897393d15f7fbf3f27a4229ac733c6e92e76ef35ba9",
+      "path": "server/src/enrollment/enrollment.service.spec.ts",
+      "name": "EnrollmentService > rejects a repeat enrollment without taking a second seat",
+      "status": "passed"
+    },
+    {
+      "key": "64aaf61df6797a633022c27e31deb05e27b51a44b9fc51d599ac13027db02aea",
+      "path": "server/src/enrollment/enrollment.service.spec.ts",
+      "name": "EnrollmentService > refuses an unknown course without recording or notifying anything",
+      "status": "passed"
+    },
+    {
+      "key": "cb56fedbc76d7058898daf9caeb1350b658594b331708e86dee93f951795a51c",
+      "path": "server/src/notifications/notifications.service.spec.ts",
+      "name": "NotificationsService > keeps each recipient's notifications separate, in order",
+      "status": "passed"
+    },
+    {
+      "key": "35d7c52f640a039a5820852bd1a14440925ee3e95468326e1e81f542da02975a",
+      "path": "server/test/app.e2e-spec.ts",
+      "name": "Course Desk API (e2e) > lists the seeded courses with free seats",
+      "status": "passed"
+    },
+    {
+      "key": "423739ce73fc6e0f455cb6074b0b16319777b0a4815b2f44045d45b81d50b17e",
+      "path": "server/test/app.e2e-spec.ts",
+      "name": "Course Desk API (e2e) > confirms, then rejects when full; each student is notified of their outcome",
+      "status": "passed"
+    },
+    {
+      "key": "20ad4dfb962acf20ea2c61862d2ccf7e00a42cb7d27c1ceb6e0d8b21cde2563a",
+      "path": "server/test/app.e2e-spec.ts",
+      "name": "Course Desk API (e2e) > answers 400 for an invalid request and 404 for unknown courses or enrollments",
+      "status": "passed"
+    }
+  ],
+  "duplicates": [],
+  "digest": "97dba204b124485625232bb7548c571c44f83e038165b2302bbc7772d465fac4"
+}

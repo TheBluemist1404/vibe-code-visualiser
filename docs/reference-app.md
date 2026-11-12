@@ -111,3 +111,21 @@ evaluation are in [samples/m2.5-maintenance/](samples/m2.5-maintenance/evaluatio
 `packages/repo/test/maintenance.test.ts` checks the guide and prompt vocabulary, the expected
 evidence after setup, the host-fixed agent identity, and replays the recorded proposal as a
 pending change; it needs neither `claude` nor npm.
+
+## Pre-merge golden path (M4.5)
+
+`examples/reference-app/premerge/` runs the [pre-merge gate](premerge-gate.md) on Course Desk:
+
+- `setup.sh <dir>` builds the approved fixture. It runs the golden-path baseline, then approves three criteria with five test-case mappings as `chg-enrollment-criteria`, adds the base policy `.github/vcv-policy.json`, and records `<dir>/main.sha`. With `REVIEWER_ID`, the reviewer has that id (the live run used `user:hoang`). With `VCV_PIN=<commit>`, it also installs the live workflow, [`vcv-premerge.yml`](../examples/reference-app/premerge/vcv-premerge.yml).
+- `ci.sh <dir> <out> [--observations <file>]` runs the three CI jobs locally on the current checkout:
+  1. the identity, read before any candidate code runs;
+  2. the app's own Vitest, with a JUnit report;
+  3. the trusted gate, with the policy read from the base.
+- `scenarios.sh <dir> <out> [step...]` runs these steps in order:
+  1. broken, explained, fixed;
+  2. a harmless edit and a weak-evidence edit;
+  3. an intent change, then its approval (simulated with the fixture key, unless `APPROVE_CMD` is set);
+  4. eight negative cases;
+  5. a merge comparison.
+
+The `reference-app` CI job runs `setup.sh` and `scenarios.sh`. The recorded live run on GitHub, with `vcv-gate` as a required check, is in [samples/m4.5-golden-path](samples/m4.5-golden-path/README.md).

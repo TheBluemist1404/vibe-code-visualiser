@@ -1,0 +1,17 @@
+ .vcv/HEAD                                          |  77 +++-----
+ .vcv/approvals/chg-quiet-rejections-2.json         |  14 ++
+ .vcv/bindings/impl.cap-enroll.json                 |  13 +-
+ .../bindings/impl.rul-announce-every-decision.json |  13 +-
+ .vcv/bindings/impl.rul-seat-limit.json             |  13 +-
+ .vcv/bindings/test.confirmation.e2e.json           |  15 +-
+ .vcv/bindings/test.rejection.e2e.json              |  15 +-
+ .vcv/bindings/test.rejection.unit.json             |  15 +-
+ .vcv/bindings/test.rul-seat-limit.json             |  15 +-
+ .vcv/changes/chg-quiet-rejections-2.json           |  43 +++++
+ .vcv/revisions/rev-4-d704dd46aee2.yaml             | 194 +++++++++++++++++++++
+ README.md                                          |   8 +-
+ scripts/smoke.mjs                                  |   2 +-
+ server/src/enrollment/enrollment.service.spec.ts   |   6 +-
+ server/src/enrollment/enrollment.service.ts        |  12 +-
+ server/test/app.e2e-spec.ts                        |   6 +-
+ 16 files changed, 338 insertions(+), 123 deletions(-)

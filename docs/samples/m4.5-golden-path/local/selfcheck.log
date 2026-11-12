@@ -1,0 +1,9 @@
+selfcheck failed-merge: stopped at the refused merge with exit 3: ok
+selfcheck failed-approval: stopped at the refused approval with exit 3: ok
+selfcheck: ok
+sc exit 0
+
+# The same selfcheck with the intent step's edit deliberately broken (a prerequisite failure):
+selfcheck failed-merge: stopped at the refused merge with exit 3: ok
+selfcheck failed-approval: UNEXPECTED: the intent step (the prerequisite) did not complete
+selfcheck: 1 unexpected

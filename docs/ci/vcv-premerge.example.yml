@@ -10,8 +10,9 @@
 #                    hands the digest over as a job output, which no other job can write.
 #   candidate-tests  starts after identity (needs: identity) and runs the PR's tests with the
 #                    project's ordinary runner and its JUnit reporter.
-#                    This executes PR code, so the job gets no token permissions, no secrets, no
-#                    caches, and hands over exactly one file: the report.
+#                    This executes PR code, so the job gets only a job-wide read-only token
+#                    (contents: read, for a private repository's checkout), no secrets, no caches,
+#                    and hands over exactly one file: the report.
 #   vcv-gate         never executes PR code. It installs VCV from a commit pinned HERE (this file
 #                    comes from the base branch: pull_request_target), reads the PR head only as
 #                    data, captures the report in-process against the identity job's digest
@@ -77,7 +78,12 @@ jobs:
     # the PR's code runs, and a failed identity read runs no tests.
     needs: identity
     runs-on: ubuntu-latest
-    permissions: {}
+    # A job-wide, read-only token (contents: read), needed to check out a private repository. The
+    # PR's code runs in this job, so treat that read access as available to it: give the job nothing
+    # else (no other permission, no secrets). persist-credentials: false means checkout does not
+    # store the credential in the checkout's Git config.
+    permissions:
+      contents: read
     steps:
       - name: The PR head (its code runs in THIS job only)
         uses: actions/checkout@v4

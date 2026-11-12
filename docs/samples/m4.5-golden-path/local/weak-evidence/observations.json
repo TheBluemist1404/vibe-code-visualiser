@@ -1,0 +1,14 @@
+{
+  "format": "vcv-observations-1",
+  "observations": [
+    {
+      "id": "obs-error-wording",
+      "kind": "concern",
+      "statement": "The 400 message for a missing recipientId changed. A client that matches on the old text could break; no criterion covers this message and no test asserts it, so this is a judgement for the reviewer, not a checked fact.",
+      "objects": ["rul-recipient-required", "cap-list-notifications"],
+      "locations": [{ "path": "server/src/notifications/notifications.controller.ts", "startLine": 11, "endLine": 11 }],
+      "resolution": "inspect",
+      "author": "agent:coder (scripted stand-in)"
+    }
+  ]
+}

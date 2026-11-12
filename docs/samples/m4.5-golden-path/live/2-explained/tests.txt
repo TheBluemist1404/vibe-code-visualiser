@@ -1,0 +1,75 @@
+
+ RUN  v5.1.0 <repo>/server
+
+ ✓ src/notifications/notifications.service.spec.ts (1 test)
+ ❯ src/enrollment/enrollment.service.spec.ts (4 tests | 1 failed)
+   ❯ EnrollmentService (4)
+     ✓ confirms an enrollment while seats are left and notifies the student
+     × rejects an enrollment into a full course and notifies the student
+     ✓ rejects a repeat enrollment without taking a second seat
+     ✓ refuses an unknown course without recording or notifying anything
+ ❯ test/app.e2e-spec.ts (3 tests | 1 failed)
+   ❯ Course Desk API (e2e) (3)
+     ✓ lists the seeded courses with free seats
+     × confirms, then rejects when full; each student is notified of their outcome
+     ✓ answers 400 for an invalid request and 404 for unknown courses or enrollments
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  test/app.e2e-spec.ts > Course Desk API (e2e) > confirms, then rejects when full; each student is notified of their outcome
+AssertionError: expected [] to deeply equal [ { id: 'ntf-2', …(4) } ]
+
+- Expected
++ Received
+
+- [
+-   {
+-     "enrollmentId": "enr-2",
+-     "id": "ntf-2",
+-     "kind": "enrollment-rejected",
+-     "message": "Modern Poetry is full; your enrollment was not accepted.",
+-     "recipientId": "stu-bob",
+-   },
+- ]
++ []
+
+ ❯ test/app.e2e-spec.ts:42:22
+     40|     expect(ada.body).toEqual([{ id: "ntf-1", recipientId: "stu-ada", k…
+     41|     const bob = await request(server).get("/api/notifications").query(…
+     42|     expect(bob.body).toEqual([
+       |                      ^
+     43|       { id: "ntf-2", recipientId: "stu-bob", kind: "enrollment-rejecte…
+     44|     ]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/enrollment/enrollment.service.spec.ts > EnrollmentService > rejects an enrollment into a full course and notifies the student
+AssertionError: expected [] to deeply equal [ ObjectContaining{…} ]
+
+- Expected
++ Received
+
+- [
+-   ObjectContaining {
+-     "enrollmentId": "enr-2",
+-     "kind": "enrollment-rejected",
+-   },
+- ]
++ []
+
+ ❯ src/enrollment/enrollment.service.spec.ts:33:51
+     31|     const e = enrollment.enroll({ studentId: "stu-bob", courseId: "crs…
+     32|     expect(e).toMatchObject({ status: "rejected", reason: "COURSE_FULL…
+     33|     expect(notifications.forRecipient("stu-bob")).toEqual([
+       |                                                   ^
+     34|       expect.objectContaining({ kind: "enrollment-rejected", enrollmen…
+     35|     ]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+
+ Test Files  2 failed | 1 passed (3)
+      Tests  2 failed | 6 passed (8)
+
+JUNIT report written to <out>/junit.xml
+npx vitest run exited 1
