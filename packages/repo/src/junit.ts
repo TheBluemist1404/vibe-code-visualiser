@@ -12,7 +12,6 @@
 // silently read as "fewer tests". This catches accidents and careless edits, not a deliberate
 // forgery with consistent numbers; provenance (who ran it) is recorded separately (testruns.ts).
 import { createHash } from "node:crypto";
-import { posix } from "node:path";
 import { pathProblem } from "./locator.ts";
 
 export const JUNIT_LIMITS = { bytes: 16 * 1024 * 1024, depth: 32, elements: 250_000, cases: 20_000, attributes: 64, nameChars: 300, messageChars: 500 } as const;
@@ -96,7 +95,11 @@ export function parseJUnit(bytes: Uint8Array, root: string): JUnitResult {
         const file = ch.attrs.get("file") ?? ch.attrs.get("classname");
         const name = ch.attrs.get("name");
         if (!file || name === undefined || name === "") throw new XmlError("a <testcase> has no name or no classname/file");
-        const rel = posix.normalize(base ? `${base}/${file}` : file);
+        // The runner's own path must already be a portable relative path: an absolute, drive, UNC,
+        // "\\" or ".." path is refused as written, never normalized into a path it might alias.
+        const raw = pathProblem(file);
+        if (raw) throw new XmlError(`test case path "${cut(file, 200)}" ${raw}`);
+        const rel = base ? `${base}/${file}` : file;
         const pp = pathProblem(rel);
         if (pp) throw new XmlError(`test case path "${cut(rel, 200)}" ${pp}`);
         const kinds = ch.children.map((c) => c.name);
@@ -137,7 +140,7 @@ export function parseJUnit(bytes: Uint8Array, root: string): JUnitResult {
   try {
     total = walkSuite(doc, []);
     if (doc.name === "testsuites") {
-      for (const [attr, actual] of [["tests", total.tests], ["failures", total.failed], ["errors", total.errors]] as const) {
+      for (const [attr, actual] of [["tests", total.tests], ["failures", total.failed], ["errors", total.errors], ["skipped", total.skipped]] as const) {
         const declared = count(doc, attr);
         if (declared !== undefined && declared !== actual) problems.push(`the report declares ${attr}="${declared}" but has ${actual}`);
       }

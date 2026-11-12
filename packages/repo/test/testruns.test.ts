@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalJson } from "../../core/src/index.ts";
@@ -135,6 +135,7 @@ test("a host-observed passing run of this candidate: every mapped case passed", 
   assert.equal(run.report.sha256, createHash("sha256").update(PASS).digest("hex"));
   const d = evaluate(repo, [run]);
   assert.deepEqual([of(d, "crt-full-course").result, of(d, "crt-full-course").resultObservedBy], ["passed", "host"]);
+  assert.deepEqual([d.runs[0]!.observedBy, d.runs[0]!.admittedAs], ["host", "captured-here"]);
   assert.equal(of(d, "crt-full-course").mappings[0]!.result!.status, "passed");
   assert.equal(of(d, "crt-confirm").result, "passed");
   assert.deepEqual(d.results.required, { passed: 1, failed: 0, stale: 0, missing: 0, unknown: 0, unverified: 0 });
@@ -212,8 +213,9 @@ test("agent-claimed runs are labelled and never host-observed", () => {
   const run = capture(repo, PASS, agentHost);
   assert.equal(run.observedBy, "agent");
   const d = evaluate(repo, [run]);
-  assert.deepEqual([of(d, "crt-full-course").result, of(d, "crt-full-course").resultObservedBy], ["passed", "agent"]);
-  assert.ok(codes(d, "crt-full-course").includes("RESULT_AGENT_CLAIMED"));
+  assert.deepEqual([of(d, "crt-full-course").result, of(d, "crt-full-course").resultObservedBy], ["passed", "claimed"]);
+  assert.deepEqual([d.runs[0]!.observedBy, d.runs[0]!.declaredObservedBy, d.runs[0]!.admittedAs], ["claimed", "agent", "imported"]);
+  assert.ok(codes(d, "crt-full-course").includes("RESULT_CLAIMED"));
 });
 
 test("an edited or forged record is refused: digest, summary, and shape", () => {
@@ -269,4 +271,116 @@ test("read-only and redacted: capture writes nothing and never prints the checko
   assert.ok(!JSON.stringify(run).includes(repo) && !JSON.stringify(d).includes(repo));
   writeFileSync(join(tmpdir(), "vcv-run-sample.json"), JSON.stringify(run)); // outside the checkout: identity unchanged
   assert.ok(evaluate(repo, [run]).runs[0]!.fresh);
+});
+
+// ---- review round 1 of PR #25 ---------------------------------------------------------------
+
+const redigest = (r: Record<string, unknown>) => {
+  const { digest: _, ...body } = r;
+  return { ...body, digest: createHash("sha256").update(canonicalJson(body)).digest("hex") };
+};
+
+test("an imported record is a claim, whatever it declares: a re-digested agent→host forgery stays claimed", () => {
+  const repo = setup();
+  const agentRun = capture(repo, PASS, agentHost);
+  const forged = redigest({ ...JSON.parse(JSON.stringify(agentRun)), observedBy: "host", principalId: "ci:invented" });
+  const d = evaluate(repo, [forged as TestRunRecord]);
+  assert.deepEqual([d.runs[0]!.observedBy, d.runs[0]!.declaredObservedBy, d.runs[0]!.admittedAs], ["claimed", "host", "imported"]);
+  assert.deepEqual([of(d, "crt-full-course").result, of(d, "crt-full-course").resultObservedBy], ["passed", "claimed"]);
+  assert.ok(codes(d, "crt-full-course").includes("RESULT_CLAIMED"));
+  // A genuine host capture written to a file and read back is a claim too.
+  const hostRun = capture(repo, PASS);
+  const copy = evaluate(repo, [JSON.parse(JSON.stringify(hostRun))]);
+  assert.equal(copy.runs[0]!.observedBy, "claimed");
+  assert.equal(of(copy, "crt-full-course").resultObservedBy, "claimed");
+  // The very object captured here, unmodified, is host-observed; edited in place it is refused.
+  assert.equal(evaluate(repo, [hostRun]).runs[0]!.observedBy, "host");
+  hostRun.principalId = "ci:other";
+  const edited = criteriaEvidence(repo, { runs: [hostRun] });
+  assert.equal(!edited.ok && edited.error.code, "RUN_INVALID");
+});
+
+test("no usable source identity, no capture and no fresh result: no Git, failed Git read, exhausted hashing budget", () => {
+  const repo = setup();
+  const run = capture(repo, PASS);
+
+  // No Git: a copy of the checkout without .git.
+  const bare = join(mkdtempSync(join(tmpdir(), "vcv-nogit-")), "course-desk");
+  cpSync(repo, bare, { recursive: true, filter: (src) => !src.split(/[\\/]/).includes(".git") });
+  const id = testIdentity(bare);
+  assert.equal(!id.ok && id.error.code, "SOURCE_IDENTITY_UNAVAILABLE");
+  const noGit = captureTestRun(bare, xml(PASS), RUN, host);
+  assert.equal(!noGit.ok && noGit.error.code, "SOURCE_IDENTITY_UNAVAILABLE");
+  edit(bare, SERVICE, "Enrollment rules. Every decision", "Enrollment rules (no git). Every decision");
+  const d1 = evaluate(bare, [JSON.parse(JSON.stringify(run))]);
+  assert.equal(d1.runs[0]!.fresh, false);
+  assert.match(d1.runs[0]!.staleBecause.join(), /no Git commit/);
+  assert.equal(of(d1, "crt-full-course").result, "stale");
+  assert.ok(d1.candidate.problem);
+
+  // More uncommitted files than are hashed.
+  for (let i = 0; i <= 5000; i++) writeFileSync(join(repo, `scratch-${i}.txt`), `${i}`);
+  const big = captureTestRun(repo, xml(PASS), RUN, host);
+  assert.equal(!big.ok && big.error.code, "SOURCE_IDENTITY_UNAVAILABLE");
+  assert.match(!big.ok ? big.error.message : "", /exceed what is hashed/);
+  const d2 = evaluate(repo, [run]);
+  assert.equal(d2.runs[0]!.fresh, false);
+  assert.equal(of(d2, "crt-full-course").result, "stale");
+  for (let i = 0; i <= 5000; i++) rmSync(join(repo, `scratch-${i}.txt`));
+
+  // A failed Git read is never a clean tree: an unreadable index makes `git diff` fail.
+  const index = join(repo, ".git/index");
+  const saved = readFileSync(index);
+  writeFileSync(index, "not an index");
+  try {
+    const broken = captureTestRun(repo, xml(PASS), RUN, host);
+    assert.equal(!broken.ok && broken.error.code, "SOURCE_IDENTITY_UNAVAILABLE");
+    assert.match(!broken.ok ? broken.error.message : "", /could not be listed \(git failed\); an unknown tree is not a clean one/);
+  } finally {
+    writeFileSync(index, saved);
+  }
+  // A record whose own identity is incomplete is never fresh.
+  const partial = redigest({ ...JSON.parse(JSON.stringify(run)), candidate: { ...run.candidate, uncommitted: { ...run.candidate.uncommitted, complete: false } } });
+  const fixedId = { ...(partial as TestRunRecord) };
+  fixedId.identityDigest = createHash("sha256").update(canonicalJson(fixedId.candidate)).digest("hex");
+  const d3 = evaluate(repo, [redigest(fixedId as unknown as Record<string, unknown>) as TestRunRecord]);
+  assert.match(d3.runs[0]!.staleBecause.join(), /not completely hashed/);
+});
+
+test("root and suite counts are both checked, skipped included; raw runner paths are validated before joining", () => {
+  const root = (attrs: string, body: string) => `<testsuites ${attrs}>${body}</testsuites>`;
+  const one = `<testsuite tests="1"><testcase classname="src/a.test.ts" name="passes"/></testsuite>`;
+  const r = parseJUnit(xml(root('tests="1" failures="0" errors="0" skipped="1"', one)), "server");
+  assert.ok(!r.ok && r.code === "REPORT_INCONSISTENT" && /skipped="1" but has 0/.test(r.message), JSON.stringify(r));
+  assert.ok(parseJUnit(xml(root('tests="1" failures="0" errors="0" skipped="0"', one)), "server").ok);
+  for (const path of ["/src/a.test.ts", "C:/src/a.test.ts", "\\\\host\\share\\a.test.ts", "src/../../a.test.ts", "src/./a.test.ts", "./src/a.test.ts", "src//a.test.ts"]) {
+    const bad = parseJUnit(xml(root('tests="1"', `<testsuite tests="1"><testcase classname="${path}" name="passes"/></testsuite>`)), "server");
+    assert.ok(!bad.ok && bad.code === "REPORT_INVALID", `${path}: ${JSON.stringify(bad)}`);
+    assert.match(!bad.ok ? bad.message : "", /test case path/);
+  }
+  // The legitimate relative path still resolves under the root.
+  const good = parseJUnit(xml(root('tests="1"', one)), "server");
+  assert.ok(good.ok && good.report.cases[0]!.path === "server/src/a.test.ts");
+});
+
+test("a capture never emits a record larger than VCV reads back; a large record round-trips", () => {
+  const repo = setup();
+  // Backslashes double in JSON, so a report under the XML limit can expand past the record limit.
+  const report = (n: number) => {
+    const name = "\\".repeat(301);
+    const message = "\\".repeat(500);
+    let body = "";
+    for (let i = 0; i < n; i++) body += `<testcase classname="src/big.test.ts" name="${i} ${name}"><failure message="${message}"/></testcase>`;
+    return `<testsuites tests="${n}" failures="${n}" errors="0"><testsuite tests="${n}" failures="${n}">${body}</testsuite></testsuites>`;
+  };
+  const over = report(9000);
+  assert.ok(Buffer.byteLength(over) < 16 * 1024 * 1024);
+  const r = captureTestRun(repo, xml(over), RUN, host);
+  assert.equal(!r.ok && r.error.code, "REPORT_TOO_LARGE");
+  const near = capture(repo, report(6000));
+  const text = `${JSON.stringify(near, null, 2)}\n`;
+  assert.ok(Buffer.byteLength(text) > 10 * 1024 * 1024 && Buffer.byteLength(text) <= 16 * 1024 * 1024, `${Buffer.byteLength(text)} bytes`);
+  const back = criteriaEvidence(repo, { runs: [JSON.parse(text)] });
+  assert.ok(back.ok, JSON.stringify(back).slice(0, 300));
+  assert.equal(back.data.runs[0]!.summary.tests, 6000);
 });

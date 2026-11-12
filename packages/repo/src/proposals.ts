@@ -126,7 +126,9 @@ export type ProposalErrorCode =
   /** M4.3: the candidate changed between reading its identity and capturing the run. */
   | "TEST_RUN_RACED"
   /** M4.3: a test-run record that does not check (shape, digest, summary). */
-  | "RUN_INVALID";
+  | "RUN_INVALID"
+  /** M4.3: the candidate's source cannot be identified exactly (no Git commit, a failed Git read, too much to hash). */
+  | "SOURCE_IDENTITY_UNAVAILABLE";
 
 export type ProposalError = { code: ProposalErrorCode; message: string; details?: { path: string; message: string }[] };
 

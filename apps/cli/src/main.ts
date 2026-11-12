@@ -3,7 +3,7 @@
 //
 // The CLI acts as the trusted host for a local single user: identity and permissions come
 // from flags here, standing in for what a real session or OAuth token would supply.
-import { readFileSync, writeFileSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, readSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { loadModel, parseYaml, ownershipTree } from "../../../packages/ir/src/index.ts";
 import type { Diagnostic, TreeNode } from "../../../packages/ir/src/index.ts";
@@ -22,6 +22,7 @@ import {
   captureTestRun,
   testIdentity,
   TEST_RUN_LIMITS,
+  JUNIT_LIMITS,
   recordImplementation,
   implementationStatus,
   reviewFinalize,
@@ -99,14 +100,17 @@ const USAGE = `vcv <command> [options]
                                         merge base, and findings labelled checked / observed / not-checked.
                                         Not a gate: it reports, and exits 0 whenever a report was produced.
 
-  criteria <path> [criterionId...] [--run <test-run.json>]... [--coverage <coverage-summary.json>] [--json]
+  criteria <path> [criterionId...] [--junit <report.xml> --runner <name> --invocation "<cmd>" [--root <dir>] [--before <d>]]
+           [--run <test-run.json>]... [--coverage <coverage-summary.json>] [--json]
                                         Read-only: the approved acceptance criteria (required / optional) and the
                                         test cases mapped to each by \`tests\` claims, verified now (resolved,
                                         stale because the test or the criterion changed, missing after a rename,
                                         ambiguous title). Map one with: binding add <path> --object <criterionId>
                                         --relation tests --locator '<file>#test:Suite > case'. With --run, each mapped
                                         case's result in runs of this exact candidate: passed / failed / stale /
-                                        missing / unknown per criterion (M4.3). Exit 0 whenever a report is produced.
+                                        missing / unknown per criterion (M4.3). --junit captures here, in this process:
+                                        the only way a run is host-observed. --run records are claims, whatever they
+                                        declare. Exit 0 whenever a report is produced.
   tests identity <path> [--json]        The candidate's identity (commit, uncommitted bytes, model revision, claims).
                                         Read it before running the tests and pass it to capture as --before.
   tests capture <path> --junit <report.xml> --runner <name> --invocation "<command>" [--root <dir>]
@@ -516,9 +520,30 @@ function reconcileCommand(): number {
   return 0;
 }
 
+/** Read at most `limit` bytes of a regular file, refusing a larger one before reading it. */
+function readBounded(file: string, limit: number): Buffer {
+  let fd: number;
+  try {
+    fd = openSync(file, "r");
+  } catch (e) {
+    throw new InputError(`cannot read ${file}: ${(e as Error).message.split("\n")[0]}`);
+  }
+  try {
+    const st = fstatSync(fd);
+    if (!st.isFile()) throw new InputError(`${file} is not a regular file`);
+    if (st.size > limit) throw new InputError(`${file} is ${st.size} bytes, more than the ${limit} read`);
+    const buf = Buffer.alloc(limit + 1);
+    let n = 0;
+    for (let r; n < buf.length && (r = readSync(fd, buf, n, buf.length - n, n)) > 0; ) n += r;
+    if (n > limit) throw new InputError(`${file} grew past ${limit} bytes while it was read`);
+    return buf.subarray(0, n);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function readJson(file: string, what: string): unknown {
-  const buf = readFileSync(file);
-  if (buf.byteLength > TEST_RUN_LIMITS.recordBytes) throw new InputError(`${file} is larger than ${TEST_RUN_LIMITS.recordBytes} bytes`);
+  const buf = readBounded(file, TEST_RUN_LIMITS.recordBytes);
   try {
     return JSON.parse(buf.toString("utf8"));
   } catch (e) {
@@ -531,6 +556,15 @@ function readCoverage(file: string): { linesPct: number; source: string } {
   const pct = (readJson(file, "coverage summary") as { total?: { lines?: { pct?: unknown } } })?.total?.lines?.pct;
   if (typeof pct !== "number" || !(pct >= 0 && pct <= 100)) throw new InputError(`${file} has no total.lines.pct (an Istanbul json-summary is expected)`);
   return { linesPct: pct, source: "istanbul json-summary" };
+}
+
+function captureInput() {
+  return {
+    root: values.root ?? "",
+    runner: { name: need(values.runner, "--runner"), ...(values["runner-version"] ? { version: values["runner-version"] } : {}) },
+    invocation: need(values.invocation, "--invocation"),
+    ...(values.before ? { before: values.before } : {}),
+  };
 }
 
 function testsCommand(): number {
@@ -547,17 +581,7 @@ function testsCommand(): number {
   }
   if (a === "capture") {
     const junit = need(values.junit, "--junit");
-    const r = captureTestRun(
-      path,
-      readFileSync(junit),
-      {
-        root: values.root ?? "",
-        runner: { name: need(values.runner, "--runner"), ...(values["runner-version"] ? { version: values["runner-version"] } : {}) },
-        invocation: need(values.invocation, "--invocation"),
-        ...(values.before ? { before: values.before } : {}),
-      },
-      ctx,
-    );
+    const r = captureTestRun(path, readBounded(junit, JUNIT_LIMITS.bytes), captureInput(), ctx);
     if (!r.ok) {
       if (values.json) console.log(JSON.stringify(r, null, 2));
       else printResultError(r);
@@ -568,7 +592,8 @@ function testsCommand(): number {
     if (values.json || !values.out) process.stdout.write(text);
     else {
       const s = r.data.summary;
-      console.log(`${values.out}: ${r.data.observedBy}-observed run by ${r.data.principalId} (digest ${r.data.digest})`);
+      console.log(`${values.out}: run captured by ${r.data.principalId}, declared ${r.data.observedBy}-observed (digest ${r.data.digest})`);
+      console.log("  as a file this record is a claim: read back with --run it is never host-observed; use criteria --junit in the trusted job");
       console.log(`  ${s.tests} case(s): ${s.passed} passed, ${s.failed} failed, ${s.errors} error(s), ${s.skipped} skipped; candidate ${r.data.identityDigest.slice(0, 12)} at ${r.data.candidate.commit?.slice(0, 12) ?? "(no commit)"}`);
     }
     return 0;
@@ -579,8 +604,18 @@ function testsCommand(): number {
 
 function criteriaCommand(): number {
   const ids = [b, ...rest].filter((x): x is string => !!x);
-  const runs = (values.run ?? []).map((f) => readJson(f, "test-run record"));
-  const r = criteriaEvidence(need(a, "<path>"), { ...(ids.length ? { ids } : {}), ...(runs.length ? { runs } : {}), ...(values.coverage ? { coverage: readCoverage(values.coverage) } : {}) });
+  const path = need(a, "<path>");
+  const runs: unknown[] = (values.run ?? []).map((f) => readJson(f, "test-run record"));
+  // --junit: capture here, in this process, and evaluate that very record (host-observed with tests:observe).
+  if (values.junit) {
+    const cap = captureTestRun(path, readBounded(values.junit, JUNIT_LIMITS.bytes), captureInput(), ctx);
+    if (!cap.ok) {
+      console.log(JSON.stringify(cap, null, 2));
+      return 1;
+    }
+    runs.unshift(cap.data);
+  }
+  const r = criteriaEvidence(path, { ...(ids.length ? { ids } : {}), ...(runs.length ? { runs } : {}), ...(values.coverage ? { coverage: readCoverage(values.coverage) } : {}) });
   if (values.json || !r.ok) {
     console.log(JSON.stringify(r.ok ? r.data : r, null, 2));
     return r.ok ? 0 : 1;
@@ -592,7 +627,7 @@ function criteriaCommand(): number {
   else console.log(`  required: ${c.requiredUnmapped} unmapped, ${c.requiredNotResolved} not fully resolved${c.requiredIncomplete ? ` (${c.requiredIncomplete} with an incomplete assessment)` : ""}; optional: ${c.optionalUnmapped} unmapped`);
   for (const run of d.runs) {
     const s = run.summary;
-    console.log(`  run ${run.index}: ${run.observedBy}-observed ${run.runner.name} by ${run.principalId}, ${s.tests} case(s) (${s.passed} passed, ${s.failed} failed, ${s.errors} error(s), ${s.skipped} skipped); suite ${run.green ? "green" : "red"}; ${run.fresh ? "describes this candidate" : `STALE: ${run.staleBecause.join("; ")}`}`);
+    console.log(`  run ${run.index}: ${run.observedBy === "host" ? "host-observed (captured here)" : `CLAIMED (${run.admittedAs}, declares ${run.declaredObservedBy})`} ${run.runner.name} by ${run.principalId}, ${s.tests} case(s) (${s.passed} passed, ${s.failed} failed, ${s.errors} error(s), ${s.skipped} skipped); suite ${run.green ? "green" : "red"}; ${run.fresh ? "describes this candidate" : `STALE: ${run.staleBecause.join("; ")}`}`);
   }
   if (d.runs.length) {
     const q = d.results.required;
@@ -605,7 +640,7 @@ function criteriaCommand(): number {
     for (const x of d.invalidClaims.items) console.log(`    ${x.file}: ${x.problem}`);
   }
   for (const e of d.criteria) {
-    console.log(`  ${e.id} [${e.verification}] ${e.result !== "unverified" ? `${e.result.toUpperCase()}${e.resultObservedBy ? ` (${e.resultObservedBy}-observed)` : ""}; mapping ` : ""}${e.mapping}: ${e.statement}`);
+    console.log(`  ${e.id} [${e.verification}] ${e.result !== "unverified" ? `${e.result.toUpperCase()}${e.resultObservedBy ? (e.resultObservedBy === "host" ? " (host-observed)" : " (claimed, not host-observed)") : ""}; mapping ` : ""}${e.mapping}: ${e.statement}`);
     console.log(`    verifies ${e.verifies.join(", ")}`);
     for (const m of e.mappings) console.log(`    ${m.state.padEnd(13)} ${m.result ? `${m.result.status.padEnd(8)} ` : ""}${m.test ? `${m.test.path} > ${m.test.name}` : `(${m.relation} claim)`}  [${m.bindingId}]${m.alsoMapsTo.length ? `  also ${m.alsoMapsTo.join(", ")}` : ""}`);
     for (const p of e.problems) console.log(`    ! ${p.code}: ${p.message}`);

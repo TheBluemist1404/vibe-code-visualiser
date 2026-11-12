@@ -6,10 +6,12 @@
 //
 //   candidate   the Git commit, the identity of every uncommitted path (bytes, not mtimes), the model
 //               revision and the set of binding claims, as one `identityDigest`;
-//   provenance  host-observed only when the caller holds `tests:observe` (the host itself ran the
-//               runner and read its output); otherwise agent-claimed. A record is data: it says who
-//               captured it, not that the claim is true. A required gate (M4.4) accepts host runs
-//               only, captured in its own trusted job;
+//   provenance  the record DECLARES `observedBy: host` only when the capturing caller holds
+//               `tests:observe`, otherwise `agent`. A declaration in a file proves nothing: anyone
+//               can write one and recompute its digest. So a consumer treats a run as host-observed
+//               only when it captured it itself, in this process (`isTrustedCapture`: the record
+//               object returned by captureTestRun, unmodified). Every imported record, whatever it
+//               declares, is a claim. The pre-merge gate (M4.4) captures in its own trusted job;
 //   invocation  the runner, its version if known, and the command, as the caller states them.
 //
 // A result is evidence for a criterion only while the candidate still has that identity: a run
@@ -25,8 +27,9 @@ import { JUNIT_LIMITS, parseJUnit } from "./junit.ts";
 import type { JUnitCase } from "./junit.ts";
 import { failFinal, finish, observed, readClaims } from "./proposals.ts";
 import type { Observation, ProposalHooks, ProposalResult } from "./proposals.ts";
-import { worktreeState } from "./worktree.ts";
+import { WORKTREE_LIMITS, worktreeState } from "./worktree.ts";
 
+/** recordBytes bounds the record as written by the CLI (JSON, 2-space indent, trailing newline) and as read back. */
 export const TEST_RUN_LIMITS = { invocationChars: 2000, runnerChars: 100, recordBytes: 16 * 1024 * 1024 } as const;
 
 export type CandidateIdentity = {
@@ -61,27 +64,65 @@ export type TestRunHost = { principalId: string; permissions: readonly Permissio
 
 const sha = (t: string) => createHash("sha256").update(t).digest("hex");
 
-/** The candidate's identity in one observation. */
-export function candidateIdentityOf(obs: Observation): CandidateIdentity {
+/**
+ * The candidate's identity in one observation, and why it cannot identify the candidate's source
+ * exactly, if it cannot: no Git commit (nothing to say which source this is), a failed Git read (never
+ * taken as a clean tree), or more uncommitted bytes than are hashed (sizes and mtimes are not an
+ * identity). A run is never bound to, or fresh against, an identity with a problem.
+ */
+export function candidateIdentityOf(obs: Observation): { candidate: CandidateIdentity; problem: string | null } {
   const root = obs.status.root;
   const commit = obs.status.git?.commit ?? null;
-  const dirty = commit ? (changedFilesSince(root, commit) ?? []) : [];
+  const listed = commit ? changedFilesSince(root, commit) : null;
+  const dirty = listed ?? [];
   const tree = worktreeState(root, dirty);
-  return {
+  const candidate: CandidateIdentity = {
     commit,
     branch: obs.status.git?.branch ?? null,
-    uncommitted: { paths: dirty.length, digest: tree.digest, complete: tree.complete },
+    uncommitted: { paths: dirty.length, digest: tree.digest, complete: tree.complete && listed !== null },
     modelRevision: obs.model.project.modelRevision,
     claims: sha(readClaims(root).key),
   };
+  const problem = !commit
+    ? "the checkout has no Git commit; a test run is bound to a commit plus the bytes of its uncommitted files"
+    : listed === null
+      ? "the uncommitted files could not be listed (git failed); an unknown tree is not a clean one"
+      : !tree.complete
+        ? `the uncommitted files exceed what is hashed (${WORKTREE_LIMITS.files} files / ${WORKTREE_LIMITS.totalBytes} bytes); sizes and mtimes do not identify their content`
+        : null;
+  return { candidate, problem };
+}
+
+/** Why a record's own candidate identity cannot be exact, or null. */
+export function recordIdentityProblem(c: CandidateIdentity): string | null {
+  if (!c.commit) return "the run names no Git commit";
+  if (!c.uncommitted.complete) return "the run's uncommitted files were not completely hashed";
+  return null;
+}
+
+// Records this process captured for a host-observing caller, with the digest they had. Membership
+// cannot be forged by JSON: only the very object captureTestRun returned is in it.
+const captured = new WeakMap<object, string>();
+
+/**
+ * True only for a record object that captureTestRun returned in this process for a caller holding
+ * `tests:observe`, unmodified since. Every imported record (parsed JSON, a copy) is false.
+ */
+export function isTrustedCapture(record: unknown): boolean {
+  if (typeof record !== "object" || record === null) return false;
+  const digest = captured.get(record);
+  if (!digest) return false;
+  const r = record as TestRunRecord;
+  return r.digest === digest && r.observedBy === "host" && recordProblem(r) === null;
 }
 export const identityDigest = (c: CandidateIdentity) => sha(canonicalJson(c));
 
 /** The candidate's identity now: read it before running the tests, and pass its digest to capture. */
 export function testIdentity(path: string, hooks: ProposalHooks = {}): ProposalResult<{ candidate: CandidateIdentity; identityDigest: string }> {
   return observed(path, hooks, (obs) => {
-    const candidate = candidateIdentityOf(obs);
-    return finish(obs, hooks, { candidate, identityDigest: identityDigest(candidate) }, { key: identityDigest(candidate), again: () => identityDigest(candidateIdentityOf(obs)) });
+    const { candidate, problem } = candidateIdentityOf(obs);
+    if (problem) return failFinal({ code: "SOURCE_IDENTITY_UNAVAILABLE", message: problem }, obs, hooks);
+    return finish(obs, hooks, { candidate, identityDigest: identityDigest(candidate) }, { key: identityDigest(candidate), again: () => identityDigest(candidateIdentityOf(obs).candidate) });
   });
 }
 
@@ -106,7 +147,8 @@ export function captureTestRun(path: string, report: Uint8Array, input: unknown,
   return observed(path, hooks, (obs) => {
     const read = parseJUnit(report, req.root);
     if (!read.ok) return failFinal({ code: read.code === "UNSAFE_PATH" ? "UNSAFE_PATH" : read.code, message: read.message }, obs, hooks);
-    const candidate = candidateIdentityOf(obs);
+    const { candidate, problem } = candidateIdentityOf(obs);
+    if (problem) return failFinal({ code: "SOURCE_IDENTITY_UNAVAILABLE", message: `${problem}. Commit, or capture in a Git checkout with fewer uncommitted files` }, obs, hooks);
     const digest = identityDigest(candidate);
     if (req.before && req.before !== digest) {
       return failFinal({ code: "TEST_RUN_RACED", message: `the candidate changed between testIdentity (${req.before.slice(0, 12)}) and capture (${digest.slice(0, 12)}); the report may describe neither. Run the tests again` }, obs, hooks);
@@ -126,7 +168,14 @@ export function captureTestRun(path: string, report: Uint8Array, input: unknown,
       duplicates: read.report.duplicates,
     };
     const record: TestRunRecord = { ...body, digest: sha(canonicalJson(body)) };
-    return finish(obs, hooks, record, { key: digest, again: () => identityDigest(candidateIdentityOf(obs)) });
+    // The record must fit what VCV reads back (as the CLI writes it).
+    const bytes = Buffer.byteLength(`${JSON.stringify(record, null, 2)}\n`);
+    if (bytes > TEST_RUN_LIMITS.recordBytes) {
+      return failFinal({ code: "REPORT_TOO_LARGE", message: `the test-run record would be ${bytes} bytes, more than the ${TEST_RUN_LIMITS.recordBytes} VCV reads back; split the run (e.g. one report per package)` }, obs, hooks);
+    }
+    const out = finish(obs, hooks, record, { key: digest, again: () => identityDigest(candidateIdentityOf(obs).candidate) });
+    if (out.ok && record.observedBy === "host") captured.set(out.data, record.digest);
+    return out;
   });
 }
 

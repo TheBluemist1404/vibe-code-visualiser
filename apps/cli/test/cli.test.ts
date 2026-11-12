@@ -371,23 +371,35 @@ test("tests capture + criteria --run: per-criterion results from a real Vitest r
     spawnSync("node", ["--experimental-strip-types", "--no-warnings", MAIN, "tests", "capture", repo, "--junit", join(fixtures, report), "--root", "server", "--runner", "vitest", "--invocation", "npx vitest run --reporter=junit", "--before", before, "--out", join(scratch, outFile)], { encoding: "utf8", env: env ?? process.env });
   const ok = capture("vitest-pass.xml", "pass.json");
   assert.equal(ok.status, 0, ok.stdout + ok.stderr);
-  assert.match(ok.stdout, /host-observed run by local-user/);
+  assert.match(ok.stdout, /run captured by local-user, declared host-observed/);
+  assert.match(ok.stdout, /as a file this record is a claim/);
   assert.match(ok.stdout, /8 case\(s\): 8 passed, 0 failed, 0 error\(s\), 0 skipped/);
   const red = capture("vitest-fail-skip.xml", "red.json");
   assert.equal(red.status, 0, red.stdout + red.stderr);
   const agentRun = capture("vitest-pass.xml", "agent.json", { ...process.env, VCV_HOST_PRINCIPAL: "agent:coder", VCV_HOST_PERMISSIONS: "binding:record" });
   assert.equal(agentRun.status, 0, agentRun.stdout + agentRun.stderr);
-  assert.match(agentRun.stdout, /agent-observed run by agent:coder/);
+  assert.match(agentRun.stdout, /run captured by agent:coder, declared agent-observed/);
 
-  const passed = vcv("criteria", repo, "--run", join(scratch, "pass.json"));
-  assert.equal(passed.status, 0, passed.stderr);
+  // Captured here, in this process: the only host-observed path.
+  const passed = vcv("criteria", repo, "--junit", join(fixtures, "vitest-pass.xml"), "--root", "server", "--runner", "vitest", "--invocation", "npx vitest run --reporter=junit", "--before", before);
+  assert.equal(passed.status, 0, passed.stdout + passed.stderr);
   assert.match(passed.stdout, /crt-full-course \[required\] PASSED \(host-observed\)/);
-  assert.match(passed.stdout, /run 0: host-observed vitest by local-user, 8 case\(s\).*suite green; describes this candidate/);
+  assert.match(passed.stdout, /run 0: host-observed \(captured here\) vitest by local-user, 8 case\(s\).*suite green; describes this candidate/);
+  // The same host capture read back from a file is a claim.
+  const imported = vcv("criteria", repo, "--run", join(scratch, "pass.json"));
+  assert.match(imported.stdout, /crt-full-course \[required\] PASSED \(claimed, not host-observed\)/);
+  assert.match(imported.stdout, /run 0: CLAIMED \(imported, declares host\)/);
+  assert.match(imported.stdout, /! RESULT_CLAIMED/);
+  // An oversized record file is refused before it is read.
+  writeFileSync(join(scratch, "huge.json"), Buffer.alloc(16 * 1024 * 1024 + 1, 32));
+  const huge = vcv("criteria", repo, "--run", join(scratch, "huge.json"));
+  assert.equal(huge.status, 2);
+  assert.match(huge.stderr, /more than the 16777216 read/);
   const failed = vcv("criteria", repo, "--run", join(scratch, "red.json"));
   assert.match(failed.stdout, /crt-full-course \[required\] FAILED/);
   assert.match(failed.stdout, /! TEST_FAILED: mapped test server\/src\/enrollment\/enrollment\.service\.spec\.ts > EnrollmentService > rejects an enrollment into a full course/);
   const json = JSON.parse(vcv("criteria", repo, "--run", join(scratch, "agent.json"), "--json").stdout);
-  assert.equal(json.criteria[0].resultObservedBy, "agent");
+  assert.equal(json.criteria[0].resultObservedBy, "claimed");
   // A capture of a report that does not add up is refused.
   writeFileSync(join(scratch, "bad.xml"), readFileSync(join(fixtures, "vitest-pass.xml"), "utf8").replace('tests="8"', 'tests="9"'));
   const bad = vcv("tests", "capture", repo, "--junit", join(scratch, "bad.xml"), "--root", "server", "--runner", "vitest", "--invocation", "x");

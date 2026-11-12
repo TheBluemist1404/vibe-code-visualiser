@@ -133,6 +133,23 @@ post-merge rewrite and no inference.
 - **Faster verification.** The criteria read reuses M4.2's per-read `verifyMemo`. Adding runs adds
   one identity read to the guard.
 
+### Review round 1 (PR #25)
+
+- **Provenance is decided by the consumer, not by the record.** A record's `observedBy` is only what
+  its capturer declared. The criteria report treats a run as host-observed only for the record
+  object `captureTestRun` returned in the same process to a `tests:observe` caller, unmodified (a
+  module-private WeakMap keyed by that object). Every imported record is `claimed`, including a
+  correctly re-digested agent→host forgery. `vcv criteria --junit` is the CLI's in-process path;
+  `--run` files are claims.
+- **No exact source identity, no evidence.** No Git commit, a failed Git listing, or an exhausted
+  hashing budget refuses capture (`SOURCE_IDENTITY_UNAVAILABLE`) and makes every run stale. A
+  failed read is never coalesced into a clean tree.
+- **Report reading.** The root `skipped` total is checked like the others. A runner path is
+  validated as written before it is joined to the root, with no normalization, so `/src/a.ts` can
+  never alias `server/src/a.ts`.
+- **Sizes that round-trip.** Capture refuses a record larger than the 16 MiB VCV reads back. The
+  CLI checks a file's size before reading it, for reports and records alike.
+
 ## Consequences
 
 - A code-first PR that edits bound code shows stale claims and the exact declarations, but VCV

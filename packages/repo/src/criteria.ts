@@ -30,7 +30,7 @@ import { failFinal, finish, moduleOf, observed, readClaims } from "./proposals.t
 import type { ProposalHooks, ProposalResult } from "./proposals.ts";
 import { worktreeState } from "./worktree.ts";
 import { caseKey } from "./junit.ts";
-import { candidateIdentityOf, identityDigest, recordProblem, testRunRecordSchema } from "./testruns.ts";
+import { candidateIdentityOf, identityDigest, isTrustedCapture, recordIdentityProblem, recordProblem, testRunRecordSchema } from "./testruns.ts";
 import type { CandidateIdentity, TestRunRecord } from "./testruns.ts";
 
 export const CRITERIA_LIMITS = {
@@ -95,8 +95,8 @@ export type MappingProblemCode =
   | "RESULT_STALE"
   /** A run reports the mapped test identity more than once. */
   | "RESULT_AMBIGUOUS"
-  /** Every passing result comes from agent-claimed runs; a host-required gate does not accept them. */
-  | "RESULT_AGENT_CLAIMED";
+  /** Some passing results come only from claimed runs (imported records, or agent captures); host evidence would need a capture here. */
+  | "RESULT_CLAIMED";
 
 export type TestIdentity = {
   path: string;
@@ -127,7 +127,8 @@ export type MappingResult = {
   status: "passed" | "failed" | "error" | "skipped" | "not-run" | "ambiguous" | "stale";
   /** Indexes into `runs` of the runs that reported this test case. */
   runs: number[];
-  observedBy: ("host" | "agent")[];
+  /** Effective provenance of the runs behind this status: host only for runs captured in this process for a trusted caller. */
+  observedBy: ("host" | "claimed")[];
   message?: string;
 };
 
@@ -162,13 +163,20 @@ export type CriterionEvidence = {
   problemsTotal: number;
   problemsTruncated: boolean;
   result: CriterionResult;
-  /** Who observed the results behind a `passed` verdict: host only, or some agent-claimed. Null otherwise. */
-  resultObservedBy: "host" | "agent" | null;
+  /** Who observed the results behind a `passed` verdict: host only, or some only claimed. Null otherwise. */
+  resultObservedBy: "host" | "claimed" | null;
 };
 
 export type RunSummary = {
   index: number;
-  observedBy: "host" | "agent";
+  /**
+   * Effective provenance: host only when this process captured the run itself for a caller holding
+   * `tests:observe` (captured-here). An imported record is a claim, whatever it declares.
+   */
+  observedBy: "host" | "claimed";
+  /** What the record says about itself. Never trusted on its own. */
+  declaredObservedBy: "host" | "agent";
+  admittedAs: "captured-here" | "imported";
   principalId: string;
   runner: { name: string; version?: string };
   invocation: string;
@@ -217,7 +225,7 @@ export type CriteriaReport = {
   /** M4.3: the supplied runs (empty when none were). */
   runs: RunSummary[];
   /** The candidate the runs are compared with. */
-  candidate: CandidateIdentity & { identityDigest: string };
+  candidate: CandidateIdentity & { identityDigest: string; problem: string | null };
   results: Record<"required" | "optional", Record<CriterionResult, number>>;
   coverage: { linesPct: number; source: string; note: string } | null;
   /** Report-level observations (e.g. a green suite while a required criterion has no passing result). */
@@ -256,10 +264,16 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
       const p = recordProblem(r);
       if (p) return failFinal({ code: "RUN_INVALID", message: `run ${i}: ${p}` }, obs, hooks);
     }
-    const candidate = candidateIdentityOf(obs);
+    // Host-observed only for the very record objects this process captured for a trusted caller;
+    // the parsed copies above are never trusted, nor is anything a record says about itself.
+    const rawRuns = ((input ?? {}) as { runs?: unknown[] }).runs ?? [];
+    const trusted = runs.map((_, i) => isTrustedCapture(rawRuns[i]));
+    const { candidate, problem: identityProblem } = candidateIdentityOf(obs);
     const candidateDigest = identityDigest(candidate);
     const runSummaries: RunSummary[] = runs.map((r, index) => {
       const staleBecause = [
+        identityProblem ? `the candidate's source cannot be identified exactly: ${identityProblem}` : null,
+        recordIdentityProblem(r.candidate),
         r.candidate.commit !== candidate.commit ? `it ran at commit ${String(r.candidate.commit).slice(0, 12)}, the candidate is ${String(candidate.commit).slice(0, 12)}` : null,
         r.candidate.uncommitted.digest !== candidate.uncommitted.digest ? "uncommitted files differ from when it ran" : null,
         r.candidate.modelRevision !== candidate.modelRevision ? `it ran at model revision ${r.candidate.modelRevision}, the candidate is at ${candidate.modelRevision}` : null,
@@ -267,7 +281,9 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
       ].filter((x): x is string => !!x);
       return {
         index,
-        observedBy: r.observedBy,
+        observedBy: trusted[index] ? "host" : "claimed",
+        declaredObservedBy: r.observedBy,
+        admittedAs: trusted[index] ? "captured-here" : "imported",
         principalId: cut(r.principalId, 256),
         runner: r.runner,
         invocation: cut(r.invocation, 300),
@@ -293,7 +309,7 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
         if (b.dup.has(k)) ambiguous = true;
         hits.push({ i, status: hit.status, ...(hit.message ? { message: hit.message } : {}) });
       });
-      const observedBy = (is: number[]) => [...new Set(is.map((i) => runs[i]!.observedBy))].sort();
+      const observedBy = (is: number[]) => [...new Set(is.map((i) => runSummaries[i]!.observedBy))].sort();
       if (ambiguous) return { status: "ambiguous", runs: hits.map((h) => h.i), observedBy: observedBy(hits.map((h) => h.i)) };
       if (hits.length) {
         const worst = (["error", "failed", "skipped", "passed"] as const).find((s) => hits.some((h) => h.status === s))!;
@@ -366,7 +382,7 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
       },
       budget: { limit: CRITERIA_LIMITS.bytes, bytes: 0, shrunk: false },
       runs: runSummaries,
-      candidate: { ...candidate, identityDigest: candidateDigest },
+      candidate: { ...candidate, identityDigest: candidateDigest, problem: identityProblem },
       results: tally(evidence),
       coverage: parsed.data.coverage
         ? { ...parsed.data.coverage, source: cut(parsed.data.coverage.source, 200), note: "line coverage says which lines ran, not which approved criteria a passing test checks; it never counts as criterion evidence" }
@@ -380,7 +396,7 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
       again: () => {
         const c = readClaims(root);
         const f = [...new Set(c.entries.filter((e) => e.claim && criterionIds.has(e.claim.modelObjectId)).map((e) => e.claim!.locator.path))].sort();
-        return canonicalJson([c.key, worktreeState(root, f.length ? f : files).digest, identityDigest(candidateIdentityOf(obs))]);
+        return canonicalJson([c.key, worktreeState(root, f.length ? f : files).digest, identityDigest(candidateIdentityOf(obs).candidate)]);
       },
     };
     const bounded = fitBudget(redact(data, root));
@@ -558,7 +574,7 @@ function criterionOf(
   const passedBy = verdict === "passed" ? [...new Set(results.flatMap((x) => x.r.observedBy))] : [];
   // A case passed in a host run counts as host-observed; agent-only passes are labelled.
   const agentOnly = verdict === "passed" && results.some((x) => !x.r.observedBy.includes("host"));
-  if (agentOnly) problems.push({ code: "RESULT_AGENT_CLAIMED", message: `every mapped test case passed, but some results come only from agent-claimed runs; a gate that requires host evidence does not accept them` });
+  if (agentOnly) problems.push({ code: "RESULT_CLAIMED", message: `every mapped test case passed, but some results come only from claimed runs (imported records or agent captures, whatever they declare); host evidence needs the host to capture the run itself` });
   return {
     ...base,
     mapping: testMappings === 0 ? (incomplete ? "unknown" : "none") : resolved === testMappings ? "resolved" : resolved > 0 ? "partial" : "unresolved",
@@ -570,7 +586,7 @@ function criterionOf(
     problemsTotal: problems.length,
     problemsTruncated: problems.length > CRITERIA_LIMITS.problemsPerCriterion,
     result: verdict,
-    resultObservedBy: verdict === "passed" ? (agentOnly ? "agent" : passedBy.includes("host") ? "host" : "agent") : null,
+    resultObservedBy: verdict === "passed" ? (agentOnly ? "claimed" : passedBy.includes("host") ? "host" : "claimed") : null,
   };
 }
 

@@ -18,13 +18,15 @@ BEFORE=$(vcv tests identity . --json | jq -r .identityDigest)
 # 2. The project's own runner, with a per-case machine-readable report, written OUTSIDE the checkout.
 (cd server && npx vitest run --reporter=junit --outputFile="$RUNNER_TEMP/junit.xml")
 
-# 3. Bind the report to the candidate.
-vcv tests capture . --junit "$RUNNER_TEMP/junit.xml" --root server \
+# 3. Capture the report HERE and evaluate it in the same process: the host-observed path.
+vcv criteria . --junit "$RUNNER_TEMP/junit.xml" --root server \
   --runner vitest --runner-version 5.1.0 --invocation "npx vitest run --reporter=junit" \
-  --before "$BEFORE" --out "$RUNNER_TEMP/test-run.json"
+  --before "$BEFORE" [--coverage coverage/coverage-summary.json]
 
-# 4. Per-criterion results.
-vcv criteria . --run "$RUNNER_TEMP/test-run.json" [--coverage coverage/coverage-summary.json]
+# Or keep the record as a file (for an agent, an artifact, a later look). Read back, it is a claim.
+vcv tests capture . --junit "$RUNNER_TEMP/junit.xml" --root server --runner vitest \
+  --invocation "npx vitest run --reporter=junit" --before "$BEFORE" --out "$RUNNER_TEMP/test-run.json"
+vcv criteria . --run "$RUNNER_TEMP/test-run.json"
 ```
 
 `--root` is the directory the runner's paths are relative to. Vitest run in `server/` reports
@@ -41,16 +43,37 @@ candidate's identity, and capture is refused as `TEST_RUN_RACED`.
 | Field | Meaning |
 |---|---|
 | `candidate` | Git commit, branch, the digest of every uncommitted path's bytes, model revision, and the digest of the binding claims. `identityDigest` is the digest of all of it. |
-| `observedBy` | `host` when the caller holds the `tests:observe` permission (the host itself ran the runner and read the report). Otherwise `agent`: an agent says it ran the tests. |
+| `observedBy` | What the capturing caller **declared**: `host` when it held the `tests:observe` permission, otherwise `agent`. A declaration, never trusted on its own (below). |
 | `runner`, `invocation`, `root` | As the caller states them. |
 | `report` | Format, sha256 and size of the exact report bytes. |
 | `cases`, `summary`, `duplicates` | Every case: path, title (cut at 300 characters, with a digest), status `passed` / `failed` / `error` / `skipped`, and the failure message (cut at 500). |
 | `digest` | sha256 of the canonical record. It catches accidental edits. It is **not** a signature. |
 
-A record is data. It says who captured it, not that what it says is true. Anyone who can write
-files can write one that claims `observedBy: host`. That is why the pre-merge gate (M4.4) accepts
-host evidence only from a capture made in its own trusted job, never from a record the candidate
-supplies.
+A record is data. Anyone who can write a file can write one that says `observedBy: host` and
+recompute its digest. So the criteria report decides provenance itself:
+
+- **host**: the record object was returned by `captureTestRun` in this same process, for a caller
+  holding `tests:observe`, and has not changed since (`isTrustedCapture`). On the CLI this means
+  `vcv criteria --junit …`. The pre-merge gate (M4.4) captures this way, in its own trusted job.
+- **claimed**: everything else. That covers every imported record (`--run`, parsed JSON, a copy),
+  whatever it declares and whoever captured it, and every agent capture. `declaredObservedBy` and
+  `admittedAs: "imported"` show what it said about itself.
+
+Trust never comes from a principal string, an environment label, a JSON field or a digest that
+anyone can recompute.
+
+A capture is refused (`SOURCE_IDENTITY_UNAVAILABLE`) when the candidate's source cannot be
+identified exactly:
+
+- the checkout has no Git commit;
+- Git fails to list the uncommitted files (a failed read is never taken as a clean tree);
+- the uncommitted files exceed what is hashed (5,000 files / 512 MiB), where sizes and mtimes
+  would stand in for content.
+
+For the same reasons, a run is never fresh against such a candidate, nor when the record's own
+identity is incomplete. A record that would be larger than the 16 MiB VCV reads back is refused
+(`REPORT_TOO_LARGE`), so a capture never produces a file `--run` cannot read. The CLI checks
+every file's size before reading it.
 
 ## Reading the report strictly
 
@@ -58,7 +81,10 @@ The reader accepts the subset of XML that JUnit reports use. It refuses:
 
 - a DOCTYPE or any entity declaration, so a report cannot expand or include anything;
 - malformed or truncated XML;
-- unknown entities, invalid UTF-8, and unsafe or escaping case paths;
+- unknown entities and invalid UTF-8;
+- a runner path that is not already a portable relative path (absolute, drive letter, UNC, `\`, `.`
+  or `..` segments). It is refused as written, never normalized into a path that could alias a
+  mapped case;
 - more than 16 MiB, 20,000 cases, 250,000 elements or nesting deeper than 32.
 
 Every declared count (`tests`, `failures`, `errors`, `skipped`, per suite and for the root) must
@@ -93,8 +119,8 @@ Each criterion then gets a `result`:
 | `unknown` | some claim files could not be read |
 | `unverified` | no runs were supplied |
 
-`resultObservedBy` is `host` when the passing results come from host runs. When some passes are
-agent-claimed it is `agent`, with `RESULT_AGENT_CLAIMED`.
+`resultObservedBy` is `host` when every passing result comes from a run captured here for a trusted
+caller. Otherwise it is `claimed`, with `RESULT_CLAIMED`.
 
 The report also lists each run (provenance, runner, freshness, the ordinary suite summary, `green`)
 and counts the results for required and optional criteria. It adds two notes for the cases that
