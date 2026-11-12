@@ -1,0 +1,352 @@
+{
+  "format": "vcv-gate-1",
+  "decision": "block",
+  "headline": "blocked: 5 blocking reasons (crt-confirmation-notified, crt-rejection-notified, crt-rejection-notified, …)",
+  "base": {
+    "commit": "088ac36f8c018167159d2d285cdeaafa6d927cc8",
+    "mergeBase": "088ac36f8c018167159d2d285cdeaafa6d927cc8",
+    "containedInCandidate": true,
+    "modelRevision": "rev-3-bd922e630c6e"
+  },
+  "candidate": {
+    "commit": "a9c443056274f9cb3b363280a9eebc958ba28d02",
+    "branch": "code-first/quiet-rejections",
+    "dirty": false,
+    "modelRevision": "rev-3-bd922e630c6e",
+    "identityDigest": "014f77c643b52920ce097470c19df2721e57062426088ea29a72bc6fe6ad133c"
+  },
+  "change": {
+    "kind": "code-first",
+    "lineage": "unchanged",
+    "changedFiles": 1,
+    "introducedRevisions": 0
+  },
+  "policy": {
+    "source": ".github/vcv-policy.json at the base (088ac36f8c01)",
+    "digest": "6b5096a4bad7e6a285593b491c7cdb5e1d5abb7027aa1980903a6f08c8ad64e9",
+    "changedByCandidate": false,
+    "effective": {
+      "format": "vcv-policy-1",
+      "optional": {
+        "failed": "warn",
+        "stale": "warn",
+        "missing": "warn",
+        "unknown": "warn",
+        "unverified": "warn",
+        "claimed": "warn"
+      },
+      "structural": "block",
+      "bindings": {
+        "related": "warn",
+        "unrelated": "warn"
+      },
+      "coverage": "warn",
+      "unsupported": "warn",
+      "baseNotContained": "warn",
+      "mappingChanged": "warn",
+      "noCriteria": "warn",
+      "observations": {
+        "contradiction": "block",
+        "concern": "warn",
+        "invalidReferences": "warn"
+      },
+      "policyChanged": "warn",
+      "requireEvidence": [
+        {
+          "object": "rul-announce-every-decision",
+          "reason": "every enrollment decision must reach the student"
+        }
+      ]
+    }
+  },
+  "reasons": [
+    {
+      "severity": "block",
+      "code": "TEST_FAILED",
+      "rule": "required.failed",
+      "basis": "checked",
+      "criterionId": "crt-confirmation-notified",
+      "objectIds": [
+        "rul-announce-every-decision",
+        "cap-enroll"
+      ],
+      "test": {
+        "path": "server/test/app.e2e-spec.ts",
+        "name": "Course Desk API (e2e) > confirms, then rejects when full; each student is notified of their outcome"
+      },
+      "bindingId": "test.confirmation.e2e",
+      "message": "crt-confirmation-notified (required) is failed: \"Course Desk API (e2e) > confirms, then rejects when full; each student is notified of their outcome\" in server/test/app.e2e-spec.ts failed: expected [] to deeply equal [ { id: 'ntf-2', …(4) } ]"
+    },
+    {
+      "severity": "block",
+      "code": "TEST_FAILED",
+      "rule": "required.failed",
+      "basis": "checked",
+      "criterionId": "crt-rejection-notified",
+      "objectIds": [
+        "rul-announce-every-decision",
+        "rul-seat-limit",
+        "cap-enroll"
+      ],
+      "test": {
+        "path": "server/test/app.e2e-spec.ts",
+        "name": "Course Desk API (e2e) > confirms, then rejects when full; each student is notified of their outcome"
+      },
+      "bindingId": "test.rejection.e2e",
+      "message": "crt-rejection-notified (required) is failed: \"Course Desk API (e2e) > confirms, then rejects when full; each student is notified of their outcome\" in server/test/app.e2e-spec.ts failed: expected [] to deeply equal [ { id: 'ntf-2', …(4) } ]"
+    },
+    {
+      "severity": "block",
+      "code": "TEST_FAILED",
+      "rule": "required.failed",
+      "basis": "checked",
+      "criterionId": "crt-rejection-notified",
+      "objectIds": [
+        "rul-announce-every-decision",
+        "rul-seat-limit",
+        "cap-enroll"
+      ],
+      "test": {
+        "path": "server/src/enrollment/enrollment.service.spec.ts",
+        "name": "EnrollmentService > rejects an enrollment into a full course and notifies the student"
+      },
+      "bindingId": "test.rejection.unit",
+      "message": "crt-rejection-notified (required) is failed: \"EnrollmentService > rejects an enrollment into a full course and notifies the student\" in server/src/enrollment/enrollment.service.spec.ts failed: expected [] to deeply equal [ ObjectContaining{…} ]"
+    },
+    {
+      "severity": "block",
+      "code": "EVIDENCE_REQUIRED",
+      "rule": "requireEvidence",
+      "basis": "checked",
+      "objectIds": [
+        "rul-announce-every-decision"
+      ],
+      "message": "rul-announce-every-decision is touched by this change and the policy requires a host-observed pass of a required criterion that verifies it (crt-confirmation-notified, crt-rejection-notified did not pass). every enrollment decision must reach the student"
+    },
+    {
+      "severity": "block",
+      "code": "AGENT_CONTRADICTION",
+      "rule": "observations.contradiction",
+      "basis": "claim",
+      "observationId": "obs-rejection-not-announced",
+      "objectIds": [
+        "rul-announce-every-decision",
+        "crt-rejection-notified",
+        "cap-enroll"
+      ],
+      "path": "server/src/enrollment/enrollment.service.ts",
+      "message": "obs-rejection-not-announced (agent claim, not checked by VCV; proposes fix-code): enroll() still records a rejected enrollment but no longer calls notifications.notify() for it, so a student turned away from a full course gets no enrollment-rejected notification. The approved rule says every decision, confirmed or rejected, results in exactly one notification."
+    },
+    {
+      "severity": "warn",
+      "code": "CLAIM_STALE",
+      "basis": "checked",
+      "message": "claim impl.cap-enroll (cap-enroll at server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll) is stale (code: the selected declaration's code differs from the recorded fingerprint). The code or object moved since the claim; whether it still does what the model says is for an agent or a person to judge",
+      "objectIds": [
+        "cap-enroll"
+      ],
+      "bindingId": "impl.cap-enroll",
+      "path": "server/src/enrollment/enrollment.service.ts",
+      "rule": "bindings.related"
+    },
+    {
+      "severity": "warn",
+      "code": "CLAIM_STALE",
+      "basis": "checked",
+      "message": "claim impl.rul-announce-every-decision (rul-announce-every-decision at server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll) is stale (code: the selected declaration's code differs from the recorded fingerprint). The code or object moved since the claim; whether it still does what the model says is for an agent or a person to judge",
+      "objectIds": [
+        "rul-announce-every-decision"
+      ],
+      "bindingId": "impl.rul-announce-every-decision",
+      "path": "server/src/enrollment/enrollment.service.ts",
+      "rule": "bindings.related"
+    },
+    {
+      "severity": "warn",
+      "code": "CLAIM_STALE",
+      "basis": "checked",
+      "message": "claim impl.rul-seat-limit (rul-seat-limit at server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll) is stale (code: the selected declaration's code differs from the recorded fingerprint). The code or object moved since the claim; whether it still does what the model says is for an agent or a person to judge",
+      "objectIds": [
+        "rul-seat-limit"
+      ],
+      "bindingId": "impl.rul-seat-limit",
+      "path": "server/src/enrollment/enrollment.service.ts",
+      "rule": "bindings.related"
+    }
+  ],
+  "reasonsTotal": 8,
+  "reasonsTruncated": false,
+  "counts": {
+    "block": 5,
+    "warn": 3
+  },
+  "criteria": {
+    "items": [
+      {
+        "id": "crt-confirmation-notified",
+        "verification": "required",
+        "result": "failed",
+        "observedBy": null,
+        "verifies": [
+          "rul-announce-every-decision",
+          "cap-enroll"
+        ]
+      },
+      {
+        "id": "crt-rejection-notified",
+        "verification": "required",
+        "result": "failed",
+        "observedBy": null,
+        "verifies": [
+          "rul-announce-every-decision",
+          "rul-seat-limit",
+          "cap-enroll"
+        ]
+      },
+      {
+        "id": "crt-repeat-rejected",
+        "verification": "optional",
+        "result": "passed",
+        "observedBy": "host",
+        "verifies": [
+          "rul-no-double-enroll"
+        ]
+      }
+    ],
+    "total": 3,
+    "truncated": false,
+    "results": {
+      "required": {
+        "passed": 0,
+        "failed": 2,
+        "stale": 0,
+        "missing": 0,
+        "unknown": 0,
+        "unverified": 0
+      },
+      "optional": {
+        "passed": 1,
+        "failed": 0,
+        "stale": 0,
+        "missing": 0,
+        "unknown": 0,
+        "unverified": 0
+      }
+    }
+  },
+  "runs": [
+    {
+      "index": 0,
+      "observedBy": "host",
+      "declaredObservedBy": "host",
+      "admittedAs": "captured-here",
+      "principalId": "ci:vcv-premerge-gate",
+      "runner": {
+        "name": "vitest"
+      },
+      "invocation": "npx vitest run --reporter=junit (job candidate-tests)",
+      "report": {
+        "format": "junit",
+        "sha256": "60c5b4135d566da869fe50b984e1eae0b94839706d9a302e8f889ae93d023cf5",
+        "bytes": 3363
+      },
+      "digest": "52a8f182f88c9b4cc775d6a99f35fed493b0baec7e493c79092955cb3dba8159",
+      "fresh": true,
+      "staleBecause": [],
+      "summary": {
+        "tests": 8,
+        "passed": 6,
+        "failed": 2,
+        "errors": 0,
+        "skipped": 0
+      },
+      "green": false
+    }
+  ],
+  "observations": [
+    {
+      "id": "obs-rejection-not-announced",
+      "kind": "contradiction",
+      "basis": "claim",
+      "statement": "enroll() still records a rejected enrollment but no longer calls notifications.notify() for it, so a student turned away from a full course gets no enrollment-rejected notification. The approved rule says every decision, confirmed or rejected, results in exactly one notification.",
+      "resolution": "fix-code",
+      "author": "agent:coder (scripted stand-in)",
+      "objects": [
+        {
+          "id": "rul-announce-every-decision",
+          "exists": true,
+          "kind": "rule"
+        },
+        {
+          "id": "crt-rejection-notified",
+          "exists": true,
+          "kind": "criterion"
+        },
+        {
+          "id": "cap-enroll",
+          "exists": true,
+          "kind": "capability"
+        }
+      ],
+      "locations": [
+        {
+          "path": "server/src/enrollment/enrollment.service.ts",
+          "startLine": 42,
+          "endLine": 45,
+          "check": "ok",
+          "lines": 54
+        }
+      ],
+      "tests": [
+        {
+          "path": "server/src/enrollment/enrollment.service.spec.ts",
+          "name": "EnrollmentService > rejects an enrollment into a full course and notifies the student",
+          "check": "ok",
+          "mapped": true,
+          "result": "failed"
+        },
+        {
+          "path": "server/test/app.e2e-spec.ts",
+          "name": "Course Desk API (e2e) > confirms, then rejects when full; each student is notified of their outcome",
+          "check": "ok",
+          "mapped": true,
+          "result": "failed"
+        }
+      ],
+      "references": "verified",
+      "problems": []
+    }
+  ],
+  "observationsTruncated": false,
+  "reconciliation": {
+    "summary": {
+      "integrity": "ok",
+      "structural": 0,
+      "staleClaims": 3,
+      "locatorProblems": 0,
+      "removedClaims": 0,
+      "unboundObjects": 0,
+      "changedFiles": 1,
+      "unmappedFiles": 0,
+      "notChecked": 0,
+      "bindingsAssessed": true
+    },
+    "integrity": {
+      "ok": true,
+      "authorization": "caller-asserted: ok means consistent and attested under the trust anchor given here; it authorizes a change only when that anchor (and --base) is supplied by the host from the hosting service's protected branch, in a check the change under review cannot edit"
+    },
+    "findingsTotal": 4
+  },
+  "notes": [],
+  "budget": {
+    "limit": 524288,
+    "bytes": 12648,
+    "shrunk": false
+  },
+  "implementationChecked": false,
+  "limits": [
+    "A passing gate says the history is approved, the claims and the model agree where VCV can check them, and every required criterion's mapped test cases passed in a run captured here. It does not say those tests check the right thing: a mapping is an agent's or a person's claim.",
+    "Agent observations are interpretations. VCV checks that the objects, files, lines and test cases they cite exist; it never confirms or refutes what they say.",
+    "Tests were run by the host's own runner, outside VCV. A run is host-observed only when this process captured its report; how far that report can be trusted is how far the job that produced it can be."
+  ]
+}

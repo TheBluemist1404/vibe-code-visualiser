@@ -1,0 +1,14 @@
+test.rejection.unit: reasserted (resolved: test "EnrollmentService > rejects an enrollment into a full course without notifying the student" resolves to test EnrollmentService > rejects an enrollment into a full course without notifying the student at line 28)
+  digest: 038862b44c20d7c4dd2b13c9c17c28aa1c89d4902054f769743839d777d53e78
+test.rejection.e2e: reasserted (resolved: test "Course Desk API (e2e) > confirms, then rejects when full; only the confirmed student is notified" resolves to test Course Desk API (e2e) > confirms, then rejects when full; only the confirmed student is notified at line 29)
+  digest: c36167b608f543e6dc18e599a3223717257fd5c6a1b9f9d8cfd6ff036375eb56
+test.confirmation.e2e: reasserted (resolved: test "Course Desk API (e2e) > confirms, then rejects when full; only the confirmed student is notified" resolves to test Course Desk API (e2e) > confirms, then rejects when full; only the confirmed student is notified at line 29)
+  digest: 4a61ee9bb65cf32fc1f5072d750cbc13eb15371837dc14a93c803612facbd8e8
+test.rul-seat-limit: reasserted (resolved: test "EnrollmentService > rejects an enrollment into a full course without notifying the student" resolves to test EnrollmentService > rejects an enrollment into a full course without notifying the student at line 28)
+  digest: 99c25f119bfe51e99d3053bc71e8645fdf926fbf1a30b21025847ad07a2ad956
+impl.rul-announce-every-decision: reasserted (resolved: symbol EnrollmentService.enroll resolves to method EnrollmentService.enroll at line 23)
+  digest: af0e249978ef2cc251eca2c63dbdc55ecbe47f1d37ab3dd7bc3a4d44eb129d21
+impl.cap-enroll: reasserted (resolved: symbol EnrollmentService.enroll resolves to method EnrollmentService.enroll at line 23)
+  digest: 0e49bcd023c5ddd80ad8149b697795106fde872d12c8553b2ead227777b9bde1
+impl.rul-seat-limit: reasserted (resolved: symbol EnrollmentService.enroll resolves to method EnrollmentService.enroll at line 23)
+  digest: f5d609b6e6b8b18029c3aa2f66fdd403feabc4b45891145a1251aa7fc704570f

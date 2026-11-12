@@ -1,0 +1,19 @@
+{
+  "candidate": {
+    "commit": "a9c443056274f9cb3b363280a9eebc958ba28d02",
+    "branch": "code-first/quiet-rejections",
+    "uncommitted": {
+      "paths": 0,
+      "digest": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+      "complete": true
+    },
+    "bound": {
+      "paths": 7,
+      "digest": "27dc574842b9bae214de2aa50e7d9b562ca7cb2bb8f6448c423346547f8a968a",
+      "complete": true
+    },
+    "modelRevision": "rev-3-bd922e630c6e",
+    "claims": "2f03bd040cc593f27b6cd7806b508b201d76a2bc56b4f408b28ba090e046d027"
+  },
+  "identityDigest": "014f77c643b52920ce097470c19df2721e57062426088ea29a72bc6fe6ad133c"
+}

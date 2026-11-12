@@ -1,0 +1,7 @@
+ .vcv/changes/chg-quiet-rejections.json           | 41 ++++++++++++++++++++++++
+ README.md                                        |  8 ++---
+ scripts/smoke.mjs                                |  2 +-
+ server/src/enrollment/enrollment.service.spec.ts |  6 ++--
+ server/src/enrollment/enrollment.service.ts      | 12 ++-----
+ server/test/app.e2e-spec.ts                      |  6 ++--
+ 6 files changed, 53 insertions(+), 22 deletions(-)

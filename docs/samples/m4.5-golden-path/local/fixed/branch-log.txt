@@ -1,0 +1,2 @@
+8168685 Announce rejected enrollments again (rul-announce-every-decision)
+a9c4430 Only announce confirmed enrollments

@@ -1,0 +1,113 @@
+diff --git a/README.md b/README.md
+index 587889a..546152f 100644
+--- a/README.md
++++ b/README.md
+@@ -1,7 +1,7 @@
+ # Course Desk
+ 
+-Students enroll in courses; every enrollment decision is announced to the student as a
+-notification.
++Students enroll in courses; every enrollment decision is recorded, and a confirmed one is
++announced to the student as a notification.
+ 
+ - `server/`: NestJS API with in-memory storage.
+ - `web/`: React (Vite) single page.
+@@ -38,8 +38,8 @@ Two courses are seeded: Linear Algebra (2 seats) and Modern Poetry (1 seat).
+ 
+ 1. `stu-ada` enrolls in Modern Poetry: `confirmed`; Modern Poetry has 0 seats left.
+ 2. `stu-bob` enrolls in Modern Poetry: `rejected` with reason `COURSE_FULL`.
+-3. `stu-ada` has one notification (`enrollment-confirmed`), `stu-bob` one
+-   (`enrollment-rejected`).
++3. `stu-ada` has one notification (`enrollment-confirmed`); `stu-bob` has none, since the
++   enrollment response already says the request was rejected.
+ 4. Enrolling again in a course you already hold is `rejected` with `ALREADY_ENROLLED` and does
+    not take a seat.
+ 
+diff --git a/scripts/smoke.mjs b/scripts/smoke.mjs
+index e5fe2b3..ac75b99 100644
+--- a/scripts/smoke.mjs
++++ b/scripts/smoke.mjs
+@@ -45,7 +45,7 @@ try {
+   assert.equal(results[1].body.status, "confirmed");
+   assert.deepEqual([results[2].body.status, results[2].body.reason], ["rejected", "COURSE_FULL"]);
+   assert.equal(results[3].body[0].kind, "enrollment-confirmed");
+-  assert.equal(results[4].body[0].kind, "enrollment-rejected");
++  assert.deepEqual(results[4].body, []); // a rejection is not announced
+   assert.equal(results[5].body.find((c) => c.id === "crs-poetry").seatsLeft, 0);
+   console.log("smoke: ok");
+ } finally {
+diff --git a/server/src/enrollment/enrollment.service.spec.ts b/server/src/enrollment/enrollment.service.spec.ts
+index 7b92878..b6d050b 100644
+--- a/server/src/enrollment/enrollment.service.spec.ts
++++ b/server/src/enrollment/enrollment.service.spec.ts
+@@ -25,14 +25,12 @@ describe("EnrollmentService", () => {
+     expect(enrollment.courses().find((c) => c.id === "crs-poetry")?.seatsLeft).toBe(0);
+   });
+ 
+-  it("rejects an enrollment into a full course and notifies the student", async () => {
++  it("rejects an enrollment into a full course without notifying the student", async () => {
+     const { enrollment, notifications } = await setup();
+     enrollment.enroll({ studentId: "stu-ada", courseId: "crs-poetry" });
+     const e = enrollment.enroll({ studentId: "stu-bob", courseId: "crs-poetry" });
+     expect(e).toMatchObject({ status: "rejected", reason: "COURSE_FULL" });
+-    expect(notifications.forRecipient("stu-bob")).toEqual([
+-      expect.objectContaining({ kind: "enrollment-rejected", enrollmentId: e.id }),
+-    ]);
++    expect(notifications.forRecipient("stu-bob")).toEqual([]);
+   });
+ 
+   it("rejects a repeat enrollment without taking a second seat", async () => {
+diff --git a/server/src/enrollment/enrollment.service.ts b/server/src/enrollment/enrollment.service.ts
+index bd7409d..68912fc 100644
+--- a/server/src/enrollment/enrollment.service.ts
++++ b/server/src/enrollment/enrollment.service.ts
+@@ -5,7 +5,7 @@ import { EnrollmentRepository } from "./enrollment.repository.js";
+ import type { CourseSummary, Enrollment, EnrollmentRequest, RejectionReason } from "./enrollment.types.js";
+ 
+ /**
+- * Enrollment rules. Each decision is recorded and announced to the student:
++ * Enrollment rules. Each decision is recorded; only a confirmed one is announced to the student:
+  * a confirmed enrollment takes a seat; a full course or a repeat request is rejected.
+  */
+ @Injectable()
+@@ -39,14 +39,8 @@ export class EnrollmentService {
+       ...(reason ? { reason } : {}),
+     });
+ 
+-    if (reason) {
+-      this.notifications.notify(
+-        enrollment.studentId,
+-        "enrollment-rejected",
+-        enrollment.id,
+-        reason === "COURSE_FULL" ? `${course.title} is full; your enrollment was not accepted.` : `You are already enrolled in ${course.title}.`,
+-      );
+-    } else {
++    // Only confirmations are announced; the response already tells the student about a rejection.
++    if (!reason) {
+       this.notifications.notify(enrollment.studentId, "enrollment-confirmed", enrollment.id, `You are enrolled in ${course.title}.`);
+     }
+     return enrollment;
+diff --git a/server/test/app.e2e-spec.ts b/server/test/app.e2e-spec.ts
+index 59503c2..e394ca3 100644
+--- a/server/test/app.e2e-spec.ts
++++ b/server/test/app.e2e-spec.ts
+@@ -26,7 +26,7 @@ describe("Course Desk API (e2e)", () => {
+     ]);
+   });
+ 
+-  it("confirms, then rejects when full; each student is notified of their outcome", async () => {
++  it("confirms, then rejects when full; only the confirmed student is notified", async () => {
+     const server = app.getHttpServer();
+     const first = await request(server).post("/api/enrollments").send({ studentId: "stu-ada", courseId: "crs-poetry" }).expect(201);
+     expect(first.body).toEqual({ id: "enr-1", studentId: "stu-ada", courseId: "crs-poetry", status: "confirmed" });
+@@ -39,9 +39,7 @@ describe("Course Desk API (e2e)", () => {
+     const ada = await request(server).get("/api/notifications").query({ recipientId: "stu-ada" }).expect(200);
+     expect(ada.body).toEqual([{ id: "ntf-1", recipientId: "stu-ada", kind: "enrollment-confirmed", enrollmentId: "enr-1", message: "You are enrolled in Modern Poetry." }]);
+     const bob = await request(server).get("/api/notifications").query({ recipientId: "stu-bob" }).expect(200);
+-    expect(bob.body).toEqual([
+-      { id: "ntf-2", recipientId: "stu-bob", kind: "enrollment-rejected", enrollmentId: "enr-2", message: "Modern Poetry is full; your enrollment was not accepted." },
+-    ]);
++    expect(bob.body).toEqual([]);
+   });
+ 
+   it("answers 400 for an invalid request and 404 for unknown courses or enrollments", async () => {

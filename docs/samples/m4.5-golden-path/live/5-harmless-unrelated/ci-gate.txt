@@ -1,0 +1,5 @@
+run 43205953222 job vcv-gate 131141312210 (PR #5, head d35479e, base abc1b87, VCV df9452c)
+vcv gate: WARN: passed with 1 warning: 2/2 required criteria passed, host-observed
+  candidate d35479ed0a37 against base abc1b870d4c7; code-first change (1 file(s), 0 new model revision(s), lineage unchanged)
+  run 0: host-observed (captured here) vitest: 8 case(s), 8 passed, 0 failed, 0 error(s), 0 skipped; suite green
+  warn  UNMAPPED_CHANGES [unsupported; not-checked]: 1 changed file(s) outside .vcv/ are not pointed at by any claim, so VCV cannot relate them to the model: README.md

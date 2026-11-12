@@ -1,0 +1,253 @@
+{
+  "format": "vcv-gate-1",
+  "decision": "warn",
+  "headline": "passed with 6 warnings: 2/2 required criteria passed, host-observed",
+  "base": {
+    "commit": "088ac36f8c018167159d2d285cdeaafa6d927cc8",
+    "mergeBase": "088ac36f8c018167159d2d285cdeaafa6d927cc8",
+    "containedInCandidate": true,
+    "modelRevision": "rev-3-bd922e630c6e"
+  },
+  "candidate": {
+    "commit": "ba1a83c46439f62ce943af3eea5dd286714eedd4",
+    "branch": "model-first/quiet-rejections",
+    "dirty": false,
+    "modelRevision": "rev-4-d704dd46aee2",
+    "identityDigest": "48260adc25462642157e3767f20b9b04a15a096b9d0afbfd93f7d39e7bbb1902"
+  },
+  "change": {
+    "kind": "model-and-code",
+    "lineage": "extends",
+    "changedFiles": 16,
+    "introducedRevisions": 1
+  },
+  "policy": {
+    "source": ".github/vcv-policy.json at the base (088ac36f8c01)",
+    "digest": "6b5096a4bad7e6a285593b491c7cdb5e1d5abb7027aa1980903a6f08c8ad64e9",
+    "changedByCandidate": false,
+    "effective": {
+      "format": "vcv-policy-1",
+      "optional": {
+        "failed": "warn",
+        "stale": "warn",
+        "missing": "warn",
+        "unknown": "warn",
+        "unverified": "warn",
+        "claimed": "warn"
+      },
+      "structural": "block",
+      "bindings": {
+        "related": "warn",
+        "unrelated": "warn"
+      },
+      "coverage": "warn",
+      "unsupported": "warn",
+      "baseNotContained": "warn",
+      "mappingChanged": "warn",
+      "noCriteria": "warn",
+      "observations": {
+        "contradiction": "block",
+        "concern": "warn",
+        "invalidReferences": "warn"
+      },
+      "policyChanged": "warn",
+      "requireEvidence": [
+        {
+          "object": "rul-announce-every-decision",
+          "reason": "every enrollment decision must reach the student"
+        }
+      ]
+    }
+  },
+  "reasons": [
+    {
+      "severity": "warn",
+      "code": "UNMAPPED_CHANGES",
+      "basis": "not-checked",
+      "message": "2 changed file(s) outside .vcv/ are not pointed at by any claim, so VCV cannot relate them to the model: README.md, scripts/smoke.mjs",
+      "rule": "unsupported"
+    },
+    {
+      "severity": "warn",
+      "code": "MAPPING_CHANGED",
+      "rule": "mappingChanged",
+      "basis": "observed",
+      "criterionId": "crt-confirmation-notified",
+      "objectIds": [
+        "crt-confirmation-notified"
+      ],
+      "bindingId": "test.confirmation.e2e",
+      "message": "the mapping test.confirmation.e2e of crt-confirmation-notified (server/test/app.e2e-spec.ts#test:Course Desk API (e2e) > confirms, then rejects when full; only the confirmed student is notified) was reasserted in this candidate; mappings change without approval, so check the test still checks the criterion"
+    },
+    {
+      "severity": "warn",
+      "code": "MAPPING_CHANGED",
+      "rule": "mappingChanged",
+      "basis": "observed",
+      "criterionId": "crt-confirmation-notified",
+      "objectIds": [
+        "crt-confirmation-notified"
+      ],
+      "bindingId": "test.confirmation.unit",
+      "message": "the mapping test.confirmation.unit of crt-confirmation-notified (server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > confirms an enrollment while seats are left and notifies the student) is unchanged, but its test file changed in this candidate; mappings change without approval, so check the test still checks the criterion"
+    },
+    {
+      "severity": "warn",
+      "code": "MAPPING_CHANGED",
+      "rule": "mappingChanged",
+      "basis": "observed",
+      "criterionId": "crt-rejection-notified",
+      "objectIds": [
+        "crt-rejection-notified"
+      ],
+      "bindingId": "test.rejection.e2e",
+      "message": "the mapping test.rejection.e2e of crt-rejection-notified (server/test/app.e2e-spec.ts#test:Course Desk API (e2e) > confirms, then rejects when full; only the confirmed student is notified) was reasserted in this candidate; mappings change without approval, so check the test still checks the criterion"
+    },
+    {
+      "severity": "warn",
+      "code": "MAPPING_CHANGED",
+      "rule": "mappingChanged",
+      "basis": "observed",
+      "criterionId": "crt-rejection-notified",
+      "objectIds": [
+        "crt-rejection-notified"
+      ],
+      "bindingId": "test.rejection.unit",
+      "message": "the mapping test.rejection.unit of crt-rejection-notified (server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > rejects an enrollment into a full course without notifying the student) was reasserted in this candidate; mappings change without approval, so check the test still checks the criterion"
+    },
+    {
+      "severity": "warn",
+      "code": "MAPPING_CHANGED",
+      "rule": "mappingChanged",
+      "basis": "observed",
+      "criterionId": "crt-repeat-rejected",
+      "objectIds": [
+        "crt-repeat-rejected"
+      ],
+      "bindingId": "test.repeat.unit",
+      "message": "the mapping test.repeat.unit of crt-repeat-rejected (server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > rejects a repeat enrollment without taking a second seat) is unchanged, but its test file changed in this candidate; mappings change without approval, so check the test still checks the criterion"
+    }
+  ],
+  "reasonsTotal": 6,
+  "reasonsTruncated": false,
+  "counts": {
+    "block": 0,
+    "warn": 6
+  },
+  "criteria": {
+    "items": [
+      {
+        "id": "crt-confirmation-notified",
+        "verification": "required",
+        "result": "passed",
+        "observedBy": "host",
+        "verifies": [
+          "rul-announce-every-decision",
+          "cap-enroll"
+        ]
+      },
+      {
+        "id": "crt-rejection-notified",
+        "verification": "required",
+        "result": "passed",
+        "observedBy": "host",
+        "verifies": [
+          "rul-announce-every-decision",
+          "rul-seat-limit",
+          "cap-enroll"
+        ]
+      },
+      {
+        "id": "crt-repeat-rejected",
+        "verification": "optional",
+        "result": "passed",
+        "observedBy": "host",
+        "verifies": [
+          "rul-no-double-enroll"
+        ]
+      }
+    ],
+    "total": 3,
+    "truncated": false,
+    "results": {
+      "required": {
+        "passed": 2,
+        "failed": 0,
+        "stale": 0,
+        "missing": 0,
+        "unknown": 0,
+        "unverified": 0
+      },
+      "optional": {
+        "passed": 1,
+        "failed": 0,
+        "stale": 0,
+        "missing": 0,
+        "unknown": 0,
+        "unverified": 0
+      }
+    }
+  },
+  "runs": [
+    {
+      "index": 0,
+      "observedBy": "host",
+      "declaredObservedBy": "host",
+      "admittedAs": "captured-here",
+      "principalId": "ci:vcv-premerge-gate",
+      "runner": {
+        "name": "vitest"
+      },
+      "invocation": "npx vitest run --reporter=junit (job candidate-tests)",
+      "report": {
+        "format": "junit",
+        "sha256": "f18cda62f99d6bbaa44398aa3a4e1241002ae4648e41ce2867488f52417b13db",
+        "bytes": 2328
+      },
+      "digest": "ab3bc4ee32812a4489f5c1265cbf3a7f0fb8278d4492de7fac9d94bb641a78a3",
+      "fresh": true,
+      "staleBecause": [],
+      "summary": {
+        "tests": 8,
+        "passed": 8,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "green": true
+    }
+  ],
+  "observations": [],
+  "observationsTruncated": false,
+  "reconciliation": {
+    "summary": {
+      "integrity": "ok",
+      "structural": 0,
+      "staleClaims": 0,
+      "locatorProblems": 0,
+      "removedClaims": 0,
+      "unboundObjects": 0,
+      "changedFiles": 16,
+      "unmappedFiles": 2,
+      "notChecked": 1,
+      "bindingsAssessed": true
+    },
+    "integrity": {
+      "ok": true,
+      "authorization": "caller-asserted: ok means consistent and attested under the trust anchor given here; it authorizes a change only when that anchor (and --base) is supplied by the host from the hosting service's protected branch, in a check the change under review cannot edit"
+    },
+    "findingsTotal": 4
+  },
+  "notes": [],
+  "budget": {
+    "limit": 524288,
+    "bytes": 8764,
+    "shrunk": false
+  },
+  "implementationChecked": false,
+  "limits": [
+    "A passing gate says the history is approved, the claims and the model agree where VCV can check them, and every required criterion's mapped test cases passed in a run captured here. It does not say those tests check the right thing: a mapping is an agent's or a person's claim.",
+    "Agent observations are interpretations. VCV checks that the objects, files, lines and test cases they cite exist; it never confirms or refutes what they say.",
+    "Tests were run by the host's own runner, outside VCV. A run is host-observed only when this process captured its report; how far that report can be trusted is how far the job that produced it can be."
+  ]
+}

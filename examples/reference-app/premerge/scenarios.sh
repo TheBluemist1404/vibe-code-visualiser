@@ -189,6 +189,15 @@ step_intent() {
     ]);' '    const bob = await request(server).get("/api/notifications").query({ recipientId: "stu-bob" }).expect(200);
     expect(bob.body).toEqual([]);'
   edit "$e2e" 'confirms, then rejects when full; each student is notified of their outcome' 'confirms, then rejects when full; only the confirmed student is notified'
+  # Everything else that still says a rejection is announced (as in the live run, course-desk#4).
+  edit "$svc" ' * Enrollment rules. Every decision is recorded and announced to the student:' ' * Enrollment rules. Every decision is recorded; only a confirmed one is announced to the student:'
+  edit scripts/smoke.mjs '  assert.equal(results[4].body[0].kind, "enrollment-rejected");' '  assert.deepEqual(results[4].body, []); // a rejection is not announced'
+  edit README.md 'Students enroll in courses; every enrollment decision is announced to the student as a
+notification.' 'Students enroll in courses; every enrollment decision is recorded, and a confirmed one is
+announced to the student as a notification.'
+  edit README.md '3. `stu-ada` has one notification (`enrollment-confirmed`), `stu-bob` one
+   (`enrollment-rejected`).' '3. `stu-ada` has one notification (`enrollment-confirmed`); `stu-bob` has none, since the
+   enrollment response already says the request was rejected.'
   local rev; rev=$(vcv project status "$repo" --json | json model.revision)
   mkdir -p "$work/changes"
   cat > "$work/changes/quiet-rejections.yaml" <<YAML
@@ -201,11 +210,17 @@ operations:
     ruleId: rul-announce-every-decision
     statement: Each enrollment decision is recorded; a confirmed decision results in exactly one notification to the student, a rejected one in none.
   - type: renameObject
+    objectId: rul-announce-every-decision
+    name: Only a confirmed decision is notified
+  - type: renameObject
     objectId: crt-rejection-notified
     name: A rejected enrollment is not announced
   - type: reviseCriterion
     criterionId: crt-rejection-notified
     statement: A request for a full course is recorded as rejected with COURSE_FULL, and the student receives no notification for it.
+  - type: setDescription
+    objectId: prj-course-desk
+    description: Draft bootstrapped from the repository at commit adb423c; not reviewed. Students enroll in courses; every enrollment decision is recorded, and a confirmed one is announced as a notification. NestJS API (server/, in-memory storage) plus a React page (web/). Based on README.md and the sources.
 YAML
   VCV_HOST_PRINCIPAL=agent:coder VCV_HOST_PERMISSIONS=model:propose vcv proposal submit "$repo" "$work/changes/quiet-rejections.yaml" | head -2 | tee "$out/intent-proposal.txt"
   mkdir -p "$out/intent"; mv "$out/intent-proposal.txt" "$out/intent/proposal.txt"
@@ -237,6 +252,10 @@ step_approved() {
     reassert test.rejection.e2e "$e2e#test:Course Desk API (e2e) > confirms, then rejects when full; only the confirmed student is notified" "over HTTP: the rejected student has no notifications"
     reassert test.confirmation.e2e "$e2e#test:Course Desk API (e2e) > confirms, then rejects when full; only the confirmed student is notified" "over HTTP: the confirmed student has exactly one enrollment-confirmed notification"
     reassert test.rul-seat-limit "$spec#test:EnrollmentService > rejects an enrollment into a full course without notifying the student" "the unit test for a full course, renamed"
+    # The enroll() claims went stale with the code change; the agent re-reads and refreshes them.
+    reassert impl.rul-announce-every-decision "$svc#symbol:EnrollmentService.enroll" "enroll() notifies only a confirmed decision, as the approved revision says"
+    reassert impl.cap-enroll "$svc#symbol:EnrollmentService.enroll" "enroll() still records and returns every decision"
+    reassert impl.rul-seat-limit "$svc#symbol:EnrollmentService.enroll" "the seat check in enroll() is unchanged"
   } | scrub | tee "$out/approved/reassert.txt"
   commit "Reassert the renamed tests' mappings"
   ci approved; expect approved 0

@@ -1,0 +1,9 @@
+vcv gate: BLOCK: blocked: the candidate's model cannot be loaded (PROJECT_NOT_READY)
+  candidate ea425267dc73 (refs/heads/negative/silent-model-edit) against base 088ac36f8c01; no-change change (0 file(s), 0 new model revision(s), lineage rewritten)
+  policy: .github/vcv-policy.json at the base (088ac36f8c01) (6b5096a4bad7)
+  BLOCK PROJECT_NOT_READY [integrity; checked]: the VCV project is invalid: revisions/rev-3-bd922e630c6e.yaml does not match its ID: its content digest does not verify as revision 3 after rev-2-a21d7aa4915e (edited after commit, or listed out of place in HEAD)
+  note: Nothing else was assessed: the candidate's model, claims and runs are only read from a loadable project.
+  not established here:
+    - A passing gate says the history is approved, the claims and the model agree where VCV can check them, and every required criterion's mapped test cases passed in a run captured here. It does not say those tests check the right thing: a mapping is an agent's or a person's claim.
+    - Agent observations are interpretations. VCV checks that the objects, files, lines and test cases they cite exist; it never confirms or refutes what they say.
+    - Tests were run by the host's own runner, outside VCV. A run is host-observed only when this process captured its report; how far that report can be trusted is how far the job that produced it can be.

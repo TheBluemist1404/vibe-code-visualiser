@@ -1,0 +1,35 @@
+proposal chg-quiet-rejections (pending, proposed by agent:coder)
+  digest:   67831771e77503bf50db2fe4df0a364888fb4048105748064921dceaedab0a2f
+  base:     rev-3-bd922e630c6e; this checkout is at rev-3-bd922e630c6e (applies)
+  why:      Product decision - a rejection is shown in the enrollment response; only confirmations are sent as notifications.
+  states:   change pending; approval none; snapshot approved; implementation not-recorded
+operations:
+  1. change the statement of rule rul-announce-every-decision
+  2. rename crt-rejection-notified to "A rejected enrollment is not announced"
+  3. change its statement of criterion crt-rejection-notified
+model delta (against current rev-3-bd922e630c6e; 2 object(s)):
+  ~ criterion crt-rejection-notified [mod-enrollment]
+      name: A rejected enrollment is announced
+        → A rejected enrollment is not announced
+      statement: A request for a full course is recorded as rejected with COURSE_FULL, and the student receives exactly one enrollment-rejected notification for that enrollment.
+        → A request for a full course is recorded as rejected with COURSE_FULL, and the student receives no notification for it.
+  ~ rule rul-announce-every-decision [mod-enrollment]
+      statement: Each enrollment decision, confirmed or rejected, is recorded and results in exactly one notification to the student.
+        → Each enrollment decision is recorded; a confirmed decision results in exactly one notification to the student, a rejected one in none.
+impact (structural candidates only):
+  modules:   mod-enrollment (changed)
+  contracts: (none)
+  · criterion crt-confirmation-notified: criterion crt-confirmation-notified references rule rul-announce-every-decision (verifies)
+  · module mod-enrollment: module mod-enrollment owns criterion crt-rejection-notified
+binding claims to revisit (5):
+  impl.rul-announce-every-decision: rul-announce-every-decision implements server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll (changed)
+  test.confirmation.e2e: crt-confirmation-notified tests server/test/app.e2e-spec.ts#test:Course Desk API (e2e) > confirms, then rejects when full; each student is notified of their outcome (impacted)
+  test.confirmation.unit: crt-confirmation-notified tests server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > confirms an enrollment while seats are left and notifies the student (impacted)
+  test.rejection.e2e: crt-rejection-notified tests server/test/app.e2e-spec.ts#test:Course Desk API (e2e) > confirms, then rejects when full; each student is notified of their outcome (changed)
+  test.rejection.unit: crt-rejection-notified tests server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > rejects an enrollment into a full course and notifies the student (changed)
+not verified by anyone yet:
+  - The impact list is structural: it follows declared model references only. It is not a code, test or runtime impact analysis, and an empty list does not mean nothing else is affected.
+  - Whether the operations express the requested behavior is the proposer's interpretation; VCV checks types, references and invariants, not meaning.
+  - The current source code has not been compared with this proposal. Approval approves model intent; the implementation comes afterwards and is checked separately.
+  - The proposer identity "agent:coder" is what the host asserted when the proposal was submitted; see docs/proposals.md for what that proves locally.
+  - The proposal states no implementation request (behavior, acceptance criteria, scope): the implementation handoff will have none to give the coding agent.

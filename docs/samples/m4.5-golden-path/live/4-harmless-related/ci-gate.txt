@@ -1,0 +1,6 @@
+run 43205473610 job vcv-gate 131139662099 (head 7d40185, base abc1b87, VCV df9452c)
+vcv gate: WARN: passed with 1 warning: 2/2 required criteria passed, host-observed
+  candidate 7d401853ed30 against base abc1b870d4c7; code-first change (1 file(s), 0 new model revision(s), lineage unchanged)
+  run 0: host-observed (captured here) vitest: 8 case(s), 8 passed, 0 failed, 0 error(s), 0 skipped; suite green
+  warn  BASE_NOT_CONTAINED [baseNotContained; observed]: the candidate does not contain the base abc1b870d4c7; its changes are measured from the merge base 984a8749677a. Update the branch before merging.
+run 43205842424 job vcv-gate 131140847608 (PR #3, head 33f7d64 = main merged in, base abc1b87): PASS, 2/2 required host-observed, 8/8, no warnings

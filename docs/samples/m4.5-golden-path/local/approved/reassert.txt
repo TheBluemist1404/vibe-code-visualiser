@@ -1,0 +1,7 @@
+test.rejection.unit: reasserted (resolved: test "EnrollmentService > rejects an enrollment into a full course without notifying the student" resolves to test EnrollmentService > rejects an enrollment into a full course without notifying the student at line 28)
+test.rejection.e2e: reasserted (resolved: test "Course Desk API (e2e) > confirms, then rejects when full; only the confirmed student is notified" resolves to test Course Desk API (e2e) > confirms, then rejects when full; only the confirmed student is notified at line 29)
+test.confirmation.e2e: reasserted (resolved: test "Course Desk API (e2e) > confirms, then rejects when full; only the confirmed student is notified" resolves to test Course Desk API (e2e) > confirms, then rejects when full; only the confirmed student is notified at line 29)
+test.rul-seat-limit: reasserted (resolved: test "EnrollmentService > rejects an enrollment into a full course without notifying the student" resolves to test EnrollmentService > rejects an enrollment into a full course without notifying the student at line 28)
+impl.rul-announce-every-decision: reasserted (resolved: symbol EnrollmentService.enroll resolves to method EnrollmentService.enroll at line 23)
+impl.cap-enroll: reasserted (resolved: symbol EnrollmentService.enroll resolves to method EnrollmentService.enroll at line 23)
+impl.rul-seat-limit: reasserted (resolved: symbol EnrollmentService.enroll resolves to method EnrollmentService.enroll at line 23)

@@ -1,0 +1,5 @@
+f8b94a3 Claude: Reassert the renamed tests' mappings and the enroll() claims against rev-4
+5e5aef7 Vũ Lê Hoàng: vcv: approve chg-quiet-rejections-2
+bbafb98 Claude: Merge remote-tracking branch 'origin/main' into model-first/quiet-rejections
+e54261d Claude: Replace chg-quiet-rejections with chg-quiet-rejections-2; align README, comment and smoke
+252acc5 Claude: Stop announcing rejected enrollments; propose the model change (chg-quiet-rejections)

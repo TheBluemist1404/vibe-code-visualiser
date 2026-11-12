@@ -1,0 +1,185 @@
+{
+  "format": "vcv-gate-1",
+  "decision": "pass",
+  "headline": "passed: 2/2 required criteria passed, host-observed",
+  "base": {
+    "commit": "088ac36f8c018167159d2d285cdeaafa6d927cc8",
+    "mergeBase": "088ac36f8c018167159d2d285cdeaafa6d927cc8",
+    "containedInCandidate": true,
+    "modelRevision": "rev-3-bd922e630c6e"
+  },
+  "candidate": {
+    "commit": "8168685d64c173ecdb6a24367fa3289f47096584",
+    "branch": "code-first/quiet-rejections",
+    "dirty": false,
+    "modelRevision": "rev-3-bd922e630c6e",
+    "identityDigest": "59f6fd5358b5f1d489e962961020bd8bb86205c5c4b2c5c1d20078c290320ce6"
+  },
+  "change": {
+    "kind": "no-change",
+    "lineage": "unchanged",
+    "changedFiles": 0,
+    "introducedRevisions": 0
+  },
+  "policy": {
+    "source": ".github/vcv-policy.json at the base (088ac36f8c01)",
+    "digest": "6b5096a4bad7e6a285593b491c7cdb5e1d5abb7027aa1980903a6f08c8ad64e9",
+    "changedByCandidate": false,
+    "effective": {
+      "format": "vcv-policy-1",
+      "optional": {
+        "failed": "warn",
+        "stale": "warn",
+        "missing": "warn",
+        "unknown": "warn",
+        "unverified": "warn",
+        "claimed": "warn"
+      },
+      "structural": "block",
+      "bindings": {
+        "related": "warn",
+        "unrelated": "warn"
+      },
+      "coverage": "warn",
+      "unsupported": "warn",
+      "baseNotContained": "warn",
+      "mappingChanged": "warn",
+      "noCriteria": "warn",
+      "observations": {
+        "contradiction": "block",
+        "concern": "warn",
+        "invalidReferences": "warn"
+      },
+      "policyChanged": "warn",
+      "requireEvidence": [
+        {
+          "object": "rul-announce-every-decision",
+          "reason": "every enrollment decision must reach the student"
+        }
+      ]
+    }
+  },
+  "reasons": [],
+  "reasonsTotal": 0,
+  "reasonsTruncated": false,
+  "counts": {
+    "block": 0,
+    "warn": 0
+  },
+  "criteria": {
+    "items": [
+      {
+        "id": "crt-confirmation-notified",
+        "verification": "required",
+        "result": "passed",
+        "observedBy": "host",
+        "verifies": [
+          "rul-announce-every-decision",
+          "cap-enroll"
+        ]
+      },
+      {
+        "id": "crt-rejection-notified",
+        "verification": "required",
+        "result": "passed",
+        "observedBy": "host",
+        "verifies": [
+          "rul-announce-every-decision",
+          "rul-seat-limit",
+          "cap-enroll"
+        ]
+      },
+      {
+        "id": "crt-repeat-rejected",
+        "verification": "optional",
+        "result": "passed",
+        "observedBy": "host",
+        "verifies": [
+          "rul-no-double-enroll"
+        ]
+      }
+    ],
+    "total": 3,
+    "truncated": false,
+    "results": {
+      "required": {
+        "passed": 2,
+        "failed": 0,
+        "stale": 0,
+        "missing": 0,
+        "unknown": 0,
+        "unverified": 0
+      },
+      "optional": {
+        "passed": 1,
+        "failed": 0,
+        "stale": 0,
+        "missing": 0,
+        "unknown": 0,
+        "unverified": 0
+      }
+    }
+  },
+  "runs": [
+    {
+      "index": 0,
+      "observedBy": "host",
+      "declaredObservedBy": "host",
+      "admittedAs": "captured-here",
+      "principalId": "ci:vcv-premerge-gate",
+      "runner": {
+        "name": "vitest"
+      },
+      "invocation": "npx vitest run --reporter=junit (job candidate-tests)",
+      "report": {
+        "format": "junit",
+        "sha256": "758daf1bb99f3f016c7cf9c893340309c539691d4e8186725eade1f1eb714305",
+        "bytes": 2327
+      },
+      "digest": "b7b027c467d8ab44fc724584536cb9fc76e1234cc874d9c684b0d611bd2777f5",
+      "fresh": true,
+      "staleBecause": [],
+      "summary": {
+        "tests": 8,
+        "passed": 8,
+        "failed": 0,
+        "errors": 0,
+        "skipped": 0
+      },
+      "green": true
+    }
+  ],
+  "observations": [],
+  "observationsTruncated": false,
+  "reconciliation": {
+    "summary": {
+      "integrity": "ok",
+      "structural": 0,
+      "staleClaims": 0,
+      "locatorProblems": 0,
+      "removedClaims": 0,
+      "unboundObjects": 0,
+      "changedFiles": 0,
+      "unmappedFiles": 0,
+      "notChecked": 0,
+      "bindingsAssessed": true
+    },
+    "integrity": {
+      "ok": true,
+      "authorization": "caller-asserted: ok means consistent and attested under the trust anchor given here; it authorizes a change only when that anchor (and --base) is supplied by the host from the hosting service's protected branch, in a check the change under review cannot edit"
+    },
+    "findingsTotal": 0
+  },
+  "notes": [],
+  "budget": {
+    "limit": 524288,
+    "bytes": 5340,
+    "shrunk": false
+  },
+  "implementationChecked": false,
+  "limits": [
+    "A passing gate says the history is approved, the claims and the model agree where VCV can check them, and every required criterion's mapped test cases passed in a run captured here. It does not say those tests check the right thing: a mapping is an agent's or a person's claim.",
+    "Agent observations are interpretations. VCV checks that the objects, files, lines and test cases they cite exist; it never confirms or refutes what they say.",
+    "Tests were run by the host's own runner, outside VCV. A run is host-observed only when this process captured its report; how far that report can be trusted is how far the job that produced it can be."
+  ]
+}

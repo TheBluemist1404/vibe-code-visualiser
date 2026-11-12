@@ -1,0 +1,23 @@
+-- main (088ac36)
+project: ready (<repo>/.vcv)
+model:   prj-course-desk at rev-3-bd922e630c6e [approved], 3 revision(s)
+git:     main 088ac36f8c01, clean
+integrity: ok (prj-course-desk at rev-3-bd922e630c6e)
+  base:  088ac36f8c018167159d2d285cdeaafa6d927cc8 088ac36f8c01 at rev-3-bd922e630c6e
+  trust: .vcv/reviewers.json at 088ac36f8c018167159d2d285cdeaafa6d927cc8 (088ac36f8c01), 1 reviewer(s); commit 088ac36f8c018167159d2d285cdeaafa6d927cc8 at 088ac36f8c01: a local ref, not pinned; anyone with a shell here can create or move it; branch protection is asserted by whoever chose this anchor, not verified by Git
+-- code-first/quiet-rejections (8168685)
+project: ready (<repo>/.vcv)
+model:   prj-course-desk at rev-3-bd922e630c6e [approved], 3 revision(s)
+git:     code-first/quiet-rejections 8168685d64c1, clean
+integrity: ok (prj-course-desk at rev-3-bd922e630c6e)
+  base:  088ac36f8c018167159d2d285cdeaafa6d927cc8 088ac36f8c01 at rev-3-bd922e630c6e
+  trust: .vcv/reviewers.json at 088ac36f8c018167159d2d285cdeaafa6d927cc8 (088ac36f8c01), 1 reviewer(s); commit 088ac36f8c018167159d2d285cdeaafa6d927cc8 at 088ac36f8c01: a local ref, not pinned; anyone with a shell here can create or move it; branch protection is asserted by whoever chose this anchor, not verified by Git
+-- simulated merge of code-first/quiet-rejections into main (0eedf1b)
+project: ready (<repo>/.vcv)
+model:   prj-course-desk at rev-3-bd922e630c6e [approved], 3 revision(s)
+git:     simulated-merge 0eedf1b2a425, clean
+integrity: ok (prj-course-desk at rev-3-bd922e630c6e)
+  base:  088ac36f8c018167159d2d285cdeaafa6d927cc8 088ac36f8c01 at rev-3-bd922e630c6e
+  trust: .vcv/reviewers.json at 088ac36f8c018167159d2d285cdeaafa6d927cc8 (088ac36f8c01), 1 reviewer(s); commit 088ac36f8c018167159d2d285cdeaafa6d927cc8 at 088ac36f8c01: a local ref, not pinned; anyone with a shell here can create or move it; branch protection is asserted by whoever chose this anchor, not verified by Git
+-- .vcv/ differences between main and the merge (none expected for a code-first fix)
+(end)

@@ -1,0 +1,20 @@
+changeId: chg-quiet-rejections
+projectId: prj-course-desk
+expectedRevision: rev-3-bd922e630c6e
+rationale: Product decision - a rejection is shown in the enrollment response; only confirmations are sent as notifications.
+operations:
+  - type: setRuleStatement
+    ruleId: rul-announce-every-decision
+    statement: Each enrollment decision is recorded; a confirmed decision results in exactly one notification to the student, a rejected one in none.
+  - type: renameObject
+    objectId: rul-announce-every-decision
+    name: Only a confirmed decision is notified
+  - type: renameObject
+    objectId: crt-rejection-notified
+    name: A rejected enrollment is not announced
+  - type: reviseCriterion
+    criterionId: crt-rejection-notified
+    statement: A request for a full course is recorded as rejected with COURSE_FULL, and the student receives no notification for it.
+  - type: setDescription
+    objectId: prj-course-desk
+    description: Draft bootstrapped from the repository at commit adb423c; not reviewed. Students enroll in courses; every enrollment decision is recorded, and a confirmed one is announced as a notification. NestJS API (server/, in-memory storage) plus a React page (web/). Based on README.md and the sources.

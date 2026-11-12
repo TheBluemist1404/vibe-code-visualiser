@@ -1,0 +1,45 @@
+## parents of merged main 366607d
+366607df4d567b405625dc5876e8b3b57b2c8fab parents: 5afcc30de3fe700f307ba7bb9f58fa688b99ecc6
+Vũ Lê Hoàng Thu Nov 12 22:05:22 2026 +0700
+Adopt owner-approved confirmation-only enrollment notifications
+
+## tree diff candidate f8b94a3 vs merged main 366607d
+(empty = identical trees)
+
+## 5afcc30
+project: ready (<checkout>/.vcv)
+model:   prj-course-desk at rev-3-bd922e630c6e [approved], 3 revision(s)
+git:     detached at 5afcc30de3fe 5afcc30de3fe, clean
+integrity: ok (prj-course-desk at rev-3-bd922e630c6e)
+
+## f8b94a3
+project: ready (<checkout>/.vcv)
+model:   prj-course-desk at rev-4-d704dd46aee2 [approved], 4 revision(s)
+git:     detached at f8b94a3ae6dc f8b94a3ae6dc, clean
+integrity: ok (prj-course-desk at rev-4-d704dd46aee2)
+
+## 366607d
+project: ready (<checkout>/.vcv)
+model:   prj-course-desk at rev-4-d704dd46aee2 [approved], 4 revision(s)
+git:     detached at 366607df4d56 366607df4d56, clean
+integrity: ok (prj-course-desk at rev-4-d704dd46aee2)
+
+## rule rul-announce-every-decision and criterion crt-rejection-notified, base vs merged main
+### 5afcc30
+HEAD -> rev-3-bd922e630c6e
+  - id: rul-announce-every-decision
+    name: Every decision is notified
+    statement: Each enrollment decision, confirmed or rejected, is recorded and results in exactly one notification to the student.
+  - id: crt-rejection-notified
+    name: A rejected enrollment is announced
+    statement: A request for a full course is recorded as rejected with COURSE_FULL, and the student receives exactly one enrollment-rejected notification for that enrollment.
+  description: Draft bootstrapped from the repository at commit adb423c; not reviewed. Students enroll in courses and every enrollment decision is announced as a notification. NestJS API (server/, in-memory storage) plus a React page (web/). Based on README.md and the sources.
+### 366607d
+HEAD -> rev-4-d704dd46aee2
+  - id: rul-announce-every-decision
+    name: Only a confirmed decision is notified
+    statement: Each enrollment decision is recorded; a confirmed decision results in exactly one notification to the student, a rejected one in none.
+  - id: crt-rejection-notified
+    name: A rejected enrollment is not announced
+    statement: A request for a full course is recorded as rejected with COURSE_FULL, and the student receives no notification for it.
+  description: Draft bootstrapped from the repository at commit adb423c; not reviewed. Students enroll in courses; every enrollment decision is recorded, and a confirmed one is announced as a notification. NestJS API (server/, in-memory storage) plus a React page (web/). Based on README.md and the sources.
