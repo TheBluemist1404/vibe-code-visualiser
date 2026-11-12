@@ -1,6 +1,6 @@
 {
   "candidate": {
-    "commit": "cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2",
+    "commit": "d73c332d718e21d3a96283f5a3895ca45719ca31",
     "branch": "main",
     "uncommitted": {
       "paths": 0,
@@ -13,7 +13,7 @@
       "complete": true
     },
     "modelRevision": "rev-3-bd922e630c6e",
-    "claims": "39be4d3a2bd3560868d3f8da62a9a039744168f08e25bb862539edfa9d93cbef"
+    "claims": "1502ab0fdc148e3ef3b3b633a4fdec4e1213e1c47ad81c19103e1879c8aeb333"
   },
-  "identityDigest": "0d46ca03fd0b783dc5fbe9d127986beebc1561aa9db136eba0cd529e7ba90543"
+  "identityDigest": "d478813357b558ec319300ec6eb00877e85626da84ac12a35c71a9deb545885e"
 }

@@ -53,7 +53,7 @@ The `stale-report` step leaves main's passing JUnit report in the output directo
 - with a runner that cannot start, it blocks with the required criteria unverified;
 - with the real, failing runner, it blocks with `TEST_FAILED` from the new report.
 
-[local/selfcheck.log](local/selfcheck.log) shows that a failed `git merge` and a failed approval each stop `scenarios.sh` with exit 3. The approval in that run is **simulated**: it uses the fixture's reviewer key and is labelled so in `approved/approval.txt`. [local/negatives/summary.txt](local/negatives/summary.txt) lists each negative case and its exit code:
+[local/selfcheck.log](local/selfcheck.log) shows that a failed `git merge` and a failed approval each stop `scenarios.sh` with exit 3. Each case passes only if its injected failure was actually reached, which it shows by a unique marker and by where the run stopped. A prerequisite failure, such as a broken intent edit, fails the selfcheck rather than satisfying it. The approval in that run is **simulated**: it uses the fixture's reviewer key and is labelled so in `approved/approval.txt`. [local/negatives/summary.txt](local/negatives/summary.txt) lists each negative case and its exit code:
 
 1. The broken code with an agent-supplied passing record: the gate **blocks**, because an agent's record is not host-observed.
 2. That record relabelled as host-observed: **refused** (exit 2), because the digest does not match.

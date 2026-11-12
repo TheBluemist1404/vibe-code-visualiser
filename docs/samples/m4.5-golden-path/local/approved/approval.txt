@@ -1,7 +1,7 @@
 proposal digest: 9cc89d59b1374a59b623a861f82dd22cc8f2ef9df58c5b75eae86c1e16f9b60d
 approval: SIMULATED (the fixture's reviewer key on this machine; not a real person's approval)
-reviewer: user:reviewer (key 1306c16d6bacd84e, trusted per .vcv/reviewers.json at a84874c88ed4a90716f8759ee990fbecdc0141c3 (a84874c88ed4))
-  trust anchor: commit a84874c88ed4 pinned by the caller: an immutability pin, not proof of origin; that it is the protected branch is caller-asserted and unverified
+reviewer: user:reviewer (key 4c0e2e562afce111, trusted per .vcv/reviewers.json at d6236547b88559da9dd97ff99871de5c62d4a7aa (d6236547b885))
+  trust anchor: commit d6236547b885 pinned by the caller: an immutability pin, not proof of origin; that it is the protected branch is caller-asserted and unverified
   ! authorization not established by this command: the trust anchor is caller-asserted, and a shell in this checkout can supply its own. The authorization gate is `vcv integrity --base <protected base> --trust-ref <protected base> --require-attestation` run by the host (CI) on the hosting service's protected branch
 chg-quiet-rejections: applied → rev-4-d704dd46aee2 (proposed by agent:coder, approved by user:reviewer; record is applied)
   attestation: .vcv/approvals/chg-quiet-rejections.json (commit it with the change record and the new revision)

@@ -1,6 +1,6 @@
 vcv gate: BLOCK: blocked: 4 blocking reasons (crt-confirmation-notified, crt-rejection-notified, crt-rejection-notified, …)
-  candidate 2f563a9b32d3 (model-first/quiet-rejections) against base cb1a5d7301cb; code-first change (6 file(s), 0 new model revision(s), lineage unchanged)
-  policy: .github/vcv-policy.json at the base (cb1a5d7301cb) (6b5096a4bad7)
+  candidate f2c016df7ff6 (model-first/quiet-rejections) against base d73c332d718e; code-first change (6 file(s), 0 new model revision(s), lineage unchanged)
+  policy: .github/vcv-policy.json at the base (d73c332d718e) (6b5096a4bad7)
   run 0: host-observed (captured here) vitest: 8 case(s), 8 passed, 0 failed, 0 error(s), 0 skipped; suite green
   ✗ crt-confirmation-notified [required] missing  verifies rul-announce-every-decision, cap-enroll
   ✗ crt-rejection-notified [required] missing  verifies rul-announce-every-decision, rul-seat-limit, cap-enroll

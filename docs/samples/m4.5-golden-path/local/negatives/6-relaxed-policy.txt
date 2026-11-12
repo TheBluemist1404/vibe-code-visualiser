@@ -1,6 +1,6 @@
 vcv gate: BLOCK: blocked: 4 blocking reasons (crt-confirmation-notified, crt-rejection-notified, crt-rejection-notified, …)
-  candidate ea324f5484c9 (negative/relaxed-policy) against base cb1a5d7301cb; code-first change (2 file(s), 0 new model revision(s), lineage unchanged)
-  policy: .github/vcv-policy.json at the base (cb1a5d7301cb) (6b5096a4bad7); the candidate changes it (applies after merge)
+  candidate c3df75cae45a (negative/relaxed-policy) against base d73c332d718e; code-first change (2 file(s), 0 new model revision(s), lineage unchanged)
+  policy: .github/vcv-policy.json at the base (d73c332d718e) (6b5096a4bad7); the candidate changes it (applies after merge)
   run 0: host-observed (captured here) vitest: 8 case(s), 6 passed, 2 failed, 0 error(s), 0 skipped; suite red
   ✗ crt-confirmation-notified [required] failed  verifies rul-announce-every-decision, cap-enroll
   ✗ crt-rejection-notified [required] failed  verifies rul-announce-every-decision, rul-seat-limit, cap-enroll
@@ -13,7 +13,7 @@ vcv gate: BLOCK: blocked: 4 blocking reasons (crt-confirmation-notified, crt-rej
   warn  CLAIM_STALE [bindings.related; checked]: claim impl.rul-announce-every-decision (rul-announce-every-decision at server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll) is stale (code: the selected declaration's code differs from the recorded fingerprint). The code or object moved since the claim; whether it still does what the model says is for an agent or a person to judge
   warn  CLAIM_STALE [bindings.related; checked]: claim impl.rul-seat-limit (rul-seat-limit at server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll) is stale (code: the selected declaration's code differs from the recorded fingerprint). The code or object moved since the claim; whether it still does what the model says is for an agent or a person to judge
   warn  UNMAPPED_CHANGES [unsupported; not-checked]: 1 changed file(s) outside .vcv/ are not pointed at by any claim, so VCV cannot relate them to the model: .github/vcv-policy.json
-  warn  POLICY_CHANGED [policyChanged; observed]: the candidate changes the gate policy (.github/vcv-policy.json at the base (cb1a5d7301cb)); this check used the base's, and the change applies only after the merge
+  warn  POLICY_CHANGED [policyChanged; observed]: the candidate changes the gate policy (.github/vcv-policy.json at the base (d73c332d718e)); this check used the base's, and the change applies only after the merge
   not established here:
     - A passing gate says the history is approved, the claims and the model agree where VCV can check them, and every required criterion's mapped test cases passed in a run captured here. It does not say those tests check the right thing: a mapping is an agent's or a person's claim.
     - Agent observations are interpretations. VCV checks that the objects, files, lines and test cases they cite exist; it never confirms or refutes what they say.

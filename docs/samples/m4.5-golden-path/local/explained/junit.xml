@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8" ?>
-<testsuites name="vitest tests" tests="8" failures="2" errors="0" time="0.24803871">
-    <testsuite name="src/enrollment/enrollment.service.spec.ts" timestamp="2026-11-12T15:40:03.440Z" hostname="vm" tests="4" failures="1" errors="0" skipped="0" time="0.08957117">
-        <testcase classname="src/enrollment/enrollment.service.spec.ts" name="EnrollmentService &gt; confirms an enrollment while seats are left and notifies the student" time="0.068633066">
+<testsuites name="vitest tests" tests="8" failures="2" errors="0" time="0.30228275">
+    <testsuite name="src/enrollment/enrollment.service.spec.ts" timestamp="2026-11-12T15:49:04.027Z" hostname="vm" tests="4" failures="1" errors="0" skipped="0" time="0.117654745">
+        <testcase classname="src/enrollment/enrollment.service.spec.ts" name="EnrollmentService &gt; confirms an enrollment while seats are left and notifies the student" time="0.095478417">
         </testcase>
-        <testcase classname="src/enrollment/enrollment.service.spec.ts" name="EnrollmentService &gt; rejects an enrollment into a full course and notifies the student" time="0.010358189">
+        <testcase classname="src/enrollment/enrollment.service.spec.ts" name="EnrollmentService &gt; rejects an enrollment into a full course and notifies the student" time="0.012875009">
             <failure message="expected [] to deeply equal [ ObjectContaining{…} ]" type="AssertionError">
 AssertionError: expected [] to deeply equal [ ObjectContaining{…} ]
 
@@ -21,19 +21,19 @@ AssertionError: expected [] to deeply equal [ ObjectContaining{…} ]
  ❯ src/enrollment/enrollment.service.spec.ts:33:51
             </failure>
         </testcase>
-        <testcase classname="src/enrollment/enrollment.service.spec.ts" name="EnrollmentService &gt; rejects a repeat enrollment without taking a second seat" time="0.002821517">
+        <testcase classname="src/enrollment/enrollment.service.spec.ts" name="EnrollmentService &gt; rejects a repeat enrollment without taking a second seat" time="0.00349819">
         </testcase>
-        <testcase classname="src/enrollment/enrollment.service.spec.ts" name="EnrollmentService &gt; refuses an unknown course without recording or notifying anything" time="0.004174513">
-        </testcase>
-    </testsuite>
-    <testsuite name="src/notifications/notifications.service.spec.ts" timestamp="2026-11-12T15:40:03.443Z" hostname="vm" tests="1" failures="0" errors="0" skipped="0" time="0.006369607">
-        <testcase classname="src/notifications/notifications.service.spec.ts" name="NotificationsService &gt; keeps each recipient&apos;s notifications separate, in order" time="0.002433176">
+        <testcase classname="src/enrollment/enrollment.service.spec.ts" name="EnrollmentService &gt; refuses an unknown course without recording or notifying anything" time="0.0038054">
         </testcase>
     </testsuite>
-    <testsuite name="test/app.e2e-spec.ts" timestamp="2026-11-12T15:40:03.444Z" hostname="vm" tests="3" failures="1" errors="0" skipped="0" time="0.152097933">
-        <testcase classname="test/app.e2e-spec.ts" name="Course Desk API (e2e) &gt; lists the seeded courses with free seats" time="0.092953253">
+    <testsuite name="src/notifications/notifications.service.spec.ts" timestamp="2026-11-12T15:49:04.031Z" hostname="vm" tests="1" failures="0" errors="0" skipped="0" time="0.004032353">
+        <testcase classname="src/notifications/notifications.service.spec.ts" name="NotificationsService &gt; keeps each recipient&apos;s notifications separate, in order" time="0.002040336">
         </testcase>
-        <testcase classname="test/app.e2e-spec.ts" name="Course Desk API (e2e) &gt; confirms, then rejects when full; each student is notified of their outcome" time="0.041887361">
+    </testsuite>
+    <testsuite name="test/app.e2e-spec.ts" timestamp="2026-11-12T15:49:04.031Z" hostname="vm" tests="3" failures="1" errors="0" skipped="0" time="0.180595652">
+        <testcase classname="test/app.e2e-spec.ts" name="Course Desk API (e2e) &gt; lists the seeded courses with free seats" time="0.114333658">
+        </testcase>
+        <testcase classname="test/app.e2e-spec.ts" name="Course Desk API (e2e) &gt; confirms, then rejects when full; each student is notified of their outcome" time="0.046562336">
             <failure message="expected [] to deeply equal [ { id: &apos;ntf-2&apos;, …(4) } ]" type="AssertionError">
 AssertionError: expected [] to deeply equal [ { id: &apos;ntf-2&apos;, …(4) } ]
 
@@ -54,7 +54,7 @@ AssertionError: expected [] to deeply equal [ { id: &apos;ntf-2&apos;, …(4) } 
  ❯ test/app.e2e-spec.ts:42:22
             </failure>
         </testcase>
-        <testcase classname="test/app.e2e-spec.ts" name="Course Desk API (e2e) &gt; answers 400 for an invalid request and 404 for unknown courses or enrollments" time="0.015770564">
+        <testcase classname="test/app.e2e-spec.ts" name="Course Desk API (e2e) &gt; answers 400 for an invalid request and 404 for unknown courses or enrollments" time="0.017652629">
         </testcase>
     </testsuite>
 </testsuites>

@@ -1,6 +1,6 @@
 vcv gate: WARN: passed with 6 warnings: 2/2 required criteria passed, host-observed
-  candidate f6694841ca90 (model-first/quiet-rejections) against base cb1a5d7301cb; model-and-code change (16 file(s), 1 new model revision(s), lineage extends)
-  policy: .github/vcv-policy.json at the base (cb1a5d7301cb) (6b5096a4bad7)
+  candidate c5e1652b65a0 (model-first/quiet-rejections) against base d73c332d718e; model-and-code change (16 file(s), 1 new model revision(s), lineage extends)
+  policy: .github/vcv-policy.json at the base (d73c332d718e) (6b5096a4bad7)
   run 0: host-observed (captured here) vitest: 8 case(s), 8 passed, 0 failed, 0 error(s), 0 skipped; suite green
   ✓ crt-confirmation-notified [required] passed (host)  verifies rul-announce-every-decision, cap-enroll
   ✓ crt-rejection-notified [required] passed (host)  verifies rul-announce-every-decision, rul-seat-limit, cap-enroll

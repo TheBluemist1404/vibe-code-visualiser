@@ -3,17 +3,17 @@
   "decision": "block",
   "headline": "blocked: 3 blocking reasons (crt-confirmation-notified, crt-rejection-notified, EVIDENCE_REQUIRED)",
   "base": {
-    "commit": "cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2",
-    "mergeBase": "cb1a5d7301cbb48622ddd1c433a5a7ac2be922d2",
+    "commit": "d73c332d718e21d3a96283f5a3895ca45719ca31",
+    "mergeBase": "d73c332d718e21d3a96283f5a3895ca45719ca31",
     "containedInCandidate": true,
     "modelRevision": "rev-3-bd922e630c6e"
   },
   "candidate": {
-    "commit": "0f5f81a6f08c8f8db4084a6ccac6db662d771be9",
+    "commit": "9cd217015588668ae4b2d4d3758658ead18442fa",
     "branch": "negative/stale-report",
     "dirty": false,
     "modelRevision": "rev-3-bd922e630c6e",
-    "identityDigest": "525dd64d37667e940de4e97116a346823948e635d7f8e914df59c1a753753b14"
+    "identityDigest": "4caf0ac93f7378cc7aeded4aa2000441a46dc3e5075914629770fa20b743dda0"
   },
   "change": {
     "kind": "code-first",
@@ -22,7 +22,7 @@
     "introducedRevisions": 0
   },
   "policy": {
-    "source": ".github/vcv-policy.json at the base (cb1a5d7301cb)",
+    "source": ".github/vcv-policy.json at the base (d73c332d718e)",
     "digest": "6b5096a4bad7e6a285593b491c7cdb5e1d5abb7027aa1980903a6f08c8ad64e9",
     "changedByCandidate": false,
     "effective": {

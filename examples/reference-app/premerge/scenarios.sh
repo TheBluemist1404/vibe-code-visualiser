@@ -54,8 +54,9 @@ ci() { local step=$1; shift; rm -f "$out/$step/exit-code"; bash "$here/ci.sh" "$
 branch() { git -C "$repo" checkout -q -B "$1" "${2:-$main}"; git -C "$repo" clean -qfd -e node_modules; }
 commit() { git -C "$repo" add -A && git -C "$repo" commit -q -m "$1"; }
 # edit <file> <old> <new>: exact, single replacement (fails if <old> is not there exactly once).
+# A file with CRLF line endings (a checkout made with core.autocrlf) keeps them.
 edit() {
-  node -e 'const fs=require("fs");const [f,a,b]=process.argv.slice(1);const t=fs.readFileSync(f,"utf8");if(t.split(a).length!==2){console.error("edit: not exactly one match in "+f);process.exit(1)}fs.writeFileSync(f,t.replace(a,()=>b))' "$repo/$1" "$2" "$3"
+  node -e 'const fs=require("fs");let [f,a,b]=process.argv.slice(1);const t=fs.readFileSync(f,"utf8");if(t.includes("\r\n")){a=a.replace(/\n/g,"\r\n");b=b.replace(/\n/g,"\r\n")}if(t.split(a).length!==2){console.error("edit: not exactly one match in "+f);process.exit(1)}fs.writeFileSync(f,t.replace(a,()=>b))' "$repo/$1" "$2" "$3"
 }
 diff_of() { git -C "$repo" diff "$1" -- . ':!.vcv' > "$out/$2/source.diff"; git -C "$repo" diff --stat "$1" > "$out/$2/diffstat.txt"; }
 expect() { # expect <step> <exit code>
