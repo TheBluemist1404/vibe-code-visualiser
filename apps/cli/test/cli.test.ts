@@ -277,3 +277,26 @@ test("handoff and implementation report through the CLI: JSON handoff, recorded 
   assert.equal(show.status, 0, show.stdout);
   assert.match(show.stdout, /same as recorded/);
 });
+
+test("reconcile: a readable report and --json with exit 0, a missing --base or unknown base fails", async () => {
+  const { baseline, git, edit, SERVICE } = await import("../../../packages/repo/test/course-desk.ts");
+  const repo = baseline();
+  const base = git(repo, "rev-parse", "HEAD");
+  git(repo, "checkout", "-q", "-b", "feature");
+  edit(repo, SERVICE, /: `You are already enrolled in \$\{course\.title\}\.`/, ': `Already enrolled.`');
+  const text = vcv("reconcile", repo, "--base", base);
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, /model: unchanged, rev-1 → rev-1; integrity ok/);
+  assert.match(text.stdout, /\[binding\/checked\] CLAIM_STALE: claim impl\.cap-enroll/);
+  assert.match(text.stdout, /not established here:/);
+  const json = vcv("reconcile", repo, "--base", base, "--json");
+  assert.equal(json.status, 0);
+  const d = JSON.parse(json.stdout);
+  assert.equal(d.format, "vcv-reconciliation-1");
+  assert.equal(d.implementationChecked, false);
+  assert.ok(!json.stdout.includes(repo));
+  assert.equal(vcv("reconcile", repo).status, 2);
+  const unknown = vcv("reconcile", repo, "--base", "nope");
+  assert.equal(unknown.status, 1);
+  assert.equal(JSON.parse(unknown.stdout).error.code, "UNKNOWN_COMMIT");
+});

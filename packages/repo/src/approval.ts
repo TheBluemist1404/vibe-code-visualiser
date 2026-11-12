@@ -102,7 +102,7 @@ export class ApprovalError extends Error {
 }
 
 /** Read a file outside the store safely: regular, not a symlink, bounded, never blocking. */
-function readPlainFile(path: string, max: number, what: string): Buffer {
+export function readPlainFile(path: string, max: number, what: string): Buffer {
   let st;
   try {
     st = lstatSync(path);

@@ -17,6 +17,7 @@ import {
   createReviewerKey,
   reviewApprove,
   buildHandoff,
+  reconcile,
   recordImplementation,
   implementationStatus,
   reviewFinalize,
@@ -37,7 +38,7 @@ import {
   verifyBinding,
   verifyBindings,
 } from "../../../packages/repo/src/index.ts";
-import type { BindingHost, HintedDiagnostic, IntegrityReport, TrustSource, ProjectStatus, ProposalPreview, ProposalResult, Verification } from "../../../packages/repo/src/index.ts";
+import type { Reconciliation, BindingHost, HintedDiagnostic, IntegrityReport, TrustSource, ProjectStatus, ProposalPreview, ProposalResult, Verification } from "../../../packages/repo/src/index.ts";
 import type { BindingRelation, ClaimSource } from "../../../packages/core/src/index.ts";
 import type { HostContext, ImplementationRequest, Outcome, Permission } from "../../../packages/core/src/index.ts";
 
@@ -85,6 +86,14 @@ const USAGE = `vcv <command> [options]
                                         Read-only check of the .vcv/ history: every revision derived by its
                                         applied change's typed operations, records consistent, base history
                                         unchanged, approvals attested by trusted keys. Exit 1 on any error.
+
+  reconcile <path> --base <full commit ID of the protected base> [--trust-ref <ref> [--trust-commit <sha>] | --trust <file>]
+            [--require-attestation] [--json]
+                                        Read-only pre-merge comparison of the candidate checkout (commits and
+                                        dirty edits) with the base: model lineage and integrity, model delta and
+                                        impact, changed files, binding claims verified now and compared with the
+                                        merge base, and findings labelled checked / observed / not-checked.
+                                        Not a gate: it reports, and exits 0 whenever a report was produced.
 
   handoff <path> <changeId>             The bounded implementation handoff (JSON) of an applied, attested change:
                                         approved operations and request, delta, impact, affected binding claims
@@ -340,6 +349,8 @@ function main(): number {
       return integrityCommand();
     case "handoff":
       return handoffCommand();
+    case "reconcile":
+      return reconcileCommand();
     case "implementation":
       return implementationCommand();
     default:
@@ -459,6 +470,42 @@ function handoffCommand(): number {
   const r = buildHandoff(need(a, "<path>"), need(b, "<changeId>"));
   console.log(JSON.stringify(r.ok ? r.data : r, null, 2));
   return r.ok ? 0 : 1;
+}
+
+function reconcileCommand(): number {
+  const r = reconcile(need(a, "<path>"), { base: need(values.base, "--base"), ...(trustSource(null) ? { trust: trustSource(null) } : {}), requireAttestation: values["require-attestation"] });
+  if (values.json || !r.ok) {
+    console.log(JSON.stringify(r.ok ? r.data : r, null, 2));
+    return r.ok ? 0 : 1;
+  }
+  printReconciliation(r.data);
+  return 0;
+}
+
+function printReconciliation(d: Reconciliation) {
+  const short = (c: string) => c.slice(0, 12);
+  console.log(`reconciliation of ${d.candidate.projectId}: candidate ${short(d.candidate.commit)}${d.candidate.branch ? ` (${d.candidate.branch})` : ""}${d.candidate.dirty ? " + uncommitted edits" : ""} against base ${d.base.ref === d.base.commit ? short(d.base.commit) : `${d.base.ref} = ${short(d.base.commit)} (ref resolved locally; not pinned)`}`);
+  if (!d.base.containedInCandidate) console.log(`  ! the candidate does not contain the base; changes are measured from the merge base ${short(d.base.mergeBase)}`);
+  console.log(`  model: ${d.model.lineage}, ${d.base.modelRevision ?? "(no model)"} → ${d.candidate.modelRevision}; integrity ${d.model.integrity.ok ? "ok" : "FAILED"}; ${d.model.delta.total} object change(s)${d.model.impact ? `, ${d.model.impact.candidates.length} impact candidate(s), cross-module ${d.model.impact.crossModule}` : ""}`);
+  for (const r of d.model.introduced) console.log(`    ${r.revision}: ${r.derivation}${r.changeId ? ` by ${r.changeId}` : ""}; approval ${r.approval}`);
+  for (const c of d.model.delta.changes) console.log(`    ${c.change} ${c.kind} ${c.id}${c.fields.length ? ` (${c.fields.map((f) => f.field).join(", ")})` : ""}`);
+  console.log(`  source: ${d.source.total} changed file(s), ${d.source.unmapped ?? "unknown (claims unreadable)"} file(s) outside .vcv/ unmapped`);
+  for (const f of d.source.files) console.log(`    ${f.committed ? "C" : " "}${f.uncommitted ? "W" : " "} ${f.area.padEnd(12)} ${f.path}${f.bindings.length ? `  ← ${f.bindings.join(", ")}` : ""}`);
+  if (d.sourceImpact) {
+    const si = d.sourceImpact;
+    console.log(`  source impact (declared-model context, not evidence of drift): seeds ${si.seeds.map((x) => x.objectId).join(", ")}; modules ${si.modules.map((m) => m.id).join(", ")}; ${si.total} impact candidate(s); cross-module ${si.crossModule}`);
+    if (si.contracts.length) console.log(`    contracts: ${si.contracts.map((c) => `${c.id} (${c.via})`).join(", ")}`);
+    if (si.rules.length) console.log(`    rules: ${si.rules.map((r) => `${r.id} (${r.via})`).join(", ")}`);
+  }
+  if (!d.bindings.available) console.log(`  bindings: NOT ASSESSED (${d.bindings.problem})`);
+  else console.log(`  bindings: ${d.bindings.total} shown, ${d.bindings.unaffected} unaffected and resolved`);
+  for (const b of d.bindings.items) console.log(`    ${b.bindingId}: ${b.state ?? "removed"}; claim ${b.atBase}; object ${b.object}${b.boundFileChanged ? "; bound file changed" : ""}`);
+  console.log(`  findings (${d.findingsTotal}):`);
+  for (const f of d.findings) console.log(`    [${f.category}/${f.basis}${f.related ? "" : ", unrelated"}] ${f.code}: ${f.message}`);
+  if (d.budget.shrunk || d.findingsTruncated) console.log(`  ! lists were cut to fit the report budget (${d.budget.bytes}/${d.budget.limit} bytes); use --json for totals`);
+  console.log(`  semantic: ${d.semantic.note}`);
+  console.log("  not established here:");
+  for (const l of d.limits) console.log(`    - ${l}`);
 }
 
 function printWarnings(ws: { code: string; message: string }[]) {
