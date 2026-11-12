@@ -56,7 +56,7 @@ the supported recipe has three jobs. See
 2. **`candidate-tests`** starts only after `identity` has finished (`needs: identity`), so no PR
    code runs before the identity is read. It checks out the PR head and runs the project's
    ordinary runner with its JUnit reporter. For Course Desk that is `npx vitest run --reporter=junit --outputFile=…`. This job
-   executes PR code, so it gets only `contents: read` (for the checkout of a private repository; the token is not persisted into the checkout) and no secrets. It uses no cache: under
+   executes PR code, so it gets nothing beyond a job-wide, read-only token (`contents: read`, needed to check out a private repository) and no secrets. The PR's code runs in that job, so treat that read access as available to it. `persist-credentials: false` means only that checkout does not store the credential in the checkout's Git config. It uses no cache: under
    `pull_request_target`, a cache it wrote would belong to the base. It hands over exactly one file,
    the report.
 3. **`vcv-gate`** never executes PR code. It installs VCV from a commit pinned in the workflow file,
