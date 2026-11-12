@@ -128,7 +128,9 @@ export type ProposalErrorCode =
   /** M4.3: a test-run record that does not check (shape, digest, summary). */
   | "RUN_INVALID"
   /** M4.3: the candidate's source cannot be identified exactly (no Git commit, a failed Git read, too much to hash). */
-  | "SOURCE_IDENTITY_UNAVAILABLE";
+  | "SOURCE_IDENTITY_UNAVAILABLE"
+  /** M4.4: the gate policy does not match vcv-policy-1, or cannot be read. */
+  | "POLICY_INVALID";
 
 export type ProposalError = { code: ProposalErrorCode; message: string; details?: { path: string; message: string }[] };
 

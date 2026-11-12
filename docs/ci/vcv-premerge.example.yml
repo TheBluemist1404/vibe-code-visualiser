@@ -1,0 +1,107 @@
+# Example VCV pre-merge policy gate for a project repository (docs/premerge-gate.md, M4.4).
+# Copy it to .github/workflows/ on the protected branch, adjust the TEST COMMAND and the VCV pin,
+# and make the "vcv-gate" job a required status check on that branch.
+#
+# Two jobs, because the PR's own code has to run for its tests but must never run next to the
+# verifier:
+#
+#   candidate-tests  runs the PR's tests with the project's ordinary runner and its JUnit reporter.
+#                    This executes PR code, so the job gets no token permissions, no secrets, no
+#                    caches, and hands over exactly one file: the report.
+#   vcv-gate         never executes PR code. It installs VCV from a commit pinned HERE (this file
+#                    comes from the base branch: pull_request_target), reads the PR head only as
+#                    data, captures the report in-process (host-observed) and applies the policy
+#                    read from the BASE commit.
+#
+# The gate's verdict is only as strong as this file: keep the PR from editing it (it runs from the
+# base under pull_request_target), require code-owner review for it, for .github/vcv-policy.json
+# and for .vcv/reviewers.json, and do not add steps that run code from ./candidate to vcv-gate.
+name: vcv-premerge
+on:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+
+permissions: {}
+
+env:
+  # The VCV build the gate trusts: a full commit ID, changed only by a reviewed PR to this file.
+  VCV_REPOSITORY: TheBluemist1404/vibe-code-visualiser
+  VCV_COMMIT: 0000000000000000000000000000000000000000 # pin a reviewed VCV commit here
+
+jobs:
+  candidate-tests:
+    runs-on: ubuntu-latest
+    permissions: {}
+    steps:
+      - name: The PR head (its code runs in THIS job only)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate
+          persist-credentials: false
+      # No `cache:`: under pull_request_target a cache written here would be the base branch's.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+      - name: The project's own tests, with a per-case JUnit report written outside the checkout
+        working-directory: candidate/server
+        # The report is produced whether the tests pass or fail; the gate decides, not this exit code.
+        run: |
+          npm ci
+          npx vitest run --reporter=junit --outputFile="$RUNNER_TEMP/junit.xml" || echo "tests exited $?"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: junit
+          path: ${{ runner.temp }}/junit.xml
+          if-no-files-found: error
+          retention-days: 1
+
+  vcv-gate:
+    needs: candidate-tests
+    # Decide even if the test job failed: without a report the required criteria are unverified and block.
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Trusted VCV (pinned by this base-owned file)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.VCV_REPOSITORY }}
+          ref: ${{ env.VCV_COMMIT }}
+          path: trusted
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+      - name: Install the trusted VCV build (no lifecycle scripts)
+        working-directory: trusted
+        run: npm ci --ignore-scripts
+      - name: Candidate as data (the PR head; never installed or run here)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          path: candidate
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Make the base commit available to the candidate's object store
+        run: git -C candidate fetch --no-tags --quiet origin "$BASE_SHA"
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      - name: The test job's report (data; read strictly and bounded)
+        uses: actions/download-artifact@v4
+        continue-on-error: true
+        with:
+          name: junit
+          path: ${{ runner.temp }}/runner
+      - name: Pre-merge gate
+        run: |
+          junit=()
+          if [ -f "$RUNNER_TEMP/runner/junit.xml" ]; then
+            junit=(--junit "$RUNNER_TEMP/runner/junit.xml" --root server --runner vitest \
+                   --invocation "npx vitest run --reporter=junit (job candidate-tests)")
+          fi
+          trusted/scripts/vcv-premerge-gate.sh "$PWD/trusted" "$PWD/candidate" "$BASE_SHA" \
+            "${junit[@]}" --policy-at-base .github/vcv-policy.json
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}

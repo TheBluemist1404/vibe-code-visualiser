@@ -174,6 +174,41 @@ post-merge rewrite and no inference.
   `.git/`, `.vcv/` and `node_modules/` paths stay excluded from hashing, since the model and the
   claims are bound separately.
 
+## M4.4 decisions
+
+- **One gate that composes, not a new analysis.** `preMergeGate` (CLI `vcv gate`) runs the M4.1
+  reconciliation, which is pinned to the base and requires attestation, and the M4.2/M4.3 criteria
+  evidence. It adds agent observations and applies a policy. It reads the candidate's identity
+  first and again before answering, so the parts describe one candidate (`STATE_CHANGED`
+  otherwise).
+- **Exit codes a check can use.** 0 means pass or warn, 1 means block, and 2 means a usage or setup
+  problem, which is never a pass. A candidate whose model cannot be loaded is a decision
+  (`PROJECT_NOT_READY` blocks), not a setup error.
+- **The policy is the host's.** It is a `vcv-policy-1` JSON file that is either supplied by the host
+  (the CLI refuses one inside the candidate) or read from the base commit's Git objects
+  (`--policy-at-base`). A candidate's edit to that file is reported as `POLICY_CHANGED` and applies
+  only after the merge. Integrity is fixed at block. Required evidence can be lowered to warn but
+  never switched off, because `unknown` is not `passed`. Unknown keys are refused.
+- **Criterion intent is not policy.** Whether a criterion is required lives in the approved model
+  (M3 approval). The policy only says how outcomes are treated. `requireEvidence` adds objects that
+  need a host-observed required pass whenever a change touches them, and counts every listed object
+  as touched when an impact list was cut.
+- **Agent observations are bounded claims.** There are at most 50, each citing at most 20 objects,
+  locations and test cases. VCV checks the references (objects in the model; portable paths that
+  exist, with the cited lines; test cases mapped, and their results in fresh runs) and labels each
+  observation `verified`, `invalid` or `unsupported`, the last for a contradiction without a source
+  location. Observations warn by default. A team may block on contradictions. They can never lower
+  another outcome.
+- **Two CI jobs, because tests run candidate code.** The candidate's tests run in a job with no
+  token permissions, no secrets and no cache, which uploads only the JUnit report. The gate job
+  installs VCV from a commit pinned in the base-owned workflow, reads the candidate as data,
+  captures the report in-process (host-observed) and decides
+  (`scripts/vcv-premerge-gate.sh`, `docs/ci/vcv-premerge.example.yml`). This keeps the verifier out
+  of reach of candidate code. It cannot stop a PR from weakening its own tests: `TEST_CHANGED`
+  and `MAPPING_CHANGED` make that visible to the PR reviewer.
+- **A whole decision.** If the criteria report must be cut to fit, the gate evaluates the remaining
+  criteria in batches before deciding. Hidden structural findings are counted from the summary.
+
 ## Consequences
 
 - A code-first PR that edits bound code shows stale claims and the exact declarations, but VCV

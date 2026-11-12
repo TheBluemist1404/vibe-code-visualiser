@@ -3,7 +3,8 @@
 //
 // The CLI acts as the trusted host for a local single user: identity and permissions come
 // from flags here, standing in for what a real session or OAuth token would supply.
-import { closeSync, constants as fsConstants, fstatSync, openSync, readFileSync, readSync, writeFileSync } from "node:fs";
+import { closeSync, constants as fsConstants, fstatSync, openSync, readFileSync, readSync, realpathSync, writeFileSync } from "node:fs";
+import { resolve as resolvePath, sep as pathSep } from "node:path";
 import { parseArgs } from "node:util";
 import { loadModel, parseYaml, ownershipTree } from "../../../packages/ir/src/index.ts";
 import type { Diagnostic, TreeNode } from "../../../packages/ir/src/index.ts";
@@ -19,6 +20,8 @@ import {
   buildHandoff,
   reconcile,
   criteriaEvidence,
+  preMergeGate,
+  findWorkTreeRoot,
   captureTestRun,
   testIdentity,
   TEST_RUN_LIMITS,
@@ -43,7 +46,7 @@ import {
   verifyBinding,
   verifyBindings,
 } from "../../../packages/repo/src/index.ts";
-import type { Reconciliation, BindingHost, HintedDiagnostic, IntegrityReport, TrustSource, ProjectStatus, ProposalPreview, ProposalResult, Verification } from "../../../packages/repo/src/index.ts";
+import type { GateReport, Reconciliation, BindingHost, HintedDiagnostic, IntegrityReport, TrustSource, ProjectStatus, ProposalPreview, ProposalResult, Verification } from "../../../packages/repo/src/index.ts";
 import type { BindingRelation, ClaimSource } from "../../../packages/core/src/index.ts";
 import type { HostContext, ImplementationRequest, Outcome, Permission } from "../../../packages/core/src/index.ts";
 
@@ -111,6 +114,14 @@ const USAGE = `vcv <command> [options]
                                         missing / unknown per criterion (M4.3). --junit captures here, in this process:
                                         the only way a run is host-observed. --run records are claims, whatever they
                                         declare. Exit 0 whenever a report is produced.
+  gate <path> --base <full commit ID of the protected base> [--junit <report.xml> --runner <name> --invocation "<cmd>" [--root <dir>]]
+       [--run <test-run.json>]... [--observations <file>] [--policy <host file> | --policy-at-base <repo path>] [--coverage <f>] [--json]
+                                        The pre-merge policy gate (M4.4): integrity pinned to the base with attestation
+                                        required, structural and binding findings, every criterion's mapped test cases
+                                        in runs of this exact candidate (--junit captured here = host-observed), and
+                                        agent observations (claims; references checked). Decides pass / warn / block
+                                        by the policy (vcv-policy-1; defaults block anything required that is not a
+                                        host-observed pass). Exit 0 pass or warn, 1 block, 2 usage or setup error.
   tests identity <path> [--json]        The candidate's identity (commit, uncommitted bytes, model revision, claims).
                                         Read it before running the tests and pass it to capture as --before.
   tests capture <path> --junit <report.xml> --runner <name> --invocation "<command>" [--root <dir>]
@@ -212,6 +223,9 @@ const { positionals, values } = parseArgs({
     out: { type: "string" },
     run: { type: "string", multiple: true },
     coverage: { type: "string" },
+    policy: { type: "string" },
+    "policy-at-base": { type: "string" },
+    observations: { type: "string" },
   },
 });
 const [cmd, a, b, ...rest] = positionals;
@@ -389,6 +403,8 @@ function main(): number {
       return criteriaCommand();
     case "tests":
       return testsCommand();
+    case "gate":
+      return gateCommand();
     case "implementation":
       return implementationCommand();
     default:
@@ -650,6 +666,71 @@ function criteriaCommand(): number {
   if (d.truncated || d.testsTruncated || d.invalidClaims.truncated || d.budget.shrunk) console.log(`  ! lists were cut (report ${d.budget.bytes}/${d.budget.limit} bytes); use --json for totals`);
   console.log(`  ${d.meaning}`);
   return 0;
+}
+
+/**
+ * The pre-merge gate (M4.4). Exit 0: pass or warn. 1: block. 2: usage or setup problem (never a pass).
+ * --junit reports are captured here, in this process; --run records are claims.
+ */
+function gateCommand(): number {
+  const path = need(a, "<path>");
+  const base = need(values.base, "--base");
+  if (values.policy && values["policy-at-base"]) throw new InputError("give --policy or --policy-at-base, not both");
+  const root = findWorkTreeRoot(path);
+  let policy: unknown;
+  if (values.policy) {
+    // The policy is the host's: a file inside the candidate would let the candidate choose it.
+    const real = (p: string) => {
+      try {
+        return realpathSync(p);
+      } catch {
+        return resolvePath(p);
+      }
+    };
+    if (root && (real(values.policy) + pathSep).startsWith(real(root) + pathSep)) {
+      throw new InputError("--policy is inside the candidate checkout; pass a host-owned file, or read it from the base with --policy-at-base");
+    }
+    policy = readJson(values.policy, "gate policy");
+  }
+  const junit = values.junit ? [{ report: readBounded(values.junit, JUNIT_LIMITS.bytes), root: values.root ?? "", runner: captureInput().runner, invocation: captureInput().invocation }] : [];
+  if (values.before) throw new InputError("--before is not used by gate: the gate reads the candidate's identity itself and binds the capture to it");
+  const r = preMergeGate(path, {
+    base,
+    ...(junit.length ? { junit } : {}),
+    ...(values.run?.length ? { runs: values.run.map((f) => readJson(f, "test-run record")) } : {}),
+    ...(values.coverage ? { coverage: readCoverage(values.coverage) } : {}),
+    ...(values.observations ? { observations: readJson(values.observations, "observations file") } : {}),
+    ...(policy !== undefined ? { policy } : {}),
+    ...(values["policy-at-base"] ? { policyAtBase: values["policy-at-base"] } : {}),
+  }, ctx);
+  if (!r.ok) {
+    if (values.json) console.log(JSON.stringify(r, null, 2));
+    else printResultError(r);
+    return 2;
+  }
+  if (values.json) console.log(JSON.stringify(r.data, null, 2));
+  else printGate(r.data);
+  return r.data.decision === "block" ? 1 : 0;
+}
+
+function printGate(d: GateReport) {
+  const short = (c: string) => c.slice(0, 12);
+  console.log(`vcv gate: ${d.decision.toUpperCase()}: ${d.headline}`);
+  console.log(`  candidate ${short(d.candidate.commit)}${d.candidate.branch ? ` (${d.candidate.branch})` : ""} against base ${short(d.base.commit)}; ${d.change.kind} change (${d.change.changedFiles} file(s), ${d.change.introducedRevisions} new model revision(s), lineage ${d.change.lineage})`);
+  console.log(`  policy: ${d.policy.source} (${short(d.policy.digest)})${d.policy.changedByCandidate ? "; the candidate changes it (applies after merge)" : ""}`);
+  for (const run of d.runs) {
+    const s = run.summary;
+    console.log(`  run ${run.index}: ${run.observedBy === "host" ? "host-observed (captured here)" : "CLAIMED (imported)"} ${run.runner.name}: ${s.tests} case(s), ${s.passed} passed, ${s.failed} failed, ${s.errors} error(s), ${s.skipped} skipped; suite ${run.green ? "green" : "red"}${run.fresh ? "" : `; STALE: ${run.staleBecause.join("; ")}`}`);
+  }
+  for (const c of d.criteria.items) console.log(`  ${c.result === "passed" && c.observedBy === "host" ? "✓" : "✗"} ${c.id} [${c.verification}] ${c.result}${c.observedBy ? ` (${c.observedBy})` : ""}  verifies ${c.verifies.join(", ")}`);
+  for (const r of d.reasons) {
+    console.log(`  ${r.severity === "block" ? "BLOCK" : "warn "} ${r.code} [${r.rule}; ${r.basis}]${r.criterionId ? ` ${r.criterionId}` : ""}: ${r.message}`);
+  }
+  if (d.reasonsTruncated || d.criteria.truncated || d.observationsTruncated) console.log(`  ! lists were cut (${d.reasonsTotal} reasons in total); use --json`);
+  for (const n of d.notes) console.log(`  note: ${n}`);
+  for (const o of d.observations) console.log(`  agent claim ${o.id} (${o.kind}, references ${o.references}): ${o.statement.slice(0, 200)}`);
+  console.log("  not established here:");
+  for (const l of d.limits) console.log(`    - ${l}`);
 }
 
 function printReconciliation(d: Reconciliation) {
