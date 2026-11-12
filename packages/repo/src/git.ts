@@ -172,3 +172,16 @@ export function changedFilesSince(root: string, commit: string): string[] | null
   if (diff === null || untracked === null) return null;
   return [...new Set([...diff.split("\0"), ...untracked.split("\0")].filter(Boolean))].sort();
 }
+
+/** The best common ancestor of two commits (`git merge-base`), or null (unrelated histories, unknown commit). */
+export function mergeBase(root: string, a: string, b: string): string | null {
+  if (!/^[0-9a-f]{40,64}$/.test(a) || !/^[0-9a-f]{40,64}$/.test(b)) return null;
+  return git(root, ["merge-base", a, b])?.trim() || null;
+}
+
+/** Repository-relative paths that differ between two commits (no renames), sorted. Null when either is not a commit here. */
+export function changedFilesBetween(root: string, from: string, to: string): string[] | null {
+  if (!/^[0-9a-f]{40,64}$/.test(from) || !/^[0-9a-f]{40,64}$/.test(to)) return null;
+  const diff = git(root, ["diff", "--name-only", "-z", "--no-renames", from, to, "--"]);
+  return diff === null ? null : [...new Set(diff.split("\0").filter(Boolean))].sort();
+}
