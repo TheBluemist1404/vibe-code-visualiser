@@ -1,8 +1,8 @@
 # VCV pre-merge policy gate for Course Desk (docs/premerge-gate.md; Issue #22, M4.5).
 # Installed by examples/reference-app/premerge/setup.sh from the example in
 # docs/ci/vcv-premerge.example.yml, with Course Desk's test command (npm workspaces: install at the
-# root, run Vitest in server/) and a token for the VCV repository, which is private. Make the
-# "vcv-gate" job a required status check on main.
+# root, run Vitest in server/). It checks out VCV from its public repository at the pinned commit.
+# Make the "vcv-gate" job a required status check on main.
 #
 # Three jobs, because the PR's own code has to run for its tests but must never run next to the
 # verifier:
@@ -54,7 +54,6 @@ jobs:
           repository: ${{ env.VCV_REPOSITORY }}
           ref: ${{ env.VCV_COMMIT }}
           path: trusted
-          token: ${{ secrets.VCV_READ_TOKEN }} # read-only access to the VCV repository
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
@@ -120,7 +119,6 @@ jobs:
           repository: ${{ env.VCV_REPOSITORY }}
           ref: ${{ env.VCV_COMMIT }}
           path: trusted
-          token: ${{ secrets.VCV_READ_TOKEN }} # read-only access to the VCV repository
           persist-credentials: false
       - uses: actions/setup-node@v4
         with:
