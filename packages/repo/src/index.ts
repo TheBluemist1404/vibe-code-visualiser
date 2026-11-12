@@ -14,3 +14,4 @@ export * from "./reconcile.ts";
 export * from "./criteria.ts";
 export * from "./junit.ts";
 export * from "./testruns.ts";
+export * from "./gate.ts";

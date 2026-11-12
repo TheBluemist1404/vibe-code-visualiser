@@ -3,8 +3,8 @@
 //
 // Only read commands are run, with GIT_OPTIONAL_LOCKS=0 so `git status` does not refresh and
 // rewrite the index. VCV never fetches, pulls, checks out or merges.
-import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 
 export type GitOperation = "merge" | "rebase" | "cherry-pick" | "revert";
@@ -25,12 +25,110 @@ export type GitObservation = {
   operation: GitOperation | null;
 };
 
-function git(cwd: string, args: string[]): string | null {
+/**
+ * Every read runs with the checkout treated as data (M4.4 review): the checkout's own
+ * configuration must not make Git execute anything. Repository-local config can name commands
+ * (core.fsmonitor, hooks such as post-index-change, external diff drivers, clean/smudge filter
+ * drivers selected by .gitattributes); these options switch each of them off for this process.
+ * Attributes are read from the empty tree (GIT_ATTR_SOURCE, Git 2.40+), so no filter or diff
+ * driver applies, whatever .gitattributes the checkout carries.
+ */
+const SAFE_OPTIONS = [
+  "-c", "core.fsmonitor=false",
+  "-c", `core.hooksPath=${process.platform === "win32" ? "NUL" : "/dev/null"}`,
+  "-c", "core.untrackedCache=false",
+  "-c", "diff.external=",
+  "-c", "core.pager=cat",
+  "--no-pager",
+];
+const EMPTY_TREE = { sha1: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", sha256: "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321" } as const;
+const objectFormat = new Map<string, "sha1" | "sha256">();
+function safeEnv(cwd: string): NodeJS.ProcessEnv {
+  let format = objectFormat.get(cwd);
+  if (!format) {
+    try {
+      const out = execFileSync("git", ["-C", cwd, ...SAFE_OPTIONS, "rev-parse", "--show-object-format"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], env: baseEnv() }).trim();
+      format = out === "sha256" ? "sha256" : "sha1";
+    } catch {
+      format = "sha1";
+    }
+    objectFormat.set(cwd, format);
+  }
+  return { ...baseEnv(), GIT_ATTR_SOURCE: EMPTY_TREE[format] };
+}
+function baseEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0", LC_ALL: "C", GIT_PAGER: "cat" };
+  // Inherited variables that would point Git at another repository, config or attributes.
+  for (const k of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_ATTR_SOURCE", "GIT_EXTERNAL_DIFF"]) delete env[k];
+  return env;
+}
+
+/**
+ * Thrown when Git cannot be run safely on this checkout: the configured filter and diff/merge
+ * drivers could not be enumerated exactly (unreadable or oversized config, too many driver keys,
+ * a failed or killed `git config`). Nothing that reads content runs then (M4.4 review round 2):
+ * a missing override would let the checkout's own driver commands execute. Callers do not turn it
+ * into "no changes" or "absent"; read surfaces report it as SOURCE_IDENTITY_UNAVAILABLE.
+ */
+export class GitRefusedError extends Error {
+  readonly code = "GIT_REFUSED" as const;
+  constructor(message: string) {
+    super(message);
+    this.name = "GitRefusedError";
+  }
+}
+
+/** Bounds on the driver enumeration; past either, Git is refused rather than run without overrides. */
+export const GIT_DRIVER_LIMITS = { keys: 1000, outputBytes: 256 * 1024 } as const;
+
+/**
+ * Per-repository overrides that empty every configured filter and diff/merge driver command.
+ * $GIT_DIR/info/attributes can still select a driver (GIT_ATTR_SOURCE replaces only the in-tree
+ * .gitattributes), and an empty command means "no driver". Reading config runs nothing.
+ *
+ * Fails closed: only `git config` exiting 1 with no output means "no driver keys". Every other
+ * outcome other than a clean exit 0 within the bounds throws GitRefusedError.
+ */
+function driverOptions(cwd: string): string[] {
+  // Read every time (config can change between reads in a long-lived process such as the MCP server).
+  const r = spawnSync("git", ["-C", cwd, ...SAFE_OPTIONS, "config", "--name-only", "--get-regexp", "^(filter|diff|merge)\\..+\\.(clean|smudge|process|command|textconv|driver)$"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+    env: safeEnv(cwd),
+    maxBuffer: GIT_DRIVER_LIMITS.outputBytes,
+  });
+  if (r.error || r.signal) throw new GitRefusedError(`the checkout's Git driver configuration could not be read within ${GIT_DRIVER_LIMITS.outputBytes} bytes (${r.error?.message ?? r.signal})`);
+  if (r.status === 1 && r.stdout === "") return [];
+  if (r.status !== 0) throw new GitRefusedError(`the checkout's Git driver configuration could not be read (git config exited ${r.status})`);
+  const keys = new Set(r.stdout.split("\n").filter(Boolean));
+  if (keys.size === 0) throw new GitRefusedError("the checkout's Git driver configuration could not be read (no keys in a successful listing)");
+  if (keys.size > GIT_DRIVER_LIMITS.keys) throw new GitRefusedError(`the checkout configures more than ${GIT_DRIVER_LIMITS.keys} Git filter or diff/merge driver keys`);
+  const out: string[] = [];
+  for (const k of keys) {
+    out.push("-c", `${k}=`);
+    if (k.startsWith("filter.")) out.push("-c", `${k.slice(0, k.lastIndexOf("."))}.required=false`);
+  }
+  return out;
+}
+
+const isDirectory = (p: string) => {
   try {
-    return execFileSync("git", ["-C", cwd, ...args], {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+function git(cwd: string, args: string[]): string | null {
+  // Not a directory (absent, or a file): Git cannot run there at all, so nothing can execute.
+  if (!isDirectory(cwd)) return null;
+  const drivers = driverOptions(cwd); // throws, outside the catch below, when Git is refused
+  try {
+    return execFileSync("git", ["-C", cwd, ...SAFE_OPTIONS, ...drivers, ...args], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0", LC_ALL: "C" },
+      env: safeEnv(cwd),
+      maxBuffer: 64 * 1024 * 1024,
     });
   } catch {
     return null;
@@ -49,15 +147,16 @@ export function findWorkTreeRoot(path: string): string | null {
 export function observeGit(root: string, storeRelPath = ".vcv"): GitObservation {
   const commit = git(root, ["rev-parse", "--verify", "-q", "HEAD"])?.trim() || null;
   const symbolic = git(root, ["symbolic-ref", "-q", "--short", "HEAD"])?.trim() || null;
-  const status = git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]) ?? "";
-  const entries = parsePorcelainZ(status);
+  const status = git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
+  // A status Git could not give is not a clean tree.
+  const entries = status === null ? [] : parsePorcelainZ(status);
   const prefix = storeRelPath.replace(/\/+$/, "") + "/";
   return {
     root,
     commit,
     branch: symbolic,
     detached: symbolic === null,
-    dirty: entries.length > 0,
+    dirty: status === null || entries.length > 0,
     storeChanges: entries.filter((p) => p.startsWith(prefix)).sort(),
     operation: gitOperation(root),
   };
@@ -88,8 +187,10 @@ export function headCommit(root: string): string | null {
 export function fileWorkingState(root: string, rel: string): "clean" | "modified" | "untracked" | "no-git" {
   if (!findWorkTreeRoot(root)) return "no-git";
   const tracked = git(root, ["ls-files", "-z", "--", rel]);
-  if (!tracked) return "untracked";
-  const status = git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", rel]) ?? "";
+  // A failed Git read is never reported as clean (or as merely untracked).
+  if (tracked === null) return "modified";
+  if (tracked === "") return "untracked";
+  const status = git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", rel]);
   return status === "" ? "clean" : "modified";
 }
 
@@ -120,15 +221,35 @@ export function fileAtCommit(root: string, commit: string, rel: string, max: num
   if (!/^[0-9a-f]{40,64}$/.test(commit) || rel.startsWith("-") || rel.includes("\0")) return null;
   const size = git(root, ["cat-file", "-s", `${commit}:${rel}`]);
   if (size === null || Number(size.trim()) > max) return null;
+  if (!isDirectory(root)) return null;
+  const drivers = driverOptions(root);
   try {
-    return execFileSync("git", ["-C", root, "cat-file", "blob", `${commit}:${rel}`], {
+    return execFileSync("git", ["-C", root, ...SAFE_OPTIONS, ...drivers, "cat-file", "blob", `${commit}:${rel}`], {
       stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: max + 1,
-      env: { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0", LC_ALL: "C" },
+      env: safeEnv(root),
     });
   } catch {
     return null;
   }
+}
+
+/**
+ * What a commit has at a repository-relative path, without reading its bytes: absent (no entry),
+ * a regular blob with its size, something else (tree, link, submodule), or null when Git could not
+ * be asked. Read-only. Callers that need "absent" to mean absent use this before fileAtCommit, whose
+ * null also covers oversized and unreadable blobs.
+ */
+export function entryAtCommit(root: string, commit: string, rel: string): { kind: "absent" } | { kind: "blob"; size: number } | { kind: "other"; mode: string } | null {
+  if (!/^[0-9a-f]{40,64}$/.test(commit) || rel.startsWith("-") || rel.includes("\0")) return null;
+  const out = git(root, ["ls-tree", "-z", "--long", "--full-tree", commit, "--", rel]);
+  if (out === null) return null;
+  const line = out.split("\0").find((l) => l.length > 0);
+  if (!line) return { kind: "absent" };
+  const m = /^(\d+) (\w+) [0-9a-f]+\s+(-|\d+)\t(.*)$/s.exec(line);
+  if (!m || m[4] !== rel) return null;
+  if (m[1] === "100644" || m[1] === "100755") return { kind: "blob", size: Number(m[3]) };
+  return { kind: "other", mode: m[1]! };
 }
 
 /** The checked-out branch's full ref name (`refs/heads/x`), or null when HEAD is detached. */
@@ -167,7 +288,7 @@ export function isAncestor(root: string, ancestor: string, commit: string): bool
  */
 export function changedFilesSince(root: string, commit: string): string[] | null {
   if (!/^[0-9a-f]{40,64}$/.test(commit)) return null;
-  const diff = git(root, ["diff", "--name-only", "-z", "--no-renames", commit, "--"]);
+  const diff = git(root, ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "--no-renames", commit, "--"]);
   const untracked = git(root, ["ls-files", "--others", "--exclude-standard", "-z"]);
   if (diff === null || untracked === null) return null;
   return [...new Set([...diff.split("\0"), ...untracked.split("\0")].filter(Boolean))].sort();
@@ -182,6 +303,6 @@ export function mergeBase(root: string, a: string, b: string): string | null {
 /** Repository-relative paths that differ between two commits (no renames), sorted. Null when either is not a commit here. */
 export function changedFilesBetween(root: string, from: string, to: string): string[] | null {
   if (!/^[0-9a-f]{40,64}$/.test(from) || !/^[0-9a-f]{40,64}$/.test(to)) return null;
-  const diff = git(root, ["diff", "--name-only", "-z", "--no-renames", from, to, "--"]);
+  const diff = git(root, ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "--no-renames", from, to, "--"]);
   return diff === null ? null : [...new Set(diff.split("\0").filter(Boolean))].sort();
 }

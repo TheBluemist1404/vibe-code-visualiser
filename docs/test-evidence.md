@@ -54,7 +54,8 @@ recompute its digest. So the criteria report decides provenance itself:
 
 - **host**: the record object was returned by `captureTestRun` in this same process, for a caller
   holding `tests:observe`, and has not changed since (`isTrustedCapture`). On the CLI this means
-  `vcv criteria --junit …`. The pre-merge gate (M4.4) captures this way, in its own trusted job.
+  `vcv criteria --junit …`. The pre-merge gate (M4.4, [premerge-gate.md](premerge-gate.md))
+  captures this way, in its own trusted job.
 - **claimed**: everything else. That covers every imported record (`--run`, parsed JSON, a copy),
   whatever it declares and whoever captured it, and every agent capture. `declaredObservedBy` and
   `admittedAs: "imported"` show what it said about itself.
@@ -149,4 +150,5 @@ are easy to misread:
 
 - That a passing test checks the right thing. A mapping is an agent's claim (M4.2).
 - That an agent-claimed run happened as described.
-- A merge decision. The configured pass / warn / block policy and the trusted check are M4.4.
+- A merge decision. The configured pass / warn / block policy and the trusted check are M4.4:
+  [premerge-gate.md](premerge-gate.md).

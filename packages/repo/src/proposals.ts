@@ -38,7 +38,7 @@ import { LIMITS as QUERY_LIMITS, createQueryApi } from "@vcv/query";
 import type { ImpactCandidate } from "@vcv/query";
 import { listBindings } from "./bindings.ts";
 import type { ClaimEntry } from "./bindings.ts";
-import { headCommit } from "./git.ts";
+import { GitRefusedError, headCommit } from "./git.ts";
 import { formatLocator } from "./locator.ts";
 import { projectStatus } from "./project.ts";
 import type { ProjectStatus } from "./project.ts";
@@ -128,7 +128,9 @@ export type ProposalErrorCode =
   /** M4.3: a test-run record that does not check (shape, digest, summary). */
   | "RUN_INVALID"
   /** M4.3: the candidate's source cannot be identified exactly (no Git commit, a failed Git read, too much to hash). */
-  | "SOURCE_IDENTITY_UNAVAILABLE";
+  | "SOURCE_IDENTITY_UNAVAILABLE"
+  /** M4.4: the gate policy does not match vcv-policy-1, or cannot be read. */
+  | "POLICY_INVALID";
 
 export type ProposalError = { code: ProposalErrorCode; message: string; details?: { path: string; message: string }[] };
 
@@ -811,6 +813,17 @@ const recordsKeyOf = (records: ChangeRecordEntry[]) => createHash("sha256").upda
 const commitOf = (status: ProjectStatus) => (status.git ? headCommit(status.root) : null);
 
 export function observed<T>(path: string, hooks: ProposalHooks, body: (obs: Observation) => ProposalResult<T>): ProposalResult<T> {
+  try {
+    return observedUnsafe(path, hooks, body);
+  } catch (e) {
+    // Git refused to run on this checkout (driver configuration not enumerable): nothing was read
+    // through it, and nothing is reported as clean or absent in its place.
+    if (e instanceof GitRefusedError) return { ok: false, error: { code: "SOURCE_IDENTITY_UNAVAILABLE", message: `Git was not run on this checkout: ${e.message}` } };
+    throw e;
+  }
+}
+
+function observedUnsafe<T>(path: string, hooks: ProposalHooks, body: (obs: Observation) => ProposalResult<T>): ProposalResult<T> {
   const status = projectStatus(path);
   if (status.state !== "ready" || !status.model) return notReady(status);
   let obs: Observation;

@@ -174,6 +174,99 @@ post-merge rewrite and no inference.
   `.git/`, `.vcv/` and `node_modules/` paths stay excluded from hashing, since the model and the
   claims are bound separately.
 
+## M4.4 decisions
+
+- **One gate that composes, not a new analysis.** `preMergeGate` (CLI `vcv gate`) runs the M4.1
+  reconciliation, which is pinned to the base and requires attestation, and the M4.2/M4.3 criteria
+  evidence. It adds agent observations and applies a policy. It reads the candidate's identity
+  first and again before answering, so the parts describe one candidate (`STATE_CHANGED`
+  otherwise).
+- **Exit codes a check can use.** 0 means pass or warn, 1 means block, and 2 means a usage or setup
+  problem, which is never a pass. A candidate whose model cannot be loaded is a decision
+  (`PROJECT_NOT_READY` blocks), not a setup error.
+- **The policy is the host's.** It is a `vcv-policy-1` JSON file that is either supplied by the host
+  (the CLI refuses one inside the candidate) or read from the base commit's Git objects
+  (`--policy-at-base`). A candidate's edit to that file is reported as `POLICY_CHANGED` and applies
+  only after the merge. Integrity is fixed at block. Required criteria are not configurable (review
+  round 1). Unknown keys are refused.
+- **Criterion intent is not policy.** Whether a criterion is required lives in the approved model
+  (M3 approval). The policy only says how outcomes are treated. `requireEvidence` adds objects that
+  need a host-observed required pass whenever a change touches them, and counts every listed object
+  as touched when an impact list was cut.
+- **Agent observations are bounded claims.** There are at most 50, each citing at most 20 objects,
+  locations and test cases. VCV checks the references (objects in the model; portable paths that
+  exist, with the cited lines; test cases mapped, and their results in fresh runs) and labels each
+  observation `verified`, `invalid` or `unsupported`, the last for a contradiction without a source
+  location. Observations warn by default. A team may block on contradictions. They can never lower
+  another outcome.
+- **Two CI jobs, because tests run candidate code.** The candidate's tests run in a job with no
+  token permissions, no secrets and no cache, which uploads only the JUnit report. The gate job
+  installs VCV from a commit pinned in the base-owned workflow, reads the candidate as data,
+  captures the report in-process (host-observed) and decides
+  (`scripts/vcv-premerge-gate.sh`, `docs/ci/vcv-premerge.example.yml`). This keeps the verifier out
+  of reach of candidate code. It cannot stop a PR from weakening its own tests: `TEST_CHANGED`
+  and `MAPPING_CHANGED` make that visible to the PR reviewer.
+- **A whole decision.** If the criteria report must be cut to fit, the gate evaluates the remaining
+  criteria in batches before deciding. Hidden structural findings are counted from the summary.
+
+### Review round 1 (PR #26)
+
+- **Execution identity is the host's, not the verifier's.** A JUnit report is admitted as
+  host-observed only with `before`, the identity a host step read before the tests ran (the CI
+  `identity` job, which runs no PR code). The gate checks that the candidate still has exactly that
+  identity (`TEST_RUN_RACED` otherwise). Without `before`, the report is captured as a claim. The
+  gate no longer reads an identity after the run and calls it the pre-run state.
+- **CI and tests are both validation.** VCV has one category, validation against requirements and
+  acceptance criteria, whatever the development tooling calls it. A configured, base-owned CI job is
+  a validation execution, and its identifiable results are collected through the host path (in-process
+  capture bound to the pre-run identity). Record files an agent or the candidate supplies remain
+  claims. VCV does not establish that test assertions are sufficient or honest: the candidate's test
+  code runs in that job. Test and mapping changes are surfaced (`TEST_CHANGED`, `MAPPING_CHANGED`) for
+  the PR reviewer.
+- **Git reads treat the checkout as data.** Every Git command:
+  - disables `core.fsmonitor` and hooks;
+  - reads attributes from the empty tree (`GIT_ATTR_SOURCE`);
+  - empties every configured filter, diff and merge driver command (which `$GIT_DIR/info/attributes`
+    could still select);
+  - uses no pager and no external diff, and drops inherited `GIT_DIR`-style variables.
+- **One snapshot across phases.** The gate's key covers:
+  - the candidate identity;
+  - every file in `.vcv/`, including attestations and the trust list;
+  - the candidate's copy of the policy;
+  - every cited file.
+
+  It is read first, after reconciliation, after the criteria, and again before answering.
+- **Decide before presenting.** Reconciliation hands the gate every finding before its lists are
+  cut, so adding lower-severity findings cannot hide a blocker. A cut claim list makes a blocking
+  `mappingChanged` setting block conservatively.
+- **Base-side scope for `requireEvidence`.** The base's claims also count: claims that point into
+  changed files, or that were removed or reasserted. Removing evidence cannot take an object out
+  of scope, and an unreadable base claim makes every listed object touched.
+- **Absent is not unreadable.** A base policy is read with `entryAtCommit` first. Only real absence
+  means defaults; an oversized, non-file or unreadable entry is `POLICY_INVALID`.
+- **Required criteria are not configurable.** Any outcome of a required criterion other than a
+  host-observed pass blocks. Changing that is an M3 model change with a separate human approval,
+  never a policy file.
+- **Observation references.** Cited test cases are resolved in the candidate whether or not any run
+  exists. A reference that could not be checked makes the observation `not-checked`, never
+  `verified`. Files are read nonblocking and bounded.
+
+### Review round 2 (PR #26)
+
+- **Git is refused, not run unprotected.** The driver keys are enumerated with bounded output and a
+  bounded key count. Only `git config` exiting 1 with no output means "no drivers". Any other
+  outcome (an unreadable or oversized config, too many keys, a killed command) throws
+  `GitRefusedError` before any content-reading Git command runs. Read surfaces report it as
+  `SOURCE_IDENTITY_UNAVAILABLE`, and the CLI exits 2.
+- **A failed Git read is not a clean tree.** A status Git could not give marks the checkout dirty,
+  and a file whose state Git could not give is `modified`, never `clean` or `untracked`.
+- **The store snapshot is complete or there is no decision.** The `.vcv/` walk is bounded by
+  entries, depth and bytes. An unreadable entry or any exhausted bound makes the gate answer
+  `SOURCE_IDENTITY_UNAVAILABLE` instead of deciding on a store it did not fully hash. A host may
+  pass lower bounds (tests do), never higher ones.
+- **The tests start after the identity.** In the example workflow, `candidate-tests` needs
+  `identity`.
+
 ## Consequences
 
 - A code-first PR that edits bound code shows stale claims and the exact declarations, but VCV

@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -405,6 +405,107 @@ test("tests capture + criteria --run: per-criterion results from a real Vitest r
   const bad = vcv("tests", "capture", repo, "--junit", join(scratch, "bad.xml"), "--root", "server", "--runner", "vitest", "--invocation", "x");
   assert.equal(bad.status, 1);
   assert.match(bad.stdout, /✗ REPORT_INCONSISTENT/);
+});
+
+test("gate: exit 0 on a host-observed pass, 1 on a failed mapped case, 2 on setup errors; a policy inside the candidate is refused", async () => {
+  const { SERVICE, edit, git } = await import("../../../packages/repo/test/course-desk.ts");
+  const { setup } = await import("../../../packages/repo/test/criteria-fixture.ts");
+  const fixtures = join(import.meta.dirname, "../../../packages/repo/test/fixtures/junit");
+  const { repo, base } = setup();
+  git(repo, "checkout", "-qb", "feature");
+  edit(repo, SERVICE, "Enrollment rules. Every decision", "Enrollment rules; every decision");
+  git(repo, "commit", "-qam", "reword a comment");
+  const before = () => JSON.parse(vcv("tests", "identity", repo, "--json").stdout).identityDigest as string;
+  const run = (report: string, ...more: string[]) => vcv("gate", repo, "--base", base, "--junit", join(fixtures, report), "--root", "server", "--runner", "vitest", "--invocation", "npx vitest run --reporter=junit", "--before", before(), ...more);
+
+  const pass = run("vitest-pass.xml");
+  assert.equal(pass.status, 0, pass.stdout + pass.stderr);
+  assert.match(pass.stdout, /vcv gate: PASS: passed: 1\/1 required criteria passed, host-observed/);
+  assert.match(pass.stdout, /run 0: host-observed \(captured here\)/);
+  assert.match(pass.stdout, /✓ crt-full-course \[required\] passed \(host\)/);
+
+  const block = run("vitest-fail-skip.xml");
+  assert.equal(block.status, 1, block.stdout + block.stderr);
+  assert.match(block.stdout, /vcv gate: BLOCK/);
+  assert.match(block.stdout, /BLOCK TEST_FAILED \[required\.failed; checked\] crt-full-course: .*"EnrollmentService > rejects an enrollment into a full course and notifies the student"/);
+  const json = JSON.parse(run("vitest-fail-skip.xml", "--json").stdout);
+  assert.equal(json.format, "vcv-gate-1");
+  assert.equal(json.decision, "block");
+
+  // No runs at all: the required criterion is unverified, which blocks.
+  const none = vcv("gate", repo, "--base", base);
+  assert.equal(none.status, 1);
+  assert.match(none.stdout, /CRITERION_UNVERIFIED/);
+
+  // Setup problems never pass: a ref name instead of a commit ID, an unknown commit, a policy the candidate owns.
+  assert.equal(vcv("gate", repo, "--base", "main").status, 2);
+  assert.equal(vcv("gate", repo, "--base", "0".repeat(40)).status, 2);
+  writeFileSync(join(repo, "lax-policy.json"), JSON.stringify({ format: "vcv-policy-1", required: { failed: "warn" } }));
+  const inside = run("vitest-fail-skip.xml", "--policy", join(repo, "lax-policy.json"));
+  assert.equal(inside.status, 2);
+  assert.match(inside.stderr, /--policy is inside the candidate checkout/);
+  const hostPolicy = join(tmp(), "policy.json");
+  writeFileSync(hostPolicy, JSON.stringify({ format: "vcv-policy-1", required: { failed: "warn" } }));
+  rmSync(join(repo, "lax-policy.json"));
+  // A host policy cannot lower a required criterion either: that is approved intent (M3).
+  const lax = run("vitest-fail-skip.xml", "--policy", hostPolicy);
+  assert.equal(lax.status, 2, lax.stdout + lax.stderr);
+  assert.match(lax.stdout, /POLICY_INVALID/);
+  // A report without --before is a claim: the required criterion blocks even on a green run.
+  const unbound = vcv("gate", repo, "--base", base, "--junit", join(fixtures, "vitest-pass.xml"), "--root", "server", "--runner", "vitest", "--invocation", "npx vitest run --reporter=junit");
+  assert.equal(unbound.status, 1, unbound.stdout + unbound.stderr);
+  assert.match(unbound.stdout, /run 0: CLAIMED/);
+});
+
+test("pre-merge gate script: a candidate that rewrites its own gate and ships a forged run still blocks on its failing case", async () => {
+  const { SERVICE, edit, git } = await import("../../../packages/repo/test/course-desk.ts");
+  const { setup } = await import("../../../packages/repo/test/criteria-fixture.ts");
+  const { mkdirSync } = await import("node:fs");
+  const ROOT = join(import.meta.dirname, "../../..");
+  const GATE = join(ROOT, "scripts/vcv-premerge-gate.sh");
+  const fixtures = join(import.meta.dirname, "../../../packages/repo/test/fixtures/junit");
+  const { repo, base } = setup();
+  git(repo, "checkout", "-qb", "feature");
+  edit(repo, SERVICE, "Enrollment rules. Every decision", "Enrollment rules; every decision");
+  // A passing run the agent recorded itself, "upgraded" to host, shipped in the PR.
+  const agentEnv = { ...process.env, VCV_HOST_PRINCIPAL: "agent:coder", VCV_HOST_PERMISSIONS: "binding:record" };
+  const scratch = tmp();
+  const rec = spawnSync("node", ["--experimental-strip-types", "--no-warnings", MAIN, "tests", "capture", repo, "--junit", join(fixtures, "vitest-pass.xml"), "--root", "server", "--runner", "vitest", "--invocation", "x", "--out", join(scratch, "run.json")], { encoding: "utf8", env: agentEnv });
+  assert.equal(rec.status, 0, rec.stdout + rec.stderr);
+  // Its own copy of VCV now says "pass" whatever it is given.
+  for (const rel of ["apps/cli/src/main.ts", "packages/repo/src/gate.ts"]) {
+    mkdirSync(join(repo, rel, ".."), { recursive: true });
+    writeFileSync(join(repo, rel), 'console.log("vcv gate: PASS"); process.exit(0);\n');
+  }
+  git(repo, "add", "-A");
+  git(repo, "commit", "-qm", "agent: all green, honestly");
+  assert.equal(spawnSync("node", [join(repo, "apps/cli/src/main.ts")], { encoding: "utf8" }).stdout.trim(), "vcv gate: PASS");
+
+  const gate = (...more: string[]) => spawnSync("bash", [GATE, ROOT, repo, base, ...more], { encoding: "utf8" });
+  // The identity the host read before the tests ran (the CI identity job).
+  const before = JSON.parse(vcv("tests", "identity", repo, "--json").stdout).identityDigest as string;
+  const junit = (report: string) => ["--junit", join(fixtures, report), "--root", "server", "--runner", "vitest", "--invocation", "npx vitest run --reporter=junit", "--before", before];
+  // The host's real run failed the mapped case; the shipped record cannot outvote it.
+  const red = gate(...junit("vitest-fail-skip.xml"), "--run", join(scratch, "run.json"));
+  assert.equal(red.status, 1, red.stdout + red.stderr);
+  assert.match(red.stdout, /vcv gate: BLOCK/);
+  assert.match(red.stdout, /BLOCK TEST_FAILED \[required\.failed; checked\] crt-full-course/);
+  assert.match(red.stdout, /run 1: CLAIMED \(imported\)/);
+  // The shipped record alone is a claim: blocked.
+  const claimOnly = gate("--run", join(scratch, "run.json"));
+  assert.equal(claimOnly.status, 1, claimOnly.stdout + claimOnly.stderr);
+  assert.match(claimOnly.stdout, /RESULT_CLAIMED|RESULT_STALE|CRITERION_STALE/);
+  // The host's own passing run, captured by the trusted gate: passes (with warnings at most).
+  const green = gate(...junit("vitest-pass.xml"));
+  assert.equal(green.status, 0, green.stdout + green.stderr);
+  assert.match(green.stdout, /vcv gate: (PASS|WARN)/);
+  assert.match(green.stdout, /run 0: host-observed \(captured here\)/);
+
+  // Setup problems are refusals; the identity and the base cannot be overridden.
+  assert.equal(gate("--perm", "tests:observe").status, 2);
+  assert.equal(gate("--base", base).status, 2);
+  assert.equal(spawnSync("bash", [GATE, ROOT, repo, "main"], { encoding: "utf8" }).status, 2);
+  assert.equal(spawnSync("bash", [GATE, repo, repo, base], { encoding: "utf8" }).status, 2, "the verifier must not come from the candidate");
 });
 
 test("a FIFO or other special file given as an input is refused without blocking", { skip: process.platform === "win32" }, () => {

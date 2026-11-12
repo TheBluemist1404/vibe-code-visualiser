@@ -26,7 +26,7 @@ marks it `pinned: false`. The trust options are passed straight to the integrity
 
 The command reads and reports. It does not decide anything, and it exits 0 whenever it produced a
 report (1 for a request it cannot answer, such as an unknown base). The policy gate that blocks a
-merge comes in M4.4.
+merge is `vcv gate` (M4.4, [premerge-gate.md](premerge-gate.md)).
 
 ### What the report contains
 
@@ -83,8 +83,8 @@ Five things stay apart on purpose:
    locate the code of something.
 4. **A checked structural contradiction** (`integrity`, `structural`) is established by VCV.
 5. **A semantic concern** ("this code no longer announces rejections") is an interpretation. VCV
-   makes none; `semantic.observations` is always empty here. M4.4 adds agent-authored observations
-   to the pre-merge report, labelled as claims with their source locations.
+   makes none; `semantic.observations` is always empty here. The pre-merge gate (M4.4) takes
+   agent-authored observations, checks what they cite and labels them claims ([premerge-gate.md](premerge-gate.md)).
 
 ### Source impact for code-first changes
 
@@ -164,4 +164,4 @@ Results of the mapped test cases, bound to this exact candidate, are described i
 - Whether the code does what the model says. A resolved, fresh claim is not evidence of that.
 - Anything about files no claim points into.
 - Which base is protected. Only a commit ID supplied by the hosting service, in a check the
-  candidate cannot edit, identifies it; M4.4 adds that gate.
+  candidate cannot edit, identifies it: see the M4.4 gate ([premerge-gate.md](premerge-gate.md)).

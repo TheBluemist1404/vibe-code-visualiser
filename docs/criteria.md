@@ -136,4 +136,4 @@ and each criterion gets a verdict: see [test-evidence.md](test-evidence.md).
 - Whether any mapped test passed, unless runs are supplied ([test-evidence.md](test-evidence.md)).
 - Whether a test is enough to show the criterion holds. That stays an agent's or a person's
   judgement.
-- A pre-merge decision. The gate is M4.4.
+- A pre-merge decision. The gate is M4.4: [premerge-gate.md](premerge-gate.md).

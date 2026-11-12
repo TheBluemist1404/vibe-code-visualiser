@@ -244,7 +244,11 @@ const LIMITS = [
 const SEMANTIC_NOTE = "VCV makes no semantic observations. Agent-authored interpretations are added to the pre-merge report (M4.4) and labelled as claims.";
 
 /** Compare the candidate checkout containing `path` with a protected base. Read-only, one observation. */
-export function reconcile(path: string, input: unknown, hooks: ProposalHooks = {}): ProposalResult<Reconciliation> {
+/**
+ * `collect`, when given, receives every finding before any list is cut (the M4.4 gate decides on
+ * all of them; the report shows the bounded list).
+ */
+export function reconcile(path: string, input: unknown, hooks: ProposalHooks = {}, collect?: (all: ReconcileFinding[]) => void): ProposalResult<Reconciliation> {
   const parsed = reconcileRequest.safeParse(input);
   if (!parsed.success) {
     return { ok: false, error: { code: "INVALID_REQUEST", message: "request does not match the reconciliation input schema", details: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })) } };
@@ -274,7 +278,7 @@ export function reconcile(path: string, input: unknown, hooks: ProposalHooks = {
     const verifications = new Map(claims.entries.map((e) => [e.bindingId, verifyBinding(root, e, obs.status)] as const));
     const baseClaims = claimsAt(root, mb);
 
-    const data = assemble({ obs, req, baseCommit, mb, tree, integrity, baseModel, fromModel, entries: claims.entries, verifications, baseClaims, claimsProblem });
+    const data = assemble({ obs, req, baseCommit, mb, tree, integrity, baseModel, fromModel, entries: claims.entries, verifications, baseClaims, claimsProblem, collect });
     const guard = {
       key: guardKey(claims.key, tree, baseCommit, evidence),
       again: () => {
@@ -428,6 +432,7 @@ function areaOf(path: string): FileArea {
 
 type Parts = {
   obs: Observation;
+  collect?: ((all: ReconcileFinding[]) => void) | undefined;
   req: ReconcileRequest;
   baseCommit: string;
   mb: string;
@@ -597,6 +602,7 @@ function assemble(p: Parts): Reconciliation {
   }
   const order: Record<FindingCategory, number> = { integrity: 0, structural: 1, binding: 2, coverage: 3, source: 4, unsupported: 5 };
   findings.sort((a, b) => order[a.category] - order[b.category] || (a.related === b.related ? 0 : a.related ? -1 : 1));
+  p.collect?.(findings.map((f) => ({ ...f })));
   const shownFindings = cut(findings, RECONCILE_LIMITS.findings);
   const n = (pred: (f: ReconcileFinding) => boolean) => findings.filter(pred).length;
 
