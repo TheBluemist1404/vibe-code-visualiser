@@ -406,3 +406,13 @@ test("tests capture + criteria --run: per-criterion results from a real Vitest r
   assert.equal(bad.status, 1);
   assert.match(bad.stdout, /✗ REPORT_INCONSISTENT/);
 });
+
+test("a FIFO or other special file given as an input is refused without blocking", { skip: process.platform === "win32" }, () => {
+  const dir = tmp();
+  const fifo = join(dir, "run.fifo");
+  execFileSync("mkfifo", [fifo]);
+  const r = spawnSync("node", ["--experimental-strip-types", "--no-warnings", MAIN, "criteria", dir, "--run", fifo], { encoding: "utf8", timeout: 20_000 });
+  assert.notEqual(r.signal, "SIGTERM", "did not block on open");
+  assert.equal(r.status, 2, r.stdout + r.stderr);
+  assert.match(r.stderr, /is not a regular file/);
+});

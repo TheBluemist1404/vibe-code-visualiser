@@ -27,7 +27,7 @@ import { JUNIT_LIMITS, parseJUnit } from "./junit.ts";
 import type { JUnitCase } from "./junit.ts";
 import { failFinal, finish, observed, readClaims } from "./proposals.ts";
 import type { Observation, ProposalHooks, ProposalResult } from "./proposals.ts";
-import { WORKTREE_LIMITS, worktreeState } from "./worktree.ts";
+import { WORKTREE_LIMITS, worktreeStateDetail } from "./worktree.ts";
 
 /** recordBytes bounds the record as written by the CLI (JSON, 2-space indent, trailing newline) and as read back. */
 export const TEST_RUN_LIMITS = { invocationChars: 2000, runnerChars: 100, recordBytes: 16 * 1024 * 1024 } as const;
@@ -35,8 +35,14 @@ export const TEST_RUN_LIMITS = { invocationChars: 2000, runnerChars: 100, record
 export type CandidateIdentity = {
   commit: string | null;
   branch: string | null;
-  /** Uncommitted paths (tracked edits and untracked files) and the digest of their bytes. */
+  /** Uncommitted paths (tracked edits and untracked files Git does not ignore) and the digest of their bytes. */
   uncommitted: { paths: number; digest: string; complete: boolean };
+  /**
+   * Every path a binding claim points at (implementation, route, test files), by its bytes, whether
+   * Git tracks, ignores or links it: an ignored bound file, or the in-checkout target of a tracked
+   * link, changes the code under test without Git seeing it.
+   */
+  bound: { paths: number; digest: string; complete: boolean };
   modelRevision: string;
   /** Digest of the binding claim files (which tests are mapped to what). */
   claims: string;
@@ -75,21 +81,32 @@ export function candidateIdentityOf(obs: Observation): { candidate: CandidateIde
   const commit = obs.status.git?.commit ?? null;
   const listed = commit ? changedFilesSince(root, commit) : null;
   const dirty = listed ?? [];
-  const tree = worktreeState(root, dirty);
+  const tree = worktreeStateDetail(root, dirty);
+  const claims = readClaims(root);
+  const boundPaths = [...new Set(claims.entries.flatMap((e) => (e.claim ? [e.claim.locator.path] : [])))];
+  const bound = worktreeStateDetail(root, boundPaths);
+  const unreadableClaims = claims.entries.filter((e) => !e.claim).length;
   const candidate: CandidateIdentity = {
     commit,
     branch: obs.status.git?.branch ?? null,
-    uncommitted: { paths: dirty.length, digest: tree.digest, complete: tree.complete && listed !== null },
+    uncommitted: { paths: dirty.length, digest: tree.digest, complete: tree.complete && tree.unreadable === 0 && listed !== null },
+    bound: { paths: boundPaths.length, digest: bound.digest, complete: bound.complete && bound.unreadable === 0 && unreadableClaims === 0 && !claims.key.startsWith("unreadable:") },
     modelRevision: obs.model.project.modelRevision,
-    claims: sha(readClaims(root).key),
+    claims: sha(claims.key),
   };
   const problem = !commit
-    ? "the checkout has no Git commit; a test run is bound to a commit plus the bytes of its uncommitted files"
+    ? "the checkout has no Git commit; a test run is bound to a commit plus the bytes of its uncommitted and bound files"
     : listed === null
       ? "the uncommitted files could not be listed (git failed); an unknown tree is not a clean one"
-      : !tree.complete
-        ? `the uncommitted files exceed what is hashed (${WORKTREE_LIMITS.files} files / ${WORKTREE_LIMITS.totalBytes} bytes); sizes and mtimes do not identify their content`
-        : null;
+      : !tree.complete || !bound.complete
+        ? `the uncommitted or bound files exceed what is hashed (${WORKTREE_LIMITS.files} files / ${WORKTREE_LIMITS.totalBytes} bytes); sizes and mtimes do not identify their content`
+        : tree.unreadable || bound.unreadable
+          ? `${tree.unreadable + bound.unreadable} uncommitted or bound file(s) cannot be read, so their content is unknown`
+          : claims.key.startsWith("unreadable:")
+            ? "the binding claims cannot be read, so which files the tests depend on is unknown"
+            : unreadableClaims
+              ? `${unreadableClaims} claim file(s) cannot be read, so the files they bind are unknown`
+              : null;
   return { candidate, problem };
 }
 
@@ -97,6 +114,7 @@ export function candidateIdentityOf(obs: Observation): { candidate: CandidateIde
 export function recordIdentityProblem(c: CandidateIdentity): string | null {
   if (!c.commit) return "the run names no Git commit";
   if (!c.uncommitted.complete) return "the run's uncommitted files were not completely hashed";
+  if (!c.bound.complete) return "the run's bound files were not completely hashed";
   return null;
 }
 
@@ -184,6 +202,7 @@ const identitySchema = z
     commit: z.string().regex(/^[0-9a-f]{40,64}$/).nullable(),
     branch: z.string().max(1000).nullable(),
     uncommitted: z.object({ paths: z.number().int().min(0), digest: z.string().regex(/^[0-9a-f]{64}$/), complete: z.boolean() }).strict(),
+    bound: z.object({ paths: z.number().int().min(0), digest: z.string().regex(/^[0-9a-f]{64}$/), complete: z.boolean() }).strict(),
     modelRevision: z.string().min(1).max(256),
     claims: z.string().regex(/^[0-9a-f]{64}$/),
   })

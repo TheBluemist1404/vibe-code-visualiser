@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalJson } from "../../core/src/index.ts";
@@ -383,4 +383,62 @@ test("a capture never emits a record larger than VCV reads back; a large record 
   const back = criteriaEvidence(repo, { runs: [JSON.parse(text)] });
   assert.ok(back.ok, JSON.stringify(back).slice(0, 300));
   assert.equal(back.data.runs[0]!.summary.tests, 6000);
+});
+
+// ---- review round 2 of PR #25 ---------------------------------------------------------------
+
+test("a bound file Git ignores is part of the identity: editing it makes the run stale", () => {
+  const repo = setup();
+  appendFileSync(join(repo, ".gitignore"), `\n${SERVICE}\n`);
+  git(repo, "rm", "-q", "--cached", SERVICE);
+  git(repo, "add", ".gitignore");
+  git(repo, "commit", "-qm", "ignore the service");
+  assert.equal(git(repo, "status", "--porcelain"), "", "the ignored file is invisible to git status");
+  const id = testIdentity(repo);
+  assert.ok(id.ok, JSON.stringify(id));
+  assert.ok(id.data.candidate.bound.paths >= 3 && id.data.candidate.bound.complete);
+  const run = capture(repo, PASS, host, { before: id.data.identityDigest });
+  edit(repo, SERVICE, "...(reason ? { reason } : {}),", ""); // drop the rejection reason
+  assert.equal(git(repo, "status", "--porcelain"), "", "git still sees nothing");
+  const after = testIdentity(repo);
+  assert.ok(after.ok);
+  assert.notEqual(after.data.identityDigest, id.data.identityDigest);
+  const d = evaluate(repo, [run]);
+  assert.equal(d.runs[0]!.fresh, false);
+  assert.match(d.runs[0]!.staleBecause.join(), /bound files .* differ/);
+  assert.equal(of(d, "crt-full-course").result, "stale");
+});
+
+test("the ignored in-checkout target of a tracked link is part of the identity", () => {
+  const repo = setup();
+  // The service's code moves to an ignored file; the tracked path becomes a link to it.
+  const target = "server/src/enrollment/generated/enrollment.service.impl.ts";
+  mkdirSync(join(repo, "server/src/enrollment/generated"));
+  renameSync(join(repo, SERVICE), join(repo, target));
+  symlinkSync("generated/enrollment.service.impl.ts", join(repo, SERVICE));
+  appendFileSync(join(repo, ".gitignore"), "\nserver/src/enrollment/generated/\n");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-qm", "link the service to an ignored file");
+  const run = capture(repo, PASS);
+  edit(repo, target, "...(reason ? { reason } : {}),", "");
+  assert.equal(git(repo, "status", "--porcelain"), "", "git records the link, not the target's bytes");
+  const d = evaluate(repo, [run]);
+  assert.equal(d.runs[0]!.fresh, false);
+  assert.match(d.runs[0]!.staleBecause.join(), /bound files/);
+});
+
+test("a bound file edited mid-capture is STATE_CHANGED; an unreadable claim refuses capture", () => {
+  const repo = setup();
+  appendFileSync(join(repo, ".gitignore"), `\n${SERVICE}\n`);
+  git(repo, "rm", "-q", "--cached", SERVICE);
+  git(repo, "add", ".gitignore");
+  git(repo, "commit", "-qm", "ignore the service");
+  let once = true;
+  const r = captureTestRun(repo, xml(PASS), RUN, host, { afterRead: () => (once ? ((once = false), edit(repo, SERVICE, "Enrollment rules. Every decision", "Enrollment rules (mid-read). Every decision")) : undefined) });
+  assert.equal(!r.ok && r.error.code, "STATE_CHANGED");
+
+  writeFileSync(join(repo, ".vcv/bindings/broken.json"), "{");
+  const u = captureTestRun(repo, xml(PASS), RUN, host);
+  assert.equal(!u.ok && u.error.code, "SOURCE_IDENTITY_UNAVAILABLE");
+  assert.match(!u.ok ? u.error.message : "", /claim file\(s\) cannot be read/);
 });

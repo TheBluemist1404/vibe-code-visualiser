@@ -31,16 +31,28 @@ export type WorktreeState = {
 };
 
 export function worktreeState(root: string, paths: Iterable<string>): WorktreeState {
+  const { digest, files, complete } = worktreeStateDetail(root, paths);
+  return { digest, files, complete };
+}
+
+/**
+ * worktreeState plus how many paths could not be read (an unreadable file, or a link whose target
+ * cannot be read): their identity says only that, so a caller that needs exact bytes must not treat
+ * them as known. Kept out of WorktreeState, whose shape is persisted in implementation reports.
+ */
+export function worktreeStateDetail(root: string, paths: Iterable<string>): WorktreeState & { unreadable: number } {
   const sorted = [...new Set(paths)].sort();
   let budget: number = WORKTREE_LIMITS.totalBytes;
   let complete = true;
+  let unreadable = 0;
   const pairs = sorted.map((p, i) => {
     const id = identity(root, p, i < WORKTREE_LIMITS.files ? budget : 0);
     if (id.bytes) budget -= id.bytes;
     if (id.partial) complete = false;
+    if (id.id === "unreadable" || id.id.endsWith(":unreadable")) unreadable++;
     return [p, id.id];
   });
-  return { digest: createHash("sha256").update(canonicalJson(pairs)).digest("hex"), files: sorted.length, complete };
+  return { digest: createHash("sha256").update(canonicalJson(pairs)).digest("hex"), files: sorted.length, complete, unreadable };
 }
 
 function identity(root: string, rel: string, budget: number): { id: string; bytes?: number; partial?: boolean } {

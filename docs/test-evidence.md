@@ -42,7 +42,7 @@ candidate's identity, and capture is refused as `TEST_RUN_RACED`.
 
 | Field | Meaning |
 |---|---|
-| `candidate` | Git commit, branch, the digest of every uncommitted path's bytes, model revision, and the digest of the binding claims. `identityDigest` is the digest of all of it. |
+| `candidate` | Git commit, branch, the bytes of every uncommitted path, the bytes of every **bound** path (each file a binding claim points at, including files Git ignores and the in-checkout targets of links), model revision, and the digest of the binding claims. `identityDigest` is the digest of all of it. |
 | `observedBy` | What the capturing caller **declared**: `host` when it held the `tests:observe` permission, otherwise `agent`. A declaration, never trusted on its own (below). |
 | `runner`, `invocation`, `root` | As the caller states them. |
 | `report` | Format, sha256 and size of the exact report bytes. |
@@ -67,8 +67,14 @@ identified exactly:
 
 - the checkout has no Git commit;
 - Git fails to list the uncommitted files (a failed read is never taken as a clean tree);
-- the uncommitted files exceed what is hashed (5,000 files / 512 MiB), where sizes and mtimes
-  would stand in for content.
+- the uncommitted or bound files exceed what is hashed (5,000 files / 512 MiB), where sizes and
+  mtimes would stand in for content;
+- an uncommitted or bound file, a claim file, or the claim store cannot be read.
+
+Git does not see an ignored file, or a change to the target of a tracked link. When such a file is
+bound (the claimed implementation of a model object, or a mapped test), its bytes are part of the
+identity, so editing it makes every earlier run stale. Other ignored files are not part of the
+identity. Keep code that tests depend on either tracked or bound.
 
 For the same reasons, a run is never fresh against such a candidate, nor when the record's own
 identity is incomplete. A record that would be larger than the 16 MiB VCV reads back is refused

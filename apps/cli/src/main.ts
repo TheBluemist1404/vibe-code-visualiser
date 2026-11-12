@@ -3,7 +3,7 @@
 //
 // The CLI acts as the trusted host for a local single user: identity and permissions come
 // from flags here, standing in for what a real session or OAuth token would supply.
-import { closeSync, fstatSync, openSync, readFileSync, readSync, writeFileSync } from "node:fs";
+import { closeSync, constants as fsConstants, fstatSync, openSync, readFileSync, readSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { loadModel, parseYaml, ownershipTree } from "../../../packages/ir/src/index.ts";
 import type { Diagnostic, TreeNode } from "../../../packages/ir/src/index.ts";
@@ -524,7 +524,8 @@ function reconcileCommand(): number {
 function readBounded(file: string, limit: number): Buffer {
   let fd: number;
   try {
-    fd = openSync(file, "r");
+    // Nonblocking, so a FIFO or device is refused by its type below instead of blocking the open.
+    fd = openSync(file, fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0));
   } catch (e) {
     throw new InputError(`cannot read ${file}: ${(e as Error).message.split("\n")[0]}`);
   }

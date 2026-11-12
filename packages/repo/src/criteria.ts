@@ -276,6 +276,7 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
         recordIdentityProblem(r.candidate),
         r.candidate.commit !== candidate.commit ? `it ran at commit ${String(r.candidate.commit).slice(0, 12)}, the candidate is ${String(candidate.commit).slice(0, 12)}` : null,
         r.candidate.uncommitted.digest !== candidate.uncommitted.digest ? "uncommitted files differ from when it ran" : null,
+        r.candidate.bound.digest !== candidate.bound.digest ? "bound files (implementation, route or test files a claim points at, tracked or not) differ from when it ran" : null,
         r.candidate.modelRevision !== candidate.modelRevision ? `it ran at model revision ${r.candidate.modelRevision}, the candidate is at ${candidate.modelRevision}` : null,
         r.candidate.claims !== candidate.claims ? "the binding claims changed since it ran" : null,
       ].filter((x): x is string => !!x);

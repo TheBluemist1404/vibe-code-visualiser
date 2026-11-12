@@ -150,6 +150,17 @@ post-merge rewrite and no inference.
 - **Sizes that round-trip.** Capture refuses a record larger than the 16 MiB VCV reads back. The
   CLI checks a file's size before reading it, for reports and records alike.
 
+### Review round 2 (PR #25)
+
+- **Bound files are part of the run identity.** `candidate.bound` hashes every path a binding
+  claim points at, through the same `worktreeState` reader the M3 observations use (links resolved
+  inside the checkout, target bytes hashed). This covers files Git ignores and the targets of
+  tracked links, which `changedFilesSince` cannot see. An unreadable bound file, claim file or
+  claim store makes the identity unusable (`SOURCE_IDENTITY_UNAVAILABLE`) instead of counting as
+  complete.
+- **Inputs are opened nonblocking.** The CLI opens reports and records with `O_NONBLOCK` and checks
+  the type before reading, so a FIFO or device is refused instead of blocking the open.
+
 ## Consequences
 
 - A code-first PR that edits bound code shows stale claims and the exact declarations, but VCV
