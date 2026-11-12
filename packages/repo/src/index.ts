@@ -11,3 +11,4 @@ export * from "./handoff.ts";
 export * from "./implementation.ts";
 export * from "./worktree.ts";
 export * from "./reconcile.ts";
+export * from "./criteria.ts";

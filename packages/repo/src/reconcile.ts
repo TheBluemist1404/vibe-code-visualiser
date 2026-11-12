@@ -578,7 +578,10 @@ function assemble(p: Parts): Reconciliation {
   for (const ch of claimsReadable ? allChanges : []) {
     if (ch.change === "removed" || ch.kind === "project") continue;
     if (claimsOn.has(ch.id)) continue;
-    add({ code: "OBJECT_UNBOUND", category: "coverage", basis: "observed", related: true, objectIds: [ch.id], message: `${ch.kind} ${ch.id} was ${ch.change} by the candidate's model change, and no binding claim locates its code`, checked: "binding claims against the model delta" });
+    add({ code: "OBJECT_UNBOUND", category: "coverage", basis: "observed", related: true, objectIds: [ch.id], message:
+        ch.kind === "criterion"
+          ? `criterion ${ch.id} was ${ch.change} by the candidate's model change, and no test case is mapped to it (a \`tests\` claim on the criterion; see vcv criteria)`
+          : `${ch.kind} ${ch.id} was ${ch.change} by the candidate's model change, and no binding claim locates its code`, checked: "binding claims against the model delta" });
   }
 
   const cut = <T>(xs: T[], n: number) => ({ items: xs.slice(0, n), total: xs.length, truncated: xs.length > n });

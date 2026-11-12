@@ -76,7 +76,7 @@ const TOOLS: ToolDef[] = [
       name: "vcv_search_objects",
       title: "Search VCV model objects",
       description:
-        `Find model objects (modules, events, contracts, capabilities, rules, data, behaviors, states, transitions, attributes, actors) by words in their ID, name, purpose, description or statement. Ranking is a deterministic keyword heuristic (not semantic search); terms are OR'd. Results are bounded (limit ≤ ${LIMITS.search.max}, default ${LIMITS.search.default}); total and truncated tell you if more exist, and nextCursor pages through them for the same text and kinds. Use the returned IDs with vcv_get_context. ${REVISION} ${IR_ONLY}`,
+        `Find model objects (modules, events, contracts, capabilities, rules, acceptance criteria, data, behaviors, states, transitions, attributes, actors) by words in their ID, name, purpose, description or statement. Ranking is a deterministic keyword heuristic (not semantic search); terms are OR'd. Results are bounded (limit ≤ ${LIMITS.search.max}, default ${LIMITS.search.default}); total and truncated tell you if more exist, and nextCursor pages through them for the same text and kinds. Use the returned IDs with vcv_get_context. ${REVISION} ${IR_ONLY}`,
       inputSchema: inputSchema(searchRequest),
       annotations: { ...annotations, title: "Search VCV model objects" },
     },

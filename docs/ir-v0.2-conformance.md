@@ -53,5 +53,12 @@ commit protocol and its limits.
    disguise.
 4. **`approveDraft` needs approve rights** even for principals that can apply changes.
 5. **Self-approval is forbidden by default** (`allowSelfApproval` policy flag).
-6. The rejection event still carries no reason, so timeout and lecturer rejections look the
+6. **Acceptance criteria are an optional top-level collection (M4.2).** `criteria` holds
+   `criterion` objects (`id`, `owner` module, `name`, `statement`, `verifies` 1–20 refs to
+   capabilities, rules, contracts, events, behaviours, transitions, data or modules, and
+   `verification: required | optional`). The key is absent when there are none, so models written
+   before M4.2 keep the same canonical form and revision digests. Changed only by the typed
+   `createCriterion` and `reviseCriterion` operations; removed with `removeObject`. Which tests
+   check a criterion is not in the IR (see [criteria.md](criteria.md)).
+7. The rejection event still carries no reason, so timeout and lecturer rejections look the
    same to consumers (spec open question 2).

@@ -194,7 +194,7 @@ test("bad queries return structured tool errors and the server keeps serving", a
     // any element is looked at (100k invalid entries do not produce 100k issues).
     const manyKinds = await s.call("vcv_search_objects", { text: "enrollment", kinds: Array(100_000).fill("table") });
     assert.ok(!manyKinds.ok && manyKinds.error.code === "INVALID_REQUEST");
-    assert.deepEqual(manyKinds.error.details, [{ path: "kinds", message: "Too big: expected array to have <=11 items" }]);
+    assert.deepEqual(manyKinds.error.details, [{ path: "kinds", message: "Too big: expected array to have <=12 items" }]);
     const manyRelations = await s.call("vcv_get_context", { id: "mod-enrollment", relations: Array(100_000).fill("consumes") });
     assert.ok(!manyRelations.ok && manyRelations.error.code === "INVALID_REQUEST");
     assert.deepEqual(manyRelations.error.details, [{ path: "relations", message: "Too big: expected array to have <=19 items" }]);

@@ -18,6 +18,7 @@ import {
   reviewApprove,
   buildHandoff,
   reconcile,
+  criteriaEvidence,
   recordImplementation,
   implementationStatus,
   reviewFinalize,
@@ -94,6 +95,13 @@ const USAGE = `vcv <command> [options]
                                         impact, changed files, binding claims verified now and compared with the
                                         merge base, and findings labelled checked / observed / not-checked.
                                         Not a gate: it reports, and exits 0 whenever a report was produced.
+
+  criteria <path> [criterionId...] [--json]
+                                        Read-only: the approved acceptance criteria (required / optional) and the
+                                        test cases mapped to each by \`tests\` claims, verified now (resolved,
+                                        stale because the test or the criterion changed, missing after a rename,
+                                        ambiguous title). Map one with: binding add <path> --object <criterionId>
+                                        --relation tests --locator '<file>#test:Suite > case'. Not a test result.
 
   handoff <path> <changeId>             The bounded implementation handoff (JSON) of an applied, attested change:
                                         approved operations and request, delta, impact, affected binding claims
@@ -351,6 +359,8 @@ function main(): number {
       return handoffCommand();
     case "reconcile":
       return reconcileCommand();
+    case "criteria":
+      return criteriaCommand();
     case "implementation":
       return implementationCommand();
     default:
@@ -479,6 +489,29 @@ function reconcileCommand(): number {
     return r.ok ? 0 : 1;
   }
   printReconciliation(r.data);
+  return 0;
+}
+
+function criteriaCommand(): number {
+  const ids = [b, ...rest].filter((x): x is string => !!x);
+  const r = criteriaEvidence(need(a, "<path>"), ids.length ? { ids } : {});
+  if (values.json || !r.ok) {
+    console.log(JSON.stringify(r.ok ? r.data : r, null, 2));
+    return r.ok ? 0 : 1;
+  }
+  const d = r.data;
+  const c = d.counts;
+  console.log(`acceptance criteria at ${d.modelRevision}: ${c.criteria} (${c.required} required, ${c.optional} optional); ${c.mappings} test mapping(s)`);
+  if (!d.mappingsAvailable) console.log(`  ! mappings NOT ASSESSED: ${d.mappingsProblem}`);
+  else console.log(`  required: ${c.requiredUnmapped} unmapped, ${c.requiredNotResolved} not fully resolved; optional: ${c.optionalUnmapped} unmapped`);
+  for (const e of d.criteria) {
+    console.log(`  ${e.id} [${e.verification}] ${e.mapping}: ${e.statement}`);
+    console.log(`    verifies ${e.verifies.join(", ")}`);
+    for (const m of e.mappings) console.log(`    ${m.state.padEnd(13)} ${m.test ? `${m.test.path} > ${m.test.name}` : `(${m.relation} claim)`}  [${m.bindingId}]${m.alsoMapsTo.length ? `  also ${m.alsoMapsTo.join(", ")}` : ""}`);
+    for (const p of e.problems) console.log(`    ! ${p.code}: ${p.message}`);
+  }
+  if (d.truncated || d.testsTruncated) console.log("  ! lists were cut; use --json for totals");
+  console.log(`  ${d.meaning}`);
   return 0;
 }
 

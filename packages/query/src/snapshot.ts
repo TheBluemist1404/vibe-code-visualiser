@@ -1,6 +1,6 @@
 // A read-only view over one model snapshot. Everything here is derived on demand from the
 // canonical IR via buildIndex/collectRefs; no relationship is stored a second time.
-import { COLLECTIONS, buildIndex, collectRefs, isUnresolved, refId, validateModel } from "@vcv/ir";
+import { COLLECTIONS, buildIndex, collectionOf, collectRefs, isUnresolved, refId, validateModel } from "@vcv/ir";
 import type { CollectionName, Diagnostic, Id, IndexEntry, Kind, Model, RefRole } from "@vcv/ir";
 import type { Edge, ObjectSummary, QueryContext, Relation, RelationCategory } from "./types.ts";
 
@@ -24,10 +24,11 @@ const CATEGORY: Record<Relation, RelationCategory> = {
   toState: "behavior",
   triggerEvent: "behavior",
   effectEvent: "behavior",
+  verifies: "traceability",
 };
 
 /** Stable order for kinds in results (architecture first, nested elements last). */
-export const KIND_ORDER: Kind[] = ["project", "module", "contract", "event", "capability", "behavior", "data", "rule", "actor", "state", "transition", "attribute"];
+export const KIND_ORDER: Kind[] = ["project", "module", "contract", "event", "capability", "behavior", "data", "rule", "criterion", "actor", "state", "transition", "attribute"];
 
 export class Snapshot {
   readonly model: Model;
@@ -42,7 +43,7 @@ export class Snapshot {
     this.model = model;
     this.index = buildIndex(model).byId;
     for (const coll of Object.keys(COLLECTIONS) as CollectionName[]) {
-      for (const o of model[coll]) this.records.set(o.id, o as Record<string, unknown>);
+      for (const o of collectionOf(model, coll)) this.records.set(o.id, o as Record<string, unknown>);
     }
     for (const d of model.data) for (const a of d.attributes) this.records.set(a.id, a as Record<string, unknown>);
     for (const b of model.behaviors) {

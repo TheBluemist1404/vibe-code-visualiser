@@ -173,6 +173,9 @@ const bindingsDir = (root: string) => join(root, VCV_DIR, BINDINGS_DIR);
 const claimPath = (root: string, id: string) => join(bindingsDir(root), `${id}.json`);
 const claimRel = (id: string) => `${VCV_DIR}/${BINDINGS_DIR}/${id}.json`;
 
+/** Longest test identity (`Suite > case`) a new claim may record. */
+export const MAX_TEST_NAME_CHARS = 1000;
+
 /** Largest claim file VCV reads. Real claims are well under 2 KB. */
 export const MAX_CLAIM_BYTES = 64 * 1024;
 
@@ -414,6 +417,10 @@ export function recordBinding(path: string, input: RecordInput, host: BindingHos
   if (pp) throw new BindingError("UNSAFE_PATH", `locator path "${input.locator.path}" ${pp}`);
   const sp = selectorProblem(input.locator.selector);
   if (sp) throw new BindingError("INVALID_CLAIM", sp);
+  // New claims carry portable, bounded test identities (claims already on disk are read as they are).
+  if (input.locator.selector.kind === "test" && input.locator.selector.name.length > MAX_TEST_NAME_CHARS) {
+    throw new BindingError("INVALID_CLAIM", `test name is longer than ${MAX_TEST_NAME_CHARS} characters`);
+  }
   const bindingId = input.bindingId ?? defaultBindingId(input.modelObjectId, input.relation, input.locator);
   const idp = persistedIdProblem(bindingId);
   if (idp) throw new BindingError("INVALID_CLAIM", `bindingId "${bindingId}" ${idp}`);
@@ -424,6 +431,11 @@ export function recordBinding(path: string, input: RecordInput, host: BindingHos
   // The object and the revision must exist in the validated project state.
   if (!buildIndex(snap.model).byId.has(input.modelObjectId)) {
     throw new BindingError("UNKNOWN_OBJECT", `model object ${input.modelObjectId} does not exist at the current revision ${snap.model.project.modelRevision}`);
+  }
+  // An acceptance criterion (M4.2) is checked by test cases: its only claims are `tests` claims
+  // that name one individual test (file + full title), never a file, a suite or a symbol.
+  if (buildIndex(snap.model).byId.get(input.modelObjectId)!.kind === "criterion" && (input.relation !== "tests" || input.locator.selector.kind !== "test")) {
+    throw new BindingError("INVALID_CLAIM", `criterion ${input.modelObjectId} can only be mapped to individual test cases: use --relation tests and a <file>#test:<Suite > case> locator`);
   }
   const modelRevision = input.modelRevision ?? snap.model.project.modelRevision;
   if (!snap.history.includes(modelRevision)) throw new BindingError("UNKNOWN_REVISION", `revision ${modelRevision} is not in this checkout's model history`);
