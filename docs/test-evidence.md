@@ -69,7 +69,13 @@ identified exactly:
 - Git fails to list the uncommitted files (a failed read is never taken as a clean tree);
 - the uncommitted or bound files exceed what is hashed (5,000 files / 512 MiB), where sizes and
   mtimes would stand in for content;
-- an uncommitted or bound file, a claim file, or the claim store cannot be read.
+- an uncommitted or bound file, a claim file, or the claim store cannot be read, including a file
+  under a directory that cannot be listed;
+- an uncommitted or bound path goes through a link that leaves the checkout or cannot be resolved.
+  VCV does not read outside the checkout, so it cannot say what such a run tested.
+
+A file that is simply missing (deleted, or a link to a missing file inside the checkout) is a known
+state, not a problem.
 
 Git does not see an ignored file, or a change to the target of a tracked link. When such a file is
 bound (the claimed implementation of a model object, or a mapped test), its bytes are part of the

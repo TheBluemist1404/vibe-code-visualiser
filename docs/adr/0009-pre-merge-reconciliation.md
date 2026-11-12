@@ -161,6 +161,19 @@ post-merge rewrite and no inference.
 - **Inputs are opened nonblocking.** The CLI opens reports and records with `O_NONBLOCK` and checks
   the type before reading, so a FIFO or device is refused instead of blocking the open.
 
+### Review round 3 (PR #25)
+
+- **Availability is a structured outcome, not a string suffix.** The worktree reader returns
+  `unavailable` for every path whose content it did not observe: a link that leaves the checkout
+  (file or directory link, or a Windows junction) or cannot be resolved (a loop), an unreadable
+  link, a stat or read failure other than `ENOENT`/`ENOTDIR` (an inaccessible parent is `EACCES`,
+  no longer `absent`), and a non-portable path. Any unavailable uncommitted or bound path refuses
+  capture and makes every run stale. Escaping targets are still never read.
+- **Known absence stays a fact.** A deleted file, a path through a file, and a link to a missing or
+  case-mismatched target inside the checkout keep their stable identities and do not block capture.
+  `.git/`, `.vcv/` and `node_modules/` paths stay excluded from hashing, since the model and the
+  claims are bound separately.
+
 ## Consequences
 
 - A code-first PR that edits bound code shows stale claims and the exact declarations, but VCV

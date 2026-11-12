@@ -101,7 +101,7 @@ export function candidateIdentityOf(obs: Observation): { candidate: CandidateIde
       : !tree.complete || !bound.complete
         ? `the uncommitted or bound files exceed what is hashed (${WORKTREE_LIMITS.files} files / ${WORKTREE_LIMITS.totalBytes} bytes); sizes and mtimes do not identify their content`
         : tree.unreadable || bound.unreadable
-          ? `${tree.unreadable + bound.unreadable} uncommitted or bound file(s) cannot be read, so their content is unknown`
+          ? `${tree.unreadable + bound.unreadable} uncommitted or bound path(s) cannot be observed (unreadable, or a link that leaves the checkout or cannot be resolved), so their content is unknown`
           : claims.key.startsWith("unreadable:")
             ? "the binding claims cannot be read, so which files the tests depend on is unknown"
             : unreadableClaims

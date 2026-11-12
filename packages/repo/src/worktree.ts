@@ -17,7 +17,7 @@ import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, re
 import { createHash } from "node:crypto";
 import { join, relative, sep } from "node:path";
 import { canonicalJson } from "@vcv/core";
-import { pathProblem, resolveInside } from "./locator.ts";
+import { EXCLUDED_SEGMENTS, pathProblem, resolveInside } from "./locator.ts";
 
 export const WORKTREE_LIMITS = { files: 5000, fileBytes: 64 * 1024 * 1024, totalBytes: 512 * 1024 * 1024 } as const;
 const CHUNK = 1024 * 1024;
@@ -36,9 +36,12 @@ export function worktreeState(root: string, paths: Iterable<string>): WorktreeSt
 }
 
 /**
- * worktreeState plus how many paths could not be read (an unreadable file, or a link whose target
- * cannot be read): their identity says only that, so a caller that needs exact bytes must not treat
- * them as known. Kept out of WorktreeState, whose shape is persisted in implementation reports.
+ * worktreeState plus how many paths are unavailable: their content could not be observed (a read or
+ * stat failure other than plain absence, a link that escapes the checkout or cannot be resolved, a
+ * path that is not portable). Their identity says only that, so a caller that needs exact bytes must
+ * not treat them as known. Known absence (no such file, a link to a missing in-checkout target) is
+ * a fact, not unavailable. Kept out of WorktreeState, whose shape is persisted in implementation
+ * reports.
  */
 export function worktreeStateDetail(root: string, paths: Iterable<string>): WorktreeState & { unreadable: number } {
   const sorted = [...new Set(paths)].sort();
@@ -49,14 +52,28 @@ export function worktreeStateDetail(root: string, paths: Iterable<string>): Work
     const id = identity(root, p, i < WORKTREE_LIMITS.files ? budget : 0);
     if (id.bytes) budget -= id.bytes;
     if (id.partial) complete = false;
-    if (id.id === "unreadable" || id.id.endsWith(":unreadable")) unreadable++;
+    if (id.unavailable) unreadable++;
     return [p, id.id];
   });
   return { digest: createHash("sha256").update(canonicalJson(pairs)).digest("hex"), files: sorted.length, complete, unreadable };
 }
 
-function identity(root: string, rel: string, budget: number): { id: string; bytes?: number; partial?: boolean } {
-  if (pathProblem(rel)) return { id: "unsafe-path" };
+/** A path's identity, and whether that identity stands for unobserved content (`unavailable`). */
+type Identity = { id: string; bytes?: number; partial?: boolean; unavailable?: boolean };
+
+/** Only a missing entry is known absence; any other stat failure (EACCES, EIO, ELOOP…) is not. */
+const isAbsence = (e: unknown) => {
+  const code = (e as NodeJS.ErrnoException | null)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+};
+
+function identity(root: string, rel: string, budget: number): Identity {
+  if (pathProblem(rel)) {
+    // .git/, .vcv/ and node_modules/ are never source: deliberately not hashed (the model and the
+    // claims are bound separately). Any other path VCV will not open is content it did not observe.
+    const excluded = rel.split("/").some((s) => EXCLUDED_SEGMENTS.has(s));
+    return excluded ? { id: "unsafe-path" } : { id: "unsafe-path", unavailable: true };
+  }
   const segments = rel.split("/");
   let abs = root;
   for (let i = 0; i < segments.length; i++) {
@@ -64,8 +81,8 @@ function identity(root: string, rel: string, budget: number): { id: string; byte
     let st;
     try {
       st = lstatSync(abs, { bigint: true });
-    } catch {
-      return { id: "absent" };
+    } catch (e) {
+      return isAbsence(e) ? { id: "absent" } : { id: "unreadable", unavailable: true };
     }
     if (st.isSymbolicLink()) return throughLink(root, rel, abs, budget);
     if (i < segments.length - 1) {
@@ -76,7 +93,7 @@ function identity(root: string, rel: string, budget: number): { id: string; byte
     if (!st.isFile()) return { id: "not-a-file" };
     const stat = `stat:${st.size}:${st.mtimeNs}:${st.ino}`;
     if (st.size > BigInt(Math.min(budget, WORKTREE_LIMITS.fileBytes))) return { id: stat, partial: true };
-    return hashFile(abs) ?? { id: "unreadable" };
+    return hashFile(abs) ?? { id: "unreadable", unavailable: true };
   }
   return { id: "absent" };
 }
@@ -85,26 +102,36 @@ function identity(root: string, rel: string, budget: number): { id: string; byte
  * A path with a symlink on it: resolved like verifyBinding resolves it, identified by the link
  * text, the resolved in-checkout path and the target's bytes (or why it does not resolve).
  */
-function throughLink(root: string, rel: string, link: string, budget: number): { id: string; bytes?: number; partial?: boolean } {
+function throughLink(root: string, rel: string, link: string, budget: number): Identity {
   let text: string;
   try {
     text = createHash("sha256").update(readlinkSync(link)).digest("hex").slice(0, 16);
   } catch {
-    text = "unreadable";
+    return { id: "link:unreadable", unavailable: true };
   }
   let where;
   try {
     where = resolveInside(root, rel);
   } catch {
-    return { id: `link:${text}:unresolvable` };
+    return { id: `link:${text}:unresolvable`, unavailable: true };
   }
-  if (!where.ok) return { id: `link:${text}:${where.reason}` };
+  if (!where.ok) {
+    // A link to a missing, case-mismatched or non-file target inside the checkout is a known fact.
+    // One that escapes the checkout (or cannot be resolved) is content VCV does not read: unavailable.
+    const known = !where.unreadable && (where.reason === "missing" || where.reason === "case-mismatch" || where.reason === "not-a-file");
+    return known ? { id: `link:${text}:${where.reason}` } : { id: `link:${text}:${where.reason}`, unavailable: true };
+  }
   const target = relative(realRoot(root), where.abs).split(sep).join("/");
-  const st = lstatSync(where.abs, { bigint: true });
+  let st;
+  try {
+    st = lstatSync(where.abs, { bigint: true });
+  } catch {
+    return { id: `link:${text}:${target}:unreadable`, unavailable: true };
+  }
   const stat = `stat:${st.size}:${st.mtimeNs}:${st.ino}`;
   if (st.size > BigInt(Math.min(budget, WORKTREE_LIMITS.fileBytes))) return { id: `link:${text}:${target}:${stat}`, partial: true };
   const h = hashFile(where.abs);
-  return h ? { id: `link:${text}:${target}:${h.id}`, bytes: h.bytes } : { id: `link:${text}:${target}:unreadable` };
+  return h ? { id: `link:${text}:${target}:${h.id}`, bytes: h.bytes } : { id: `link:${text}:${target}:unreadable`, unavailable: true };
 }
 
 const realRoot = (root: string) => {

@@ -2,7 +2,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalJson } from "../../core/src/index.ts";
@@ -19,6 +19,7 @@ import {
   reviewApprove,
   submitProposal,
   testIdentity,
+  worktreeStateDetail,
 } from "../src/index.ts";
 import type { CriteriaReport, TestRunRecord } from "../src/index.ts";
 import { SERVICE, SPEC, agent, baseline, edit, git } from "./course-desk.ts";
@@ -441,4 +442,80 @@ test("a bound file edited mid-capture is STATE_CHANGED; an unreadable claim refu
   const u = captureTestRun(repo, xml(PASS), RUN, host);
   assert.equal(!u.ok && u.error.code, "SOURCE_IDENTITY_UNAVAILABLE");
   assert.match(!u.ok ? u.error.message : "", /claim file\(s\) cannot be read/);
+});
+
+// ---- review round 3 of PR #25 ---------------------------------------------------------------
+
+test("a bound path through a link that leaves the checkout is unavailable: no capture, no fresh run, never read", () => {
+  const repo = setup();
+  const run = capture(repo, PASS);
+  // The service's directory becomes a link (a junction, on Windows) to a copy outside the checkout.
+  const outside = mkdtempSync(join(tmpdir(), "vcv-outside-"));
+  cpSync(join(repo, "server/src/enrollment"), outside, { recursive: true });
+  rmSync(join(repo, "server/src/enrollment"), { recursive: true });
+  symlinkSync(outside, join(repo, "server/src/enrollment"), "junction");
+
+  const id = testIdentity(repo);
+  assert.equal(!id.ok && id.error.code, "SOURCE_IDENTITY_UNAVAILABLE");
+  assert.match(!id.ok ? id.error.message : "", /cannot be observed .* leaves the checkout/);
+  const r = captureTestRun(repo, xml(PASS), RUN, host);
+  assert.equal(!r.ok && r.error.code, "SOURCE_IDENTITY_UNAVAILABLE");
+  const d = evaluate(repo, [run]);
+  assert.equal(d.runs[0]!.fresh, false);
+  assert.notEqual(of(d, "crt-full-course").result, "passed");
+
+  // The escaping target's bytes are never read: changing them does not change the identity.
+  const detail = () => worktreeStateDetail(repo, [SERVICE]);
+  const before = detail();
+  assert.equal(before.unreadable, 1);
+  writeFileSync(join(outside, "enrollment.service.ts"), "export const changed = true;\n");
+  assert.equal(detail().digest, before.digest);
+
+  // The same for a single-file link to a file outside.
+  const repo2 = setup();
+  const file = join(outside, "service-copy.ts");
+  writeFileSync(file, readFileSync(join(repo2, SERVICE)));
+  rmSync(join(repo2, SERVICE));
+  symlinkSync(file, join(repo2, SERVICE));
+  assert.equal(worktreeStateDetail(repo2, [SERVICE]).unreadable, 1);
+  const r2 = captureTestRun(repo2, xml(PASS), RUN, host);
+  assert.equal(!r2.ok && r2.error.code, "SOURCE_IDENTITY_UNAVAILABLE");
+});
+
+test("a path that cannot be resolved (a link loop) is unavailable, not absent", () => {
+  const repo = setup();
+  rmSync(join(repo, SERVICE));
+  symlinkSync("enrollment.service.ts", join(repo, SERVICE)); // points at itself: ELOOP
+  assert.equal(worktreeStateDetail(repo, [SERVICE]).unreadable, 1);
+  const r = captureTestRun(repo, xml(PASS), RUN, host);
+  assert.equal(!r.ok && r.error.code, "SOURCE_IDENTITY_UNAVAILABLE");
+});
+
+test("an inaccessible parent directory is unavailable, not absent", { skip: process.getuid?.() === 0 ? "root ignores directory permissions" : false }, () => {
+  const repo = setup();
+  edit(repo, SERVICE, "Enrollment rules. Every decision", "Enrollment rules (uncommitted). Every decision");
+  const dir = join(repo, "server/src/enrollment");
+  chmodSync(dir, 0o000);
+  try {
+    assert.equal(worktreeStateDetail(repo, [SERVICE]).unreadable, 1);
+    assert.equal(worktreeStateDetail(repo, ["server/src/enrollment/no-such-file.ts"]).unreadable, 1);
+    const r = captureTestRun(repo, xml(PASS), RUN, host);
+    assert.equal(!r.ok && r.error.code, "SOURCE_IDENTITY_UNAVAILABLE");
+  } finally {
+    chmodSync(dir, 0o755);
+  }
+});
+
+test("known absence stays a fact: a deleted bound file, a dangling in-checkout link, a file used as a directory", () => {
+  const repo = setup();
+  assert.equal(worktreeStateDetail(repo, ["server/src/nope.ts", `${SERVICE}/inner.ts`]).unreadable, 0);
+  symlinkSync("missing-target.ts", join(repo, "server/src/dangling.ts"));
+  assert.equal(worktreeStateDetail(repo, ["server/src/dangling.ts"]).unreadable, 0);
+  rmSync(join(repo, "server/src/dangling.ts"));
+  rmSync(join(repo, SERVICE)); // bound and now an uncommitted deletion
+  const id = testIdentity(repo);
+  assert.ok(id.ok, JSON.stringify(id));
+  assert.ok(id.data.candidate.uncommitted.complete && id.data.candidate.bound.complete);
+  const run = capture(repo, PASS, host, { before: id.data.identityDigest });
+  assert.equal(evaluate(repo, [run]).runs[0]!.fresh, true);
 });
