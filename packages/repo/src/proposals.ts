@@ -118,7 +118,15 @@ export type ProposalErrorCode =
   /** The handoff would exceed its byte limit even with every derived list cut. */
   | "HANDOFF_TOO_LARGE"
   /** M4.1: the reconciliation report would exceed its byte budget even with every list cut. */
-  | "REPORT_TOO_LARGE";
+  | "REPORT_TOO_LARGE"
+  /** M4.3: a test report that cannot be read as the supported JUnit XML subset. */
+  | "REPORT_INVALID"
+  /** M4.3: a test report whose declared counts do not match its cases (truncated or edited). */
+  | "REPORT_INCONSISTENT"
+  /** M4.3: the candidate changed between reading its identity and capturing the run. */
+  | "TEST_RUN_RACED"
+  /** M4.3: a test-run record that does not check (shape, digest, summary). */
+  | "RUN_INVALID";
 
 export type ProposalError = { code: ProposalErrorCode; message: string; details?: { path: string; message: string }[] };
 

@@ -12,3 +12,5 @@ export * from "./implementation.ts";
 export * from "./worktree.ts";
 export * from "./reconcile.ts";
 export * from "./criteria.ts";
+export * from "./junit.ts";
+export * from "./testruns.ts";

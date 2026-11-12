@@ -154,6 +154,11 @@ Approved criteria, and the test cases mapped to them, are described in
 revises without a mapped test case gives `OBJECT_UNBOUND` with the message "no test case is mapped
 to it".
 
+## M4.3: per-test runner evidence
+
+Results of the mapped test cases, bound to this exact candidate, are described in
+[test-evidence.md](test-evidence.md).
+
 ## Not established by this report
 
 - Whether the code does what the model says. A resolved, fresh claim is not evidence of that.

@@ -110,6 +110,29 @@ post-merge rewrite and no inference.
 - **`verifies` is a query filter.** `getContext` accepts the relation it returns. A compile-time
   check now keeps the accepted relations equal to every relation the snapshot can emit.
 
+## M4.3 decisions
+
+- **The runner's own per-case report, not a new format.** VCV reads JUnit XML, which Vitest, Jest
+  (jest-junit), pytest and Surefire already emit, and runs no tests itself. The fixtures are real
+  Vitest reports of the Course Desk server. The reader is a strict, bounded subset parser: no DTD or
+  entities, explicit size, case, element and depth limits, and declared counts that must match the
+  cases (`REPORT_INCONSISTENT`), so truncated or carelessly edited reports are refused.
+- **A result is bound to a candidate identity.** A test-run record carries the commit, the bytes of
+  every uncommitted path, the model revision and the claims digest. A result counts only while all
+  four still match. Anything else is `stale` with the reason, so a run from commit A never passes B.
+  `testIdentity` read before the run and passed as `before` closes the gap between running and
+  capturing (`TEST_RUN_RACED`).
+- **Provenance from the host's permission, not from the record.** `observedBy` is `host` only when
+  the capturing caller holds `tests:observe`. The CLI's local user does by default; an agent wrapper
+  (`VCV_HOST_PERMISSIONS`) does not. The record's digest detects edits but is not a signature, so
+  M4.4's gate captures in its own trusted job instead of trusting candidate-supplied records.
+- **Results are per test case, verdicts per criterion.** Precedence is failed, stale, missing,
+  unknown, then passed. Skipped, not-run and ambiguous cases are `missing`, never passed. The suite
+  summary is shown next to the verdicts but never decides them. Line coverage is accepted only as
+  labelled context.
+- **Faster verification.** The criteria read reuses M4.2's per-read `verifyMemo`. Adding runs adds
+  one identity read to the guard.
+
 ## Consequences
 
 - A code-first PR that edits bound code shows stale claims and the exact declarations, but VCV

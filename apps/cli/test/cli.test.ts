@@ -342,3 +342,55 @@ test("criteria: unmapped and mapped acceptance criteria, --json, a non-test mapp
   assert.equal(unknown.status, 1);
   assert.equal(JSON.parse(unknown.stdout).error.code, "INVALID_REQUEST");
 });
+
+test("tests capture + criteria --run: per-criterion results from a real Vitest report", async () => {
+  const { baseline, git, SPEC } = await import("../../../packages/repo/test/course-desk.ts");
+  const { FileStore, ModelEngine } = await import("../../../packages/core/src/index.ts");
+  const { projectStatus } = await import("../../../packages/repo/src/index.ts");
+  const fixtures = join(import.meta.dirname, "../../../packages/repo/test/fixtures/junit");
+  const repo = baseline();
+  const out = new ModelEngine(new FileStore(join(repo, ".vcv"))).propose(
+    {
+      changeId: "chg-criteria",
+      projectId: "prj-course-desk",
+      expectedRevision: projectStatus(repo).model!.revision,
+      operations: [{ type: "createCriterion", criterion: { id: "crt-full-course", kind: "criterion", owner: "mod-enrollment", name: "Full course", statement: "A full course is rejected with COURSE_FULL.", verifies: ["rul-seat-limit"], verification: "required" } }],
+    },
+    { principalId: "user:dev", permissions: ["model:propose", "model:apply"] },
+  );
+  assert.equal(out.status, "applied");
+  assert.equal(vcv("binding", "add", repo, "--object", "crt-full-course", "--relation", "tests", "--locator", `${SPEC}#test:EnrollmentService > rejects an enrollment into a full course and notifies the student`, "--source", "agent").status, 0);
+  git(repo, "add", "-A");
+  git(repo, "commit", "-qm", "criteria");
+
+  const scratch = tmp();
+  const id = vcv("tests", "identity", repo, "--json");
+  assert.equal(id.status, 0, id.stderr);
+  const before = JSON.parse(id.stdout).identityDigest;
+  const capture = (report: string, outFile: string, env?: NodeJS.ProcessEnv) =>
+    spawnSync("node", ["--experimental-strip-types", "--no-warnings", MAIN, "tests", "capture", repo, "--junit", join(fixtures, report), "--root", "server", "--runner", "vitest", "--invocation", "npx vitest run --reporter=junit", "--before", before, "--out", join(scratch, outFile)], { encoding: "utf8", env: env ?? process.env });
+  const ok = capture("vitest-pass.xml", "pass.json");
+  assert.equal(ok.status, 0, ok.stdout + ok.stderr);
+  assert.match(ok.stdout, /host-observed run by local-user/);
+  assert.match(ok.stdout, /8 case\(s\): 8 passed, 0 failed, 0 error\(s\), 0 skipped/);
+  const red = capture("vitest-fail-skip.xml", "red.json");
+  assert.equal(red.status, 0, red.stdout + red.stderr);
+  const agentRun = capture("vitest-pass.xml", "agent.json", { ...process.env, VCV_HOST_PRINCIPAL: "agent:coder", VCV_HOST_PERMISSIONS: "binding:record" });
+  assert.equal(agentRun.status, 0, agentRun.stdout + agentRun.stderr);
+  assert.match(agentRun.stdout, /agent-observed run by agent:coder/);
+
+  const passed = vcv("criteria", repo, "--run", join(scratch, "pass.json"));
+  assert.equal(passed.status, 0, passed.stderr);
+  assert.match(passed.stdout, /crt-full-course \[required\] PASSED \(host-observed\)/);
+  assert.match(passed.stdout, /run 0: host-observed vitest by local-user, 8 case\(s\).*suite green; describes this candidate/);
+  const failed = vcv("criteria", repo, "--run", join(scratch, "red.json"));
+  assert.match(failed.stdout, /crt-full-course \[required\] FAILED/);
+  assert.match(failed.stdout, /! TEST_FAILED: mapped test server\/src\/enrollment\/enrollment\.service\.spec\.ts > EnrollmentService > rejects an enrollment into a full course/);
+  const json = JSON.parse(vcv("criteria", repo, "--run", join(scratch, "agent.json"), "--json").stdout);
+  assert.equal(json.criteria[0].resultObservedBy, "agent");
+  // A capture of a report that does not add up is refused.
+  writeFileSync(join(scratch, "bad.xml"), readFileSync(join(fixtures, "vitest-pass.xml"), "utf8").replace('tests="8"', 'tests="9"'));
+  const bad = vcv("tests", "capture", repo, "--junit", join(scratch, "bad.xml"), "--root", "server", "--runner", "vitest", "--invocation", "x");
+  assert.equal(bad.status, 1);
+  assert.match(bad.stdout, /✗ REPORT_INCONSISTENT/);
+});

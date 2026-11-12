@@ -25,7 +25,9 @@ export type Permission =
   /** May record, reassert or remove source binding claims (ADR 0007 §5). Never changes the model. */
   | "binding:record"
   /** May mark a binding claim as disputed. */
-  | "binding:dispute";
+  | "binding:dispute"
+  /** May record test runs as host-observed (M4.3): the host itself ran the tests and read the report. Without it a run is agent-claimed. */
+  | "tests:observe";
 
 export type ChangeStatus = "pending" | "applied" | "rejected" | "denied";
 
