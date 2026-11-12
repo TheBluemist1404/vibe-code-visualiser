@@ -489,12 +489,20 @@ function printReconciliation(d: Reconciliation) {
   console.log(`  model: ${d.model.lineage}, ${d.base.modelRevision ?? "(no model)"} → ${d.candidate.modelRevision}; integrity ${d.model.integrity.ok ? "ok" : "FAILED"}; ${d.model.delta.total} object change(s)${d.model.impact ? `, ${d.model.impact.candidates.length} impact candidate(s), cross-module ${d.model.impact.crossModule}` : ""}`);
   for (const r of d.model.introduced) console.log(`    ${r.revision}: ${r.derivation}${r.changeId ? ` by ${r.changeId}` : ""}; approval ${r.approval}`);
   for (const c of d.model.delta.changes) console.log(`    ${c.change} ${c.kind} ${c.id}${c.fields.length ? ` (${c.fields.map((f) => f.field).join(", ")})` : ""}`);
-  console.log(`  source: ${d.source.total} changed file(s), ${d.source.unmapped} file(s) outside .vcv/ unmapped`);
+  console.log(`  source: ${d.source.total} changed file(s), ${d.source.unmapped ?? "unknown (claims unreadable)"} file(s) outside .vcv/ unmapped`);
   for (const f of d.source.files) console.log(`    ${f.committed ? "C" : " "}${f.uncommitted ? "W" : " "} ${f.area.padEnd(12)} ${f.path}${f.bindings.length ? `  ← ${f.bindings.join(", ")}` : ""}`);
-  console.log(`  bindings: ${d.bindings.total} shown, ${d.bindings.unaffected} unaffected and resolved`);
+  if (d.sourceImpact) {
+    const si = d.sourceImpact;
+    console.log(`  source impact (declared-model context, not evidence of drift): seeds ${si.seeds.map((x) => x.objectId).join(", ")}; modules ${si.modules.map((m) => m.id).join(", ")}; ${si.total} impact candidate(s); cross-module ${si.crossModule}`);
+    if (si.contracts.length) console.log(`    contracts: ${si.contracts.map((c) => `${c.id} (${c.via})`).join(", ")}`);
+    if (si.rules.length) console.log(`    rules: ${si.rules.map((r) => `${r.id} (${r.via})`).join(", ")}`);
+  }
+  if (!d.bindings.available) console.log(`  bindings: NOT ASSESSED (${d.bindings.problem})`);
+  else console.log(`  bindings: ${d.bindings.total} shown, ${d.bindings.unaffected} unaffected and resolved`);
   for (const b of d.bindings.items) console.log(`    ${b.bindingId}: ${b.state ?? "removed"}; claim ${b.atBase}; object ${b.object}${b.boundFileChanged ? "; bound file changed" : ""}`);
   console.log(`  findings (${d.findingsTotal}):`);
   for (const f of d.findings) console.log(`    [${f.category}/${f.basis}${f.related ? "" : ", unrelated"}] ${f.code}: ${f.message}`);
+  if (d.budget.shrunk || d.findingsTruncated) console.log(`  ! lists were cut to fit the report budget (${d.budget.bytes}/${d.budget.limit} bytes); use --json for totals`);
   console.log(`  semantic: ${d.semantic.note}`);
   console.log("  not established here:");
   for (const l of d.limits) console.log(`    - ${l}`);

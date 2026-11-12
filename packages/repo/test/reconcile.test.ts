@@ -1,11 +1,12 @@
 // Pre-merge candidate/base reconciliation baseline (Issue #22, M4.1).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileStore, ModelEngine } from "../../core/src/index.ts";
 import type { HostContext } from "../../core/src/index.ts";
-import { projectStatus, reconcile } from "../src/index.ts";
+import { RECONCILE_LIMITS, addTrustedReviewer, createReviewerKey, previewProposal, projectStatus, reconcile, reviewApprove, submitProposal } from "../src/index.ts";
 import type { Reconciliation } from "../src/index.ts";
 import { SERVICE, baseline, edit, git } from "./course-desk.ts";
 
@@ -74,6 +75,18 @@ test("code-first change: bound code moved, claims are stale, nothing is called d
   assert.equal(d.summary.staleClaims, 2);
   assert.equal(d.summary.unmappedFiles, 1);
   assert.ok(!d.findings.some((f) => f.category === "structural" || f.category === "integrity"));
+
+  // No model delta, so no model impact; the source side still gets declared-model context.
+  assert.equal(d.model.impact, null);
+  const si = d.sourceImpact!;
+  assert.equal(si.impactClass, "declared-model-context");
+  assert.deepEqual(si.seeds.map((x) => x.objectId), ["cap-enroll", "rul-seat-limit"]);
+  assert.deepEqual(si.seeds[0]!.why, ["bound-file-changed"]);
+  assert.deepEqual(si.seeds[0]!.bindings, ["impl.cap-enroll"]);
+  assert.ok(si.modules.some((m) => m.id === "mod-enrollment" && m.via === "seed"), JSON.stringify(si.modules));
+  assert.ok(si.rules.some((r) => r.id === "rul-seat-limit" && r.via === "seed"));
+  assert.ok(si.candidates.length > 0, "the declared model has dependents of enrollment");
+  assert.match(si.note, /not evidence that behaviour changed/);
 });
 
 test("a harmless edit in a bound file is observed, not reported as a stale claim", () => {
@@ -85,6 +98,9 @@ test("a harmless edit in a bound file is observed, not reported as a stale claim
   assert.ok(!codes(d).includes("CLAIM_STALE"));
   const row = d.bindings.items.find((b) => b.bindingId === "impl.cap-enroll")!;
   assert.deepEqual([row.state, row.source?.fileChanged], ["resolved", true]);
+  // Where to look, still offered as context, and still not a contradiction.
+  assert.ok(d.sourceImpact?.seeds.some((x) => x.objectId === "cap-enroll"));
+  assert.ok(!d.findings.some((f) => f.category === "structural" || f.category === "integrity" || f.code === "CLAIM_STALE"));
 });
 
 test("model-first change: lineage, delta, impact, unattested approval and unbound new objects", () => {
@@ -246,4 +262,117 @@ test("bad requests and unknown bases are refused clearly", () => {
   rmSync(join(repo, ".vcv"), { recursive: true });
   const r4 = reconcile(repo, { base: "main" });
   assert.equal(!r4.ok && r4.error.code, "PROJECT_NOT_READY");
+});
+
+// ---- review round 1 of PR #23 ---------------------------------------------------------------
+
+const keys = mkdtempSync(join(tmpdir(), "vcv-keys-")); // outside every checkout
+
+/** A genuinely attested introduced revision on the feature branch, with the trust list on main. */
+function attested() {
+  const repo = baseline();
+  const keyFile = join(keys, `rev-${Math.random().toString(36).slice(2, 8)}.pem`);
+  addTrustedReviewer(repo, createReviewerKey("user:hoang", keyFile));
+  git(repo, "add", "-A");
+  git(repo, "commit", "-qm", "trust user:hoang");
+  const base = git(repo, "rev-parse", "HEAD");
+  git(repo, "checkout", "-q", "-b", "feature");
+  const id = "chg-statement";
+  const sub = submitProposal(repo, {
+    changeId: id,
+    projectId: "prj-course-desk",
+    expectedRevision: projectStatus(repo).model!.revision,
+    operations: [{ type: "setRuleStatement", ruleId: "rul-seat-limit", statement: "A full course is rejected with COURSE_FULL and the capacity." }],
+  }, { principalId: "agent:coder", permissions: ["model:propose"] });
+  assert.ok(sub.ok);
+  const pv = previewProposal(repo, { changeId: id });
+  assert.ok(pv.ok);
+  const trust = { kind: "git-ref" as const, ref: base, pinnedCommit: base };
+  const r = reviewApprove(repo, { changeId: id, expectedDigest: pv.data.proposal.proposalDigest, keyFile, trust });
+  assert.equal(r.outcome.status, "applied");
+  git(repo, "add", "-A");
+  git(repo, "commit", "-qm", "approved");
+  return { repo, base, trust, attestation: join(repo, ".vcv/approvals", `${id}.json`) };
+}
+
+test("P1: approval evidence read by integrity is rechecked, also when the attestation path is already dirty", () => {
+  const { repo, base, trust, attestation } = attested();
+  const strict = (hooks = {}) => reconcile(repo, { base, trust, requireAttestation: true }, hooks);
+  const before = strict();
+  assert.ok(before.ok);
+  assert.equal(before.data.model.integrity.ok, true, JSON.stringify(before.data.model.integrity));
+  assert.equal(before.data.model.introduced[0]!.approval, "attested");
+
+  appendFileSync(attestation, "\n"); // harmless, but the path is now dirty: the changed-path set no longer moves
+  assert.equal(strict().ok && strict().ok && (strict() as { data: { model: { integrity: { ok: boolean } } } }).data.model.integrity.ok, true);
+  let once = true;
+  const raced = strict({
+    afterRead: () => {
+      if (!once) return;
+      once = false;
+      const a = JSON.parse(readFileSync(attestation, "utf8"));
+      writeFileSync(attestation, JSON.stringify({ ...a, approverId: "user:mallory" }, null, 2) + "\n");
+    },
+  });
+  assert.equal(!raced.ok && raced.error.code, "STATE_CHANGED", JSON.stringify(raced.ok ? raced.data.model.integrity : raced.error));
+  const after = strict();
+  assert.ok(after.ok);
+  assert.equal(after.data.model.integrity.ok, false, "the final bytes fail integrity, and a fresh call says so");
+});
+
+test("P1: a trust file or trust ref that moves mid-read is STATE_CHANGED", () => {
+  const { repo, base, trust } = attested();
+  // External trust file (outside the checkout).
+  const file = join(mkdtempSync(join(tmpdir(), "vcv-trust-")), "reviewers.json");
+  writeFileSync(file, git(repo, "show", `${base}:.vcv/reviewers.json`) + "\n");
+  let once = true;
+  const r1 = reconcile(repo, { base, trust: { kind: "file", path: file } }, { afterRead: () => (once ? ((once = false), appendFileSync(file, " ")) : undefined) });
+  assert.equal(!r1.ok && r1.error.code, "STATE_CHANGED");
+  // An unpinned trust ref that is moved.
+  git(repo, "branch", "-q", "trusted", trust.pinnedCommit);
+  once = true;
+  const r2 = reconcile(repo, { base, trust: { kind: "git-ref", ref: "trusted" } }, { afterRead: () => (once ? ((once = false), git(repo, "branch", "-qf", "trusted", "HEAD")) : undefined) });
+  assert.equal(!r2.ok && r2.error.code, "STATE_CHANGED");
+});
+
+test("P2: an unreadable claim store is reported as such, never as removed or unaffected claims", () => {
+  for (const kind of ["file", "symlink"] as const) {
+    const { repo, base } = setup();
+    edit(repo, SERVICE, "Enrollment rules. Every decision", "Enrollment rules (x). Every decision");
+    rmSync(join(repo, ".vcv/bindings"), { recursive: true });
+    if (kind === "file") writeFileSync(join(repo, ".vcv/bindings"), "not a directory\n");
+    else symlinkSync(mkdtempSync(join(tmpdir(), "vcv-elsewhere-")), join(repo, ".vcv/bindings"));
+    const d = ok(repo, base);
+    assert.equal(d.bindings.available, false, kind);
+    assert.match(d.bindings.problem!, kind === "file" ? /not a directory/ : /symlink/);
+    assert.deepEqual([d.bindings.items.length, d.bindings.unaffected, d.summary.removedClaims, d.summary.bindingsAssessed, d.source.unmapped], [0, null, 0, false, null]);
+    const f = finding(d, "CLAIM_STORE_UNREADABLE")!;
+    assert.deepEqual([f.category, f.basis], ["binding", "not-checked"]);
+    assert.ok(!codes(d).includes("CLAIM_REMOVED") && !codes(d).includes("UNMAPPED_CHANGES") && !codes(d).includes("OBJECT_UNBOUND"));
+    assert.equal(d.sourceImpact, null);
+  }
+});
+
+test("P2: the serialized report stays within its byte budget for valid worst-case claims", () => {
+  const { repo, base } = setup();
+  const template = JSON.parse(readFileSync(join(repo, ".vcv/bindings/test.rul-seat-limit.json"), "utf8"));
+  const long = "EnrollmentService > " + "x".repeat(50_000);
+  for (let i = 0; i < 5; i++) writeFileSync(join(repo, `.vcv/bindings/test.long-${i}.json`), JSON.stringify({ ...template, bindingId: `test.long-${i}`, locator: { ...template.locator, selector: { kind: "test", name: long } } }, null, 2));
+  const d = ok(repo, base);
+  const bytes = Buffer.byteLength(JSON.stringify(d, null, 2));
+  assert.ok(bytes <= RECONCILE_LIMITS.bytes, `${bytes} bytes`);
+  assert.equal(d.budget.bytes, bytes);
+  const row = d.bindings.items.find((b) => b.bindingId === "test.long-0")!;
+  assert.ok(row.locator!.length <= RECONCILE_LIMITS.locatorChars);
+  assert.match(row.locatorDigest!, /^[0-9a-f]{64}$/, "a cut locator keeps the digest of its full identity");
+  for (const f of d.findings) assert.ok(f.message.length <= RECONCILE_LIMITS.textChars);
+
+  // Many valid claims: lists are cut further, flagged, and the size still fits.
+  for (let i = 0; i < 600; i++) writeFileSync(join(repo, `.vcv/bindings/test.many-${i}.json`), JSON.stringify({ ...template, bindingId: `test.many-${i}`, locator: { ...template.locator, selector: { kind: "test", name: `${long.slice(0, 2000)} ${i}` } } }, null, 2));
+  const m = ok(repo, base);
+  const mBytes = Buffer.byteLength(JSON.stringify(m, null, 2));
+  assert.ok(mBytes <= RECONCILE_LIMITS.bytes, `${mBytes} bytes`);
+  assert.equal(m.budget.shrunk, true);
+  assert.ok(m.bindings.truncated && m.bindings.total > m.bindings.items.length);
+  assert.ok(m.findingsTruncated && m.findingsTotal > m.findings.length);
 });

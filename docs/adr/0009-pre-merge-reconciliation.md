@@ -48,6 +48,23 @@ post-merge rewrite and no inference.
 - **Bounded, deterministic, redacted.** Fixed list limits with totals and `LIST_TRUNCATED`; stable
   ordering; `redact` removes the checkout path and home directory.
 
+### Review round 1 (PR #23)
+
+- **Integrity inputs are part of the observation.** `worktreeState` does not read inside `.vcv/`
+  and `storeFingerprint` does not cover `approvals/`, so the guard also hashes every attestation,
+  `.vcv/reviewers.json`, every changed `.vcv/` file (safe store reader) and the trust source's
+  identity (external file bytes, ref commit). An already-dirty attestation edited mid-read is
+  `STATE_CHANGED`.
+- **An unreadable claim store is an explicit unknown.** It is reported as `bindings.available:
+  false` with `CLAIM_STORE_UNREADABLE`, and nothing is inferred from it (no removed claims, no
+  unaffected count, no unmapped count, no source impact).
+- **Source impact is separate from model impact.** Seeds are objects with claims into changed
+  code (or claims added, reasserted or unresolved). The impact runs on the candidate model with the
+  existing query graph and is labelled `declared-model-context`.
+- **A byte budget, not just item counts.** Display strings are cut (a locator then carries the
+  digest of its full text), every emitted list is bounded, and the serialized report is fitted to
+  512 KiB by halving the longest lists, or refused with `REPORT_TOO_LARGE`.
+
 ## Consequences
 
 - A code-first PR that edits bound code shows stale claims and the exact declarations, but VCV

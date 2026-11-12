@@ -38,7 +38,9 @@ merge comes in M4.4.
 | `model.delta`, `model.impact` | Object-level changes from the merge base's model, and structural impact candidates (modules, contracts, cross-module) | The same diff and impact the proposal preview uses |
 | `source.files` | Each changed file since the merge base: committed, uncommitted or both; its area (source, test, `.vcv/` model, claims, other); the claims that point into it | Git |
 | `bindings.items` | Every claim that is related to the change (its file changed, it was added, reasserted or removed, or its object is in the delta or impact) or is not `resolved`, verified now, with how the claim file compares with the merge base | `verifyBinding`, Git |
+| `sourceImpact` | For source changes: the objects whose claims point into changed code, or whose claims were added, reasserted or no longer resolve (seeds), and the modules, contracts, rules and impact candidates the declared model connects to them. Kept apart from `model.impact`, labelled `declared-model-context` | Claims plus `@vcv/query` impact on the candidate model |
 | `findings` | One list, sorted by category | All of the above |
+| `budget` | The serialized size and whether lists were cut further to fit | |
 
 Source changes are measured from the **merge base**, so work that landed on `main` after the
 branch point is not counted as the candidate's (`BASE_NOT_CONTAINED` says so and asks for an
@@ -62,6 +64,11 @@ Every finding has a `category` and a `basis`. The basis says how much it is wort
 | `source` | `BOUND_FILE_CHANGED`, `UNCOMMITTED_CHANGES`, `BASE_NOT_CONTAINED`, `MODEL_INTRODUCED` | observed | Facts about the change. A changed file is not drift |
 | `unsupported` | `UNMAPPED_CHANGES`, `CLAIM_NOT_CHECKED`, `DELTA_UNAVAILABLE`, `LIST_TRUNCATED` | not-checked | What VCV could not relate to the model or check |
 
+If the claim store itself cannot be read (`.vcv/bindings` is a file, a symlink or unreadable),
+the report says `bindings.available: false` with `CLAIM_STORE_UNREADABLE` (not-checked). It then
+infers nothing: no claim is reported removed or unaffected, `source.unmapped` is `null`, and there
+is no source impact.
+
 `related: false` marks a finding about something the candidate did not touch, such as a claim
 that was already unresolved on the base.
 
@@ -79,18 +86,35 @@ Five things stay apart on purpose:
    makes none; `semantic.observations` is always empty here. M4.4 adds agent-authored observations
    to the pre-merge report, labelled as claims with their source locations.
 
+### Source impact for code-first changes
+
+A code-first PR changes no model object, so `model.impact` is empty. `sourceImpact` gives the
+reviewer and the agent the structural context anyway. Example: the change to
+`EnrollmentService.enroll` seeds `cap-enroll` and `rul-seat-limit` and lists the Enrollment
+module and the objects the model says depend on them (in this draft model, which declares no
+contracts, that is the Enrollment module only). This is where to look, not a finding.
+Changed files that no claim points into contribute nothing, and a comment-only edit still seeds
+context while producing no stale claim and no contradiction.
+
 ### Coherent reads
 
 The report is one observation. Before answering, VCV reads again the model store, Git HEAD, the
 base ref, every claim file and the bytes of every changed or bound file
-([worktree.ts](../packages/repo/src/worktree.ts)). If any of them moved (a branch switch, a
+([worktree.ts](../packages/repo/src/worktree.ts)). It also rereads every input of the integrity
+result: each attestation file, the checkout's trust list, every changed `.vcv/` file, and the
+trust source (an external trust file's bytes, a trust ref's commit). If any of them moved (a branch switch, a
 same-path edit in the working tree, a moved ref), the call fails with `STATE_CHANGED` instead of
 mixing two states. Retry it.
 
 ### Bounds and redaction
 
-At most 500 files, 500 claims, 200 model changes and 500 findings are listed; the summary counts
-everything and `LIST_TRUNCATED` says what was cut. Paths are repository-relative; the checkout's
+At most 500 files, 500 claims, 200 model changes, 500 findings, 200 introduced revisions and 100
+integrity errors and warnings each are listed; the summary and the `…Total` fields count
+everything, and `LIST_TRUNCATED` says what was cut. Display strings are bounded too: a locator is
+cut at 300 characters and then carries `locatorDigest`, the sha256 of the full text (the claim
+file keeps the identity), and messages are cut at 1000. The whole report must fit 512 KiB: if it
+does not, the longest lists are halved until it does and flagged as truncated (`budget.shrunk`).
+If it still cannot fit, the call fails with `REPORT_TOO_LARGE`. Paths are repository-relative; the checkout's
 absolute path and the home directory never appear. The same checkout state gives the same JSON.
 
 ### Example: a code-first change
@@ -104,6 +128,8 @@ reconciliation of prj-course-desk: candidate 9762b1541bbd (feature) + uncommitte
   source: 2 changed file(s), 1 file(s) outside .vcv/ unmapped
      W source       README.md
     C  source       server/src/enrollment/enrollment.service.ts  ← impl.cap-enroll, impl.rul-seat-limit
+  source impact (declared-model context, not evidence of drift): seeds cap-enroll, rul-seat-limit; modules mod-enrollment; 1 impact candidate(s); cross-module no
+    rules: rul-seat-limit (seed)
   bindings: 2 shown, 2 unaffected and resolved
     impl.cap-enroll: stale; claim unchanged; object unchanged; bound file changed
     impl.rul-seat-limit: stale; claim unchanged; object unchanged; bound file changed

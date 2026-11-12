@@ -116,7 +116,9 @@ export type ProposalErrorCode =
   /** No implementation report for this change. */
   | "NO_REPORT"
   /** The handoff would exceed its byte limit even with every derived list cut. */
-  | "HANDOFF_TOO_LARGE";
+  | "HANDOFF_TOO_LARGE"
+  /** M4.1: the reconciliation report would exceed its byte budget even with every list cut. */
+  | "REPORT_TOO_LARGE";
 
 export type ProposalError = { code: ProposalErrorCode; message: string; details?: { path: string; message: string }[] };
 
@@ -601,7 +603,7 @@ function items(m: Model): Map<Id, Item> {
   return out;
 }
 
-function moduleOf(m: Model, id: Id): Id | null {
+export function moduleOf(m: Model, id: Id): Id | null {
   const index = buildIndex(m).byId;
   let e = index.get(id);
   while (e) {
