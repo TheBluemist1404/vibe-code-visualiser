@@ -147,6 +147,13 @@ not. It does not say the rejection notice is missing. Deciding that is the agent
 and M4.3 add the evidence that settles it: the approved acceptance criteria and the individual
 test cases mapped to them.
 
+## M4.2: acceptance criteria and test-case mappings
+
+Approved criteria, and the test cases mapped to them, are described in
+[criteria.md](criteria.md). In the reconciliation report, a criterion the candidate adds or
+revises without a mapped test case gives `OBJECT_UNBOUND` with the message "no test case is mapped
+to it".
+
 ## Not established by this report
 
 - Whether the code does what the model says. A resolved, fresh claim is not evidence of that.

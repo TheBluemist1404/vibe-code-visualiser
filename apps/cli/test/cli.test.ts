@@ -300,3 +300,45 @@ test("reconcile: a readable report and --json with exit 0, a missing --base or u
   assert.equal(unknown.status, 1);
   assert.equal(JSON.parse(unknown.stdout).error.code, "UNKNOWN_COMMIT");
 });
+
+test("criteria: unmapped and mapped acceptance criteria, --json, a non-test mapping is refused", async () => {
+  const { baseline, git, SPEC } = await import("../../../packages/repo/test/course-desk.ts");
+  const { FileStore, ModelEngine } = await import("../../../packages/core/src/index.ts");
+  const { projectStatus } = await import("../../../packages/repo/src/index.ts");
+  const repo = baseline();
+  const out = new ModelEngine(new FileStore(join(repo, ".vcv"))).propose(
+    {
+      changeId: "chg-criteria",
+      projectId: "prj-course-desk",
+      expectedRevision: projectStatus(repo).model!.revision,
+      operations: [{ type: "createCriterion", criterion: { id: "crt-full-course", kind: "criterion", owner: "mod-enrollment", name: "Full course", statement: "A full course is rejected with COURSE_FULL.", verifies: ["rul-seat-limit"], verification: "required" } }],
+    },
+    { principalId: "user:dev", permissions: ["model:propose", "model:apply"] },
+  );
+  assert.equal(out.status, "applied", JSON.stringify(out));
+  git(repo, "add", "-A");
+  git(repo, "commit", "-qm", "criteria");
+
+  const none = vcv("criteria", repo);
+  assert.equal(none.status, 0, none.stderr);
+  assert.match(none.stdout, /1 \(1 required, 0 optional\); 0 test mapping/);
+  assert.match(none.stdout, /crt-full-course \[required\] none: A full course/);
+  assert.match(none.stdout, /! NO_MAPPING/);
+
+  const refused = vcv("binding", "add", repo, "--object", "crt-full-course", "--relation", "implements", "--locator", `${SPEC}#test:EnrollmentService > rejects an enrollment into a full course and notifies the student`, "--source", "agent");
+  assert.notEqual(refused.status, 0);
+  assert.match(refused.stdout + refused.stderr, /only be mapped to individual test cases/);
+  const mapped = vcv("binding", "add", repo, "--object", "crt-full-course", "--relation", "tests", "--locator", `${SPEC}#test:EnrollmentService > rejects an enrollment into a full course and notifies the student`, "--source", "agent");
+  assert.equal(mapped.status, 0, mapped.stdout + mapped.stderr);
+
+  const text = vcv("criteria", repo, "crt-full-course");
+  assert.equal(text.status, 0, text.stderr);
+  assert.match(text.stdout, /crt-full-course \[required\] resolved/);
+  assert.match(text.stdout, /resolved\s+server\/src\/enrollment\/enrollment\.service\.spec\.ts > EnrollmentService > rejects/);
+  const json = JSON.parse(vcv("criteria", repo, "--json").stdout);
+  assert.equal(json.format, "vcv-criteria-1");
+  assert.equal(json.counts.requiredNotResolved, 0);
+  const unknown = vcv("criteria", repo, "crt-nope");
+  assert.equal(unknown.status, 1);
+  assert.equal(JSON.parse(unknown.stdout).error.code, "INVALID_REQUEST");
+});

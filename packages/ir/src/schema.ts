@@ -1,6 +1,6 @@
 // Level 1 validation: shape and primitive types only. References are checked in validate.ts.
 import { z } from "zod";
-import { ATTRIBUTE_TYPES } from "./types.ts";
+import { ATTRIBUTE_TYPES, VERIFICATION_POLICIES } from "./types.ts";
 import { persistedIdSchema } from "./ids.ts";
 
 const id = z.string().min(1);
@@ -38,6 +38,15 @@ const rule = z.discriminatedUnion("ruleKind", [
 ]);
 const event = z.object(base("event")).strict();
 const contract = z.object({ ...base("contract"), accepts: z.array(ref).optional(), publishes: z.array(ref).optional() }).strict();
+
+const criterion = z
+  .object({
+    ...base("criterion"),
+    statement: z.string().min(1).max(2000),
+    verifies: z.array(ref).min(1).max(20),
+    verification: z.enum(VERIFICATION_POLICIES),
+  })
+  .strict();
 
 // ISO 8601 duration, date and time parts (e.g. P7D, PT12H, P1DT2H).
 const isoDuration = z.string().regex(/^P(?!$)(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+S)?)?$/, "ISO 8601 duration expected");
@@ -82,7 +91,9 @@ export const modelSchema = z
     events: z.array(event).default([]),
     contracts: z.array(contract).default([]),
     behaviors: z.array(behavior).default([]),
+    // No default: a model without criteria has no `criteria` key at all (see Model.criteria).
+    criteria: z.array(criterion).optional(),
   })
   .strict();
 
-export const schemas = { state, transition: transitionSchema, attribute, module, capability, event, rule };
+export const schemas = { state, transition: transitionSchema, attribute, module, capability, event, rule, criterion };

@@ -173,6 +173,9 @@ const bindingsDir = (root: string) => join(root, VCV_DIR, BINDINGS_DIR);
 const claimPath = (root: string, id: string) => join(bindingsDir(root), `${id}.json`);
 const claimRel = (id: string) => `${VCV_DIR}/${BINDINGS_DIR}/${id}.json`;
 
+/** Longest test identity (`Suite > case`) a new claim may record. */
+export const MAX_TEST_NAME_CHARS = 1000;
+
 /** Largest claim file VCV reads. Real claims are well under 2 KB. */
 export const MAX_CLAIM_BYTES = 64 * 1024;
 
@@ -414,6 +417,10 @@ export function recordBinding(path: string, input: RecordInput, host: BindingHos
   if (pp) throw new BindingError("UNSAFE_PATH", `locator path "${input.locator.path}" ${pp}`);
   const sp = selectorProblem(input.locator.selector);
   if (sp) throw new BindingError("INVALID_CLAIM", sp);
+  // New claims carry portable, bounded test identities (claims already on disk are read as they are).
+  if (input.locator.selector.kind === "test" && input.locator.selector.name.length > MAX_TEST_NAME_CHARS) {
+    throw new BindingError("INVALID_CLAIM", `test name is longer than ${MAX_TEST_NAME_CHARS} characters`);
+  }
   const bindingId = input.bindingId ?? defaultBindingId(input.modelObjectId, input.relation, input.locator);
   const idp = persistedIdProblem(bindingId);
   if (idp) throw new BindingError("INVALID_CLAIM", `bindingId "${bindingId}" ${idp}`);
@@ -424,6 +431,11 @@ export function recordBinding(path: string, input: RecordInput, host: BindingHos
   // The object and the revision must exist in the validated project state.
   if (!buildIndex(snap.model).byId.has(input.modelObjectId)) {
     throw new BindingError("UNKNOWN_OBJECT", `model object ${input.modelObjectId} does not exist at the current revision ${snap.model.project.modelRevision}`);
+  }
+  // An acceptance criterion (M4.2) is checked by test cases: its only claims are `tests` claims
+  // that name one individual test (file + full title), never a file, a suite or a symbol.
+  if (buildIndex(snap.model).byId.get(input.modelObjectId)!.kind === "criterion" && (input.relation !== "tests" || input.locator.selector.kind !== "test")) {
+    throw new BindingError("INVALID_CLAIM", `criterion ${input.modelObjectId} can only be mapped to individual test cases: use --relation tests and a <file>#test:<Suite > case> locator`);
   }
   const modelRevision = input.modelRevision ?? snap.model.project.modelRevision;
   if (!snap.history.includes(modelRevision)) throw new BindingError("UNKNOWN_REVISION", `revision ${modelRevision} is not in this checkout's model history`);
@@ -536,15 +548,34 @@ export type Verification = {
  * Recompute a claim's state against the working tree and the model. Read-only. Pass `status`
  * (from projectStatus) to verify several claims against one observation of the project.
  */
-export function verifyBinding(path: string, entry: ClaimEntry, status: ProjectStatus = projectStatus(path)): Verification {
+/**
+ * Per-read memo for verifying many claims in one observation: the HEAD model, revision models and
+ * their indexes, Git working-tree states and locator resolutions are computed once. Only for one
+ * read whose inputs are rechecked before answering (a guard); never kept across reads.
+ */
+export type VerifyMemo = {
+  head?: Model;
+  revisions: Map<string, Model | undefined>;
+  indexes: WeakMap<Model, ReturnType<typeof buildIndex>>;
+  working: Map<string, ReturnType<typeof fileWorkingState>>;
+  resolutions: Map<string, Resolution>;
+};
+export const verifyMemo = (): VerifyMemo => ({ revisions: new Map(), indexes: new WeakMap(), working: new Map(), resolutions: new Map() });
+
+export function verifyBinding(path: string, entry: ClaimEntry, status: ProjectStatus = projectStatus(path), memo?: VerifyMemo): Verification {
   const base = { bindingId: entry.bindingId, meaning: "unverified" as const, approved: false as const };
   const c = entry.claim;
   if (!c) {
     return { ...base, claim: null, state: "invalid", problem: entry.problem, locator: null, source: null, model: null, git: { commitMoved: null, workingTree: null }, disputed: null };
   }
-  const resolution = resolveLocator(status.root, c.locator);
+  const once = <K, V>(m: Map<K, V> | undefined, k: K, f: () => V): V => {
+    if (!m) return f();
+    if (!m.has(k)) m.set(k, f());
+    return m.get(k)!;
+  };
+  const resolution = once(memo?.resolutions, canonicalJson(c.locator), () => resolveLocator(status.root, c.locator));
   const source = sourceFreshness(c, resolution);
-  const model = status.state === "ready" && status.model ? modelFreshness(status.storeDir, status.model.history, c) : { state: "unknown" as const, cause: `project is ${status.state}` };
+  const model = status.state === "ready" && status.model ? modelFreshness(status.storeDir, status.model.history, c, memo) : { state: "unknown" as const, cause: `project is ${status.state}` };
   // resolved needs complete evidence: a unique locator AND both axes known unchanged. Known
   // change wins (stale); anything still unknown is indeterminate, never a pass.
   const state: BindingState =
@@ -555,7 +586,7 @@ export function verifyBinding(path: string, entry: ClaimEntry, status: ProjectSt
         : source.state === "unchanged" && model.state === "unchanged"
           ? "resolved"
           : "indeterminate";
-  const workingTree = resolution.fileFingerprint ? fileWorkingState(status.root, c.locator.path) : null;
+  const workingTree = resolution.fileFingerprint ? once(memo?.working, c.locator.path, () => fileWorkingState(status.root, c.locator.path)) : null;
   return {
     ...base,
     claim: c,
@@ -592,14 +623,14 @@ function sourceFreshness(c: BindingClaim, r: Resolution): SourceFreshness {
 }
 
 /** Does the bound object's definition differ between the claim's revision and the current one? */
-function modelFreshness(storeDir: string, history: readonly string[], c: BindingClaim): ModelFreshness {
-  const current = readHeadRevision(storeDir);
-  const now = objectJson(current, c.modelObjectId);
+function modelFreshness(storeDir: string, history: readonly string[], c: BindingClaim, memo?: VerifyMemo): ModelFreshness {
+  const current = memo ? (memo.head ??= readHeadRevision(storeDir)) : readHeadRevision(storeDir);
+  const now = objectJson(current, c.modelObjectId, memo);
   if (now === undefined) return { state: "removed", cause: `${c.modelObjectId} does not exist at the current revision ${current.project.modelRevision}` };
   if (c.modelRevision === current.project.modelRevision) return { state: "unchanged", cause: `claim was made against the current revision ${c.modelRevision}` };
   if (!history.includes(c.modelRevision)) return { state: "unknown", cause: `revision ${c.modelRevision} is not in this checkout's model history (another branch?)` };
-  const then = readRevision(storeDir, c.modelRevision);
-  const before = then ? objectJson(then, c.modelObjectId) : undefined;
+  const then = memo ? (memo.revisions.has(c.modelRevision) ? memo.revisions.get(c.modelRevision) : (memo.revisions.set(c.modelRevision, readRevision(storeDir, c.modelRevision)), memo.revisions.get(c.modelRevision))) : readRevision(storeDir, c.modelRevision);
+  const before = then ? objectJson(then, c.modelObjectId, memo) : undefined;
   if (before === undefined) return { state: "unknown", cause: `${c.modelObjectId} cannot be read at ${c.modelRevision}` };
   return before === now
     ? { state: "unchanged", cause: `${c.modelObjectId} is identical at ${c.modelRevision} and ${current.project.modelRevision}` }
@@ -620,8 +651,13 @@ function readRevision(storeDir: string, rev: string): Model | undefined {
 }
 
 /** Canonical JSON of the object with this ID (top-level or nested), or undefined if absent. */
-function objectJson(model: Model, id: Id): string | undefined {
-  const entry = buildIndex(model).byId.get(id);
+function objectJson(model: Model, id: Id, memo?: VerifyMemo): string | undefined {
+  let index = memo?.indexes.get(model);
+  if (!index) {
+    index = buildIndex(model);
+    memo?.indexes.set(model, index);
+  }
+  const entry = index.byId.get(id);
   if (!entry) return undefined;
   let node: unknown = model;
   for (const part of entry.path.matchAll(/([A-Za-z]+)(?:\[(\d+)\])?/g)) {

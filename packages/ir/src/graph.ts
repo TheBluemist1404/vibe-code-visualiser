@@ -1,6 +1,6 @@
 // Indexing and reference extraction. One function (collectRefs) defines every typed
 // reference in the IR; validation, removal safety and graph projection all use it.
-import { COLLECTIONS, isUnresolved } from "./types.ts";
+import { COLLECTIONS, collectionOf, isUnresolved } from "./types.ts";
 import type { CollectionName, Id, Kind, Model, Ref } from "./types.ts";
 
 export type IndexEntry = {
@@ -34,7 +34,7 @@ export function buildIndex(model: Model): ModelIndex {
 
   add({ id: model.project.id, kind: "project", parentId: undefined, path: "project", name: model.project.name });
   for (const coll of Object.keys(COLLECTIONS) as CollectionName[]) {
-    model[coll].forEach((obj, i) => {
+    collectionOf(model, coll).forEach((obj, i) => {
       const path = `${coll}[${i}]`;
       add({ id: obj.id, kind: COLLECTIONS[coll], parentId: refId(obj.owner), path, name: obj.name ?? obj.id });
     });
@@ -75,7 +75,9 @@ export type RefRole =
   | "anchorData"
   | "anchorAttribute"
   | "guardRule"
-  | "effectEvent";
+  | "effectEvent"
+  /** A criterion and the objects it is about (M4.2). */
+  | "verifies";
 
 export type RefSite = {
   /** The object (or nested element) holding the reference. */
@@ -119,6 +121,10 @@ export function collectRefs(model: Model): RefSite[] {
     push(c.id, `contracts[${i}].owner`, c.owner, "owner", ["module"]);
     c.accepts?.forEach((r, j) => push(c.id, `contracts[${i}].accepts[${j}]`, r, "contractAccepts", ["event"]));
     c.publishes?.forEach((r, j) => push(c.id, `contracts[${i}].publishes[${j}]`, r, "contractPublishes", ["event"]));
+  });
+  (model.criteria ?? []).forEach((c, i) => {
+    push(c.id, `criteria[${i}].owner`, c.owner, "owner", ["module"]);
+    c.verifies.forEach((r, j) => push(c.id, `criteria[${i}].verifies[${j}]`, r, "verifies", ["capability", "rule", "contract", "event", "behavior", "transition", "data", "module"]));
   });
   model.behaviors.forEach((b, i) => {
     const p = `behaviors[${i}]`;

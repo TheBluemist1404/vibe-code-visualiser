@@ -65,6 +65,51 @@ post-merge rewrite and no inference.
   digest of its full text), every emitted list is bounded, and the serialized report is fitted to
   512 KiB by halving the longest lists, or refused with `REPORT_TOO_LARGE`.
 
+## M4.2 decisions
+
+- **Criteria are intent; mappings are evidence.** An acceptance criterion is an IR object in an
+  optional `criteria` collection, changed only by `createCriterion` / `reviseCriterion` (a typed
+  proposal and a separate approval, as in M3). It has an ID, an observable statement, refs to
+  what it is about (`verifies`) and a `required`/`optional` verification policy. Changing the
+  statement, the refs or the policy is a model change. Which test cases check a criterion is not
+  in the model: it is a `tests` binding claim on the criterion's ID that names one test case
+  (file + full title). Reasserting it after a rename or move is routine binding maintenance that
+  needs no approval and does not move `.vcv/HEAD`.
+- **No duplicate truth.** We reuse the existing claim store, locator grammar (`#test:Suite > case`),
+  fingerprints and `verifyBinding` instead of adding a second mapping file. One claim per
+  (criterion, test case) pair, so the relation is many-to-many: a test can check several criteria
+  and a criterion can need several tests.
+- **A criterion only takes test-case claims.** `recordBinding` refuses any other relation or
+  selector on a criterion (`INVALID_CLAIM`). New test names are bounded (1000 characters).
+- **The four hard cases are reported, not guessed.** No mapping gives `NO_MAPPING`. A renamed,
+  moved or removed test gives `TEST_MISSING`. A duplicated title gives `TEST_AMBIGUOUS`. An edited
+  test body gives `TEST_CHANGED` (comment-only edits do not, since the selector fingerprint is
+  token-based). A revised criterion gives `CRITERION_CHANGED` on every mapping until it is
+  reasserted, because a mapping claimed against the old statement may no longer hold.
+- **An unreadable claim store is `unknown`, never `none`.** Counts of unmapped criteria then stay 0
+  and `mappingsAvailable` is false.
+- **The absent collection keeps digests stable.** `criteria` has no schema default, so a model
+  with no criteria has no `criteria` key, and every revision ID written before M4.2 is unchanged.
+- **Runner identities are deferred to M4.3.** A JUnit `testcase` (`classname`, `name`) maps onto
+  the claim's file and title. M4.2 stores no runner-specific ID.
+- **Read surface.** `criteriaEvidence` / `vcv criteria` is one observation over the store, the
+  claim files and the bytes of every mapped test file (`STATE_CHANGED` otherwise). It is bounded,
+  deterministic and redacted, and it is not a test result.
+
+### Review round 1 (PR #24)
+
+- **Unreadable claim files are never attributed by name.** Binding IDs are arbitrary, so an
+  unreadable file may be about any criterion. It is listed in `invalidClaims`, and every
+  criterion's `assessment` becomes `incomplete`. `none` becomes `unknown`, and
+  `requiredNotResolved` counts every required criterion that is not both resolved and complete.
+  A readable mapping that verifies as `invalid` is reported too (`MAPPING_INVALID`).
+- **Every nested list is bounded, plus a byte budget.** `alsoMapsTo` and the per-test criteria
+  lists are capped with totals. Per-criterion mappings and problems carry totals and truncation
+  flags. The serialized report is fitted to 512 KiB by halving the longest list, or refused with
+  `REPORT_TOO_LARGE`, as for reconciliation.
+- **`verifies` is a query filter.** `getContext` accepts the relation it returns. A compile-time
+  check now keeps the accepted relations equal to every relation the snapshot can emit.
+
 ## Consequences
 
 - A code-first PR that edits bound code shows stale claims and the exact declarations, but VCV

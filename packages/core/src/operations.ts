@@ -26,6 +26,20 @@ export const operationSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("createCapability"), capability: schemas.capability }).strict(),
   z.object({ type: z.literal("setRuleStatement"), ruleId: id, statement: z.string().min(1) }).strict(),
   z.object({ type: z.literal("setDescription"), objectId: id, description: z.string().min(1) }).strict(),
+  // M4.2: approved acceptance criteria. Creating one, or changing what it says, what it is about
+  // or whether its evidence is required, is a model change like any other (proposal + approval).
+  // Renaming uses renameObject, a description setDescription, removal removeObject.
+  z.object({ type: z.literal("createCriterion"), criterion: schemas.criterion }).strict(),
+  z
+    .object({
+      type: z.literal("reviseCriterion"),
+      criterionId: id,
+      statement: z.string().min(1).max(2000).optional(),
+      verifies: z.array(id).min(1).max(20).optional(),
+      verification: z.enum(["required", "optional"]).optional(),
+    })
+    .strict()
+    .refine((o) => o.statement !== undefined || o.verifies !== undefined || o.verification !== undefined, { message: "reviseCriterion needs statement, verifies or verification" }),
   z.object({ type: z.literal("approveDraft") }).strict(),
 ]);
 
@@ -176,6 +190,17 @@ function applyOne(m: Model, op: ModelOperation): void {
       else (findRecord(m, op.objectId) as { description?: string }).description = op.description;
       return;
     }
+    case "createCriterion":
+      fresh(op.criterion.id);
+      (m.criteria ??= []).push(op.criterion);
+      return;
+    case "reviseCriterion": {
+      const c = (m.criteria ?? []).find((x) => x.id === op.criterionId) ?? fail("TARGET_MISSING", `criterion "${op.criterionId}" not found`);
+      if (op.statement !== undefined) c.statement = op.statement;
+      if (op.verifies !== undefined) c.verifies = [...op.verifies];
+      if (op.verification !== undefined) c.verification = op.verification;
+      return;
+    }
     case "approveDraft":
       if (m.project.status === "approved") fail("ALREADY_APPROVED", "snapshot is already approved");
       m.project.status = "approved";
@@ -229,21 +254,24 @@ function removeObject(m: Model, targetId: Id): void {
       return;
     }
     default: {
-      const coll = collectionOf(entry.kind);
-      (m[coll] as { id: Id }[]) = (m[coll] as { id: Id }[]).filter((o) => o.id !== targetId);
+      const coll = collectionFor(entry.kind);
+      const rest = ((m[coll] ?? []) as { id: Id }[]).filter((o) => o.id !== targetId);
+      // An emptied optional collection disappears again, so the canonical form matches a model that never had it.
+      if (coll === "criteria" && rest.length === 0) delete m.criteria;
+      else (m[coll] as { id: Id }[]) = rest;
     }
   }
 }
 
 const isNested = (k: string) => k === "state" || k === "transition" || k === "attribute";
 
-function collectionOf(kind: string): CollectionName {
+function collectionFor(kind: string): CollectionName {
   return (Object.keys(COLLECTIONS) as CollectionName[]).find((c) => COLLECTIONS[c] === kind)!;
 }
 
 function findRecord(m: Model, objectId: Id): { name?: string } {
   for (const c of Object.keys(COLLECTIONS) as CollectionName[]) {
-    const hit = (m[c] as { id: Id; name?: string }[]).find((o) => o.id === objectId);
+    const hit = ((m[c] ?? []) as { id: Id; name?: string }[]).find((o) => o.id === objectId);
     if (hit) return hit;
   }
   for (const d of m.data) for (const a of d.attributes) if (a.id === objectId) return a;

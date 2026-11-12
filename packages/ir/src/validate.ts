@@ -90,6 +90,16 @@ export function validateModel(model: Model): Diagnostic[] {
     check(c.publishes, "publishes");
   });
 
+  // Criteria (M4.2): each object listed once.
+  (model.criteria ?? []).forEach((c, i) => {
+    const seen = new Set<Id>();
+    c.verifies.forEach((r, j) => {
+      const t = refId(r);
+      if (t && seen.has(t)) warn("DUPLICATE_VERIFIES", `criteria[${i}].verifies[${j}]`, `criterion "${c.id}" lists "${t}" more than once`);
+      if (t) seen.add(t);
+    });
+  });
+
   // Behaviors.
   const rules = new Map(model.rules.map((r) => [r.id, r]));
   const attrType = new Map(model.data.flatMap((d) => d.attributes.map((a) => [a.id, a.type] as const)));

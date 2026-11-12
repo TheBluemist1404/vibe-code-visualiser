@@ -55,12 +55,15 @@ export type Edge = {
 
 // ---- Requests --------------------------------------------------------------------------
 
-const KINDS = ["actor", "module", "capability", "data", "attribute", "rule", "event", "contract", "behavior", "state", "transition"] as const;
+const KINDS = ["actor", "module", "capability", "data", "attribute", "rule", "event", "contract", "behavior", "criterion", "state", "transition"] as const;
 const RELATIONS = [
   "owner", "dependsOn", "consumes", "initiator", "attributeRef", "permissionActor", "permissionCapability",
   "contractAccepts", "contractPublishes", "realizes", "initialState", "fromState", "toState", "triggerEvent",
-  "anchorData", "anchorAttribute", "guardRule", "effectEvent", "contains",
+  "anchorData", "anchorAttribute", "guardRule", "effectEvent", "contains", "verifies",
 ] as const satisfies readonly Relation[];
+// Every relation the snapshot can emit is also a valid filter (a missing one is a compile error).
+const _everyRelation: readonly (typeof RELATIONS)[number][] = [] as Relation[];
+void _everyRelation;
 
 const revision = { expectedRevision: z.string().min(1).optional() };
 const id = z.string().min(1).max(256);

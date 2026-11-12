@@ -105,6 +105,24 @@ export type Behavior = Base<"behavior"> & {
   transitions: Transition[];
 };
 
+/** How a criterion must be verified before merge (M4.2). Changing it is a model change. */
+export const VERIFICATION_POLICIES = ["required", "optional"] as const;
+export type VerificationPolicy = (typeof VERIFICATION_POLICIES)[number];
+
+/**
+ * An approved acceptance criterion (M4.2): one observable expected behaviour or invariant, the
+ * model objects it is about, and whether evidence for it is required. Intent, like every IR
+ * object: it changes only through a typed proposal and approval. Which test cases check it is
+ * not stored here; that is an agent-maintained `tests` binding claim on the criterion's ID.
+ */
+export type Criterion = Base<"criterion"> & {
+  /** The observable expected behaviour or invariant, in plain words. */
+  statement: string;
+  /** The objects this criterion is about (capabilities, rules, contracts, events, behaviours…). */
+  verifies: Ref[];
+  verification: VerificationPolicy;
+};
+
 export type Model = {
   schemaVersion: string;
   project: Project;
@@ -116,6 +134,11 @@ export type Model = {
   events: Event[];
   contracts: Contract[];
   behaviors: Behavior[];
+  /**
+   * Optional and absent when empty, so every model written before M4.2 keeps exactly the same
+   * canonical form (and branch-safe revision digest).
+   */
+  criteria?: Criterion[];
 };
 
 /** Every kind that can be the target of a reference, including nested elements. */
@@ -130,6 +153,7 @@ export type Kind =
   | "event"
   | "contract"
   | "behavior"
+  | "criterion"
   | "state"
   | "transition";
 
@@ -143,11 +167,15 @@ export const COLLECTIONS = {
   events: "event",
   contracts: "contract",
   behaviors: "behavior",
+  criteria: "criterion",
 } as const satisfies Record<string, Kind>;
 
 export type CollectionName = keyof typeof COLLECTIONS;
 
-export type TopLevelObject = Model[CollectionName][number];
+export type TopLevelObject = NonNullable<Model[CollectionName]>[number];
+
+/** A top-level collection of a model; `criteria` may be absent. */
+export const collectionOf = <C extends CollectionName>(model: Model, coll: C): NonNullable<Model[C]> => (model[coll] ?? []) as NonNullable<Model[C]>;
 
 export type Severity = "error" | "warning";
 

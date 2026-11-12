@@ -595,6 +595,7 @@ function items(m: Model): Map<Id, Item> {
     put("data", d, ["attributes"]);
     for (const a of d.attributes) put("attribute", a);
   }
+  for (const x of m.criteria ?? []) put("criterion", x);
   for (const b of m.behaviors) {
     put("behavior", b, ["states", "transitions"]);
     for (const s of b.states) put("state", s);
@@ -751,6 +752,12 @@ export function describeOperation(op: ProposedModelChange["operations"][number])
       return `change the statement of rule ${op.ruleId}`;
     case "setDescription":
       return `change the description of ${op.objectId}`;
+    case "createCriterion":
+      return `create ${op.criterion.verification} criterion ${op.criterion.id} on ${op.criterion.verifies.map(String).join(", ")}`;
+    case "reviseCriterion": {
+      const what = [op.statement !== undefined && "its statement", op.verifies !== undefined && `what it verifies (${op.verifies.join(", ")})`, op.verification !== undefined && `its verification policy (${op.verification})`].filter(Boolean);
+      return `change ${what.join(", ")} of criterion ${op.criterionId}`;
+    }
     case "approveDraft":
       return "mark the model snapshot approved (draft → approved)";
   }
