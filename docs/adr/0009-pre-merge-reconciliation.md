@@ -248,6 +248,22 @@ post-merge rewrite and no inference.
   exists. A reference that could not be checked makes the observation `not-checked`, never
   `verified`. Files are read nonblocking and bounded.
 
+### Review round 2 (PR #26)
+
+- **Git is refused, not run unprotected.** The driver keys are enumerated with bounded output and a
+  bounded key count. Only `git config` exiting 1 with no output means "no drivers". Any other
+  outcome (an unreadable or oversized config, too many keys, a killed command) throws
+  `GitRefusedError` before any content-reading Git command runs. Read surfaces report it as
+  `SOURCE_IDENTITY_UNAVAILABLE`, and the CLI exits 2.
+- **A failed Git read is not a clean tree.** A status Git could not give marks the checkout dirty,
+  and a file whose state Git could not give is `modified`, never `clean` or `untracked`.
+- **The store snapshot is complete or there is no decision.** The `.vcv/` walk is bounded by
+  entries, depth and bytes. An unreadable entry or any exhausted bound makes the gate answer
+  `SOURCE_IDENTITY_UNAVAILABLE` instead of deciding on a store it did not fully hash. A host may
+  pass lower bounds (tests do), never higher ones.
+- **The tests start after the identity.** In the example workflow, `candidate-tests` needs
+  `identity`.
+
 ## Consequences
 
 - A code-first PR that edits bound code shows stale claims and the exact declarations, but VCV

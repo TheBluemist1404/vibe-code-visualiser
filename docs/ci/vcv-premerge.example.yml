@@ -8,7 +8,8 @@
 #   identity         never executes PR code. The trusted VCV reads the PR head's identity (commit,
 #                    uncommitted and bound bytes, model revision, claims) BEFORE any test runs, and
 #                    hands the digest over as a job output, which no other job can write.
-#   candidate-tests  runs the PR's tests with the project's ordinary runner and its JUnit reporter.
+#   candidate-tests  starts after identity (needs: identity) and runs the PR's tests with the
+#                    project's ordinary runner and its JUnit reporter.
 #                    This executes PR code, so the job gets no token permissions, no secrets, no
 #                    caches, and hands over exactly one file: the report.
 #   vcv-gate         never executes PR code. It installs VCV from a commit pinned HERE (this file
@@ -70,6 +71,9 @@ jobs:
           echo "before=$before" >> "$GITHUB_OUTPUT"
 
   candidate-tests:
+    # Starts only after the identity job has read the PR head: the identity is taken before any of
+    # the PR's code runs, and a failed identity read runs no tests.
+    needs: identity
     runs-on: ubuntu-latest
     permissions: {}
     steps:

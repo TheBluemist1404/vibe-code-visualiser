@@ -53,8 +53,9 @@ the supported recipe has three jobs. See
 1. **`identity`** never executes PR code. The trusted VCV reads the PR head's identity before any
    test runs: its commit, uncommitted and bound bytes, model revision and claims (`vcv tests
    identity`). It hands the digest over as a job output, which no other job can write.
-2. **`candidate-tests`** checks out the PR head and runs the project's ordinary runner with its
-   JUnit reporter. For Course Desk that is `npx vitest run --reporter=junit --outputFile=…`. This job
+2. **`candidate-tests`** starts only after `identity` has finished (`needs: identity`), so no PR
+   code runs before the identity is read. It checks out the PR head and runs the project's
+   ordinary runner with its JUnit reporter. For Course Desk that is `npx vitest run --reporter=junit --outputFile=…`. This job
    executes PR code, so it gets no token permissions and no secrets. It uses no cache: under
    `pull_request_target`, a cache it wrote would belong to the base. It hands over exactly one file,
    the report.
@@ -84,6 +85,10 @@ repository's settings, under Rules (or Branches).
 - reads attributes from the empty tree, so the checkout's `.gitattributes` cannot pick a filter;
 - empties every configured filter, diff and merge driver command;
 - uses no pager and no external diff.
+
+If VCV cannot list the driver keys exactly (an unreadable or oversized config, more than 1,000 keys),
+it runs no Git command on that checkout. The gate answers `SOURCE_IDENTITY_UNAVAILABLE` (exit 2), and
+a failed Git read is never taken as a clean tree.
 
 A candidate whose `.git/config` names commands, for example a checkout an agent prepared, therefore
 runs none of them in the verifier's process.
@@ -238,7 +243,9 @@ same candidate gives the same JSON.
 The gate reads everything it depends on first: the candidate's identity, every file in `.vcv/`
 (attestations and trust list included), the candidate's copy of the policy file, and every cited
 file. It reads them again after the history check, again after the test results, and once more
-before answering. If anything moved, it answers `STATE_CHANGED` (exit 2) instead of a decision. The
+before answering. If anything moved, it answers `STATE_CHANGED` (exit 2) instead of a decision. If
+the store cannot be read whole (an unreadable entry, more than 50,000 entries, 32 levels or 256 MiB),
+it answers `SOURCE_IDENTITY_UNAVAILABLE` (exit 2): it never decides on a partly observed store. The
 policy is applied to every finding before any list in the report is cut, so adding lower-severity
 findings can never push a blocking one out of view.
 

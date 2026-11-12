@@ -267,6 +267,51 @@ test("Git reads in the candidate run none of its configured commands (fsmonitor,
   assert.deepEqual(readdirSync(marks), [], "no candidate-configured command ran");
 });
 
+test("a driver configuration VCV cannot enumerate exactly refuses Git instead of running it unprotected", () => {
+  for (const pad of ["many keys", "oversized output"] as const) {
+    const { repo, base } = codeFirst();
+    const marks = mkdtempSync(join(tmpdir(), "vcv-gate-marks-"));
+    git(repo, "config", "filter.evil.clean", `sh -c 'touch ${join(marks, "filter")}; cat'`);
+    git(repo, "config", "filter.evil.smudge", `sh -c 'touch ${join(marks, "smudge")}; cat'`);
+    writeFileSync(join(repo, ".git/info/attributes"), "* filter=evil diff=evil\n");
+    // Padding: more keys than are overridden, or more listing bytes than are read.
+    const lines: string[] = [];
+    if (pad === "many keys") for (let i = 0; i < 1500; i++) lines.push(`[filter "pad${i}"]\n\tclean = cat`);
+    else for (let i = 0; i < 300; i++) lines.push(`[filter "${"p".repeat(1000)}${i}"]\n\tclean = cat`);
+    appendFileSync(join(repo, ".git/config"), `${lines.join("\n")}\n`);
+    edit(repo, SERVICE, "Enrollment rules; every decision", "Enrollment rules: every decision"); // stat-dirty: status would clean-filter it
+    const id = testIdentity(repo);
+    assert.ok(!id.ok && id.error.code === "SOURCE_IDENTITY_UNAVAILABLE", `${pad}: ${JSON.stringify(id).slice(0, 400)}`);
+    const r = preMergeGate(repo, { base, junit: [{ report: PASS, ...JUNIT }] }, host);
+    assert.ok(!r.ok && r.error.code === "SOURCE_IDENTITY_UNAVAILABLE", `${pad}: ${JSON.stringify(r).slice(0, 400)}`);
+    assert.deepEqual(readdirSync(marks), [], `${pad}: no candidate-configured filter ran`);
+  }
+});
+
+test("a store the snapshot cannot hash whole is never decided on, even when an approval is tampered mid-gate", () => {
+  const { repo, trusted } = setup();
+  for (let i = 0; i < 300; i++) mkdirSync(join(repo, ".vcv/aaa", `d${String(i).padStart(3, "0")}`), { recursive: true });
+  const before = testIdentity(repo);
+  assert.ok(before.ok);
+  const req = { base: trusted, junit: [{ report: PASS, ...JUNIT, before: before.data.identityDigest }] };
+  // With the full budget, the padding is simply hashed.
+  const full = preMergeGate(repo, req, host);
+  assert.ok(full.ok, JSON.stringify(full).slice(0, 400));
+  const dir = join(repo, ".vcv/approvals");
+  const att = join(dir, readdirSync(dir).find((f) => f.endsWith(".json"))!);
+  const valid = readFileSync(att, "utf8");
+  for (let k = 0; k <= 12; k++) {
+    let n = 0;
+    const r = preMergeGate(repo, req, host, {
+      afterRead: () => {
+        if (++n === k) writeFileSync(att, valid.replace(/"signedAt": "[^"]+"/, '"signedAt": "2000-01-01T00:00:00.000Z"'));
+      },
+    }, { storeBudget: { entries: 200 } });
+    assert.ok(!r.ok && r.error.code === "SOURCE_IDENTITY_UNAVAILABLE", `tamper at read ${k}: ${JSON.stringify(r.ok ? r.data.decision : r.error)}`);
+    writeFileSync(att, valid);
+  }
+});
+
 test("approvals are rechecked through the final answer: a post-reconciliation tamper is STATE_CHANGED", () => {
   const { repo, trusted } = setup();
   const dir = join(repo, ".vcv/approvals");

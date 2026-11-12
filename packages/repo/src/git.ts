@@ -3,8 +3,8 @@
 //
 // Only read commands are run, with GIT_OPTIONAL_LOCKS=0 so `git status` does not refresh and
 // rewrite the index. VCV never fetches, pulls, checks out or merges.
-import { execFileSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { execFileSync, spawnSync } from "node:child_process";
+import { existsSync, statSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 
 export type GitOperation = "merge" | "rebase" | "cherry-pick" | "revert";
@@ -64,31 +64,71 @@ function baseEnv(): NodeJS.ProcessEnv {
 }
 
 /**
+ * Thrown when Git cannot be run safely on this checkout: the configured filter and diff/merge
+ * drivers could not be enumerated exactly (unreadable or oversized config, too many driver keys,
+ * a failed or killed `git config`). Nothing that reads content runs then (M4.4 review round 2):
+ * a missing override would let the checkout's own driver commands execute. Callers do not turn it
+ * into "no changes" or "absent"; read surfaces report it as SOURCE_IDENTITY_UNAVAILABLE.
+ */
+export class GitRefusedError extends Error {
+  readonly code = "GIT_REFUSED" as const;
+  constructor(message: string) {
+    super(message);
+    this.name = "GitRefusedError";
+  }
+}
+
+/** Bounds on the driver enumeration; past either, Git is refused rather than run without overrides. */
+export const GIT_DRIVER_LIMITS = { keys: 1000, outputBytes: 256 * 1024 } as const;
+
+/**
  * Per-repository overrides that empty every configured filter and diff/merge driver command.
  * $GIT_DIR/info/attributes can still select a driver (GIT_ATTR_SOURCE replaces only the in-tree
  * .gitattributes), and an empty command means "no driver". Reading config runs nothing.
+ *
+ * Fails closed: only `git config` exiting 1 with no output means "no driver keys". Every other
+ * outcome other than a clean exit 0 within the bounds throws GitRefusedError.
  */
 function driverOptions(cwd: string): string[] {
   // Read every time (config can change between reads in a long-lived process such as the MCP server).
+  const r = spawnSync("git", ["-C", cwd, ...SAFE_OPTIONS, "config", "--name-only", "--get-regexp", "^(filter|diff|merge)\\..+\\.(clean|smudge|process|command|textconv|driver)$"], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+    env: safeEnv(cwd),
+    maxBuffer: GIT_DRIVER_LIMITS.outputBytes,
+  });
+  if (r.error || r.signal) throw new GitRefusedError(`the checkout's Git driver configuration could not be read within ${GIT_DRIVER_LIMITS.outputBytes} bytes (${r.error?.message ?? r.signal})`);
+  if (r.status === 1 && r.stdout === "") return [];
+  if (r.status !== 0) throw new GitRefusedError(`the checkout's Git driver configuration could not be read (git config exited ${r.status})`);
+  const keys = new Set(r.stdout.split("\n").filter(Boolean));
+  if (keys.size === 0) throw new GitRefusedError("the checkout's Git driver configuration could not be read (no keys in a successful listing)");
+  if (keys.size > GIT_DRIVER_LIMITS.keys) throw new GitRefusedError(`the checkout configures more than ${GIT_DRIVER_LIMITS.keys} Git filter or diff/merge driver keys`);
   const out: string[] = [];
-  try {
-    const keys = execFileSync("git", ["-C", cwd, ...SAFE_OPTIONS, "config", "--name-only", "--get-regexp", "^(filter|diff|merge)\\..+\\.(clean|smudge|process|command|textconv|driver)$"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], env: safeEnv(cwd) });
-    for (const k of new Set(keys.split("\n").filter(Boolean))) {
-      out.push("-c", `${k}=`);
-      if (k.startsWith("filter.")) out.push("-c", `${k.slice(0, k.lastIndexOf("."))}.required=false`);
-    }
-  } catch {
-    // No such keys (exit 1), or no repository: nothing to override.
+  for (const k of keys) {
+    out.push("-c", `${k}=`);
+    if (k.startsWith("filter.")) out.push("-c", `${k.slice(0, k.lastIndexOf("."))}.required=false`);
   }
   return out;
 }
 
-function git(cwd: string, args: string[]): string | null {
+const isDirectory = (p: string) => {
   try {
-    return execFileSync("git", ["-C", cwd, ...SAFE_OPTIONS, ...driverOptions(cwd), ...args], {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+function git(cwd: string, args: string[]): string | null {
+  // Not a directory (absent, or a file): Git cannot run there at all, so nothing can execute.
+  if (!isDirectory(cwd)) return null;
+  const drivers = driverOptions(cwd); // throws, outside the catch below, when Git is refused
+  try {
+    return execFileSync("git", ["-C", cwd, ...SAFE_OPTIONS, ...drivers, ...args], {
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
       env: safeEnv(cwd),
+      maxBuffer: 64 * 1024 * 1024,
     });
   } catch {
     return null;
@@ -107,15 +147,16 @@ export function findWorkTreeRoot(path: string): string | null {
 export function observeGit(root: string, storeRelPath = ".vcv"): GitObservation {
   const commit = git(root, ["rev-parse", "--verify", "-q", "HEAD"])?.trim() || null;
   const symbolic = git(root, ["symbolic-ref", "-q", "--short", "HEAD"])?.trim() || null;
-  const status = git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]) ?? "";
-  const entries = parsePorcelainZ(status);
+  const status = git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
+  // A status Git could not give is not a clean tree.
+  const entries = status === null ? [] : parsePorcelainZ(status);
   const prefix = storeRelPath.replace(/\/+$/, "") + "/";
   return {
     root,
     commit,
     branch: symbolic,
     detached: symbolic === null,
-    dirty: entries.length > 0,
+    dirty: status === null || entries.length > 0,
     storeChanges: entries.filter((p) => p.startsWith(prefix)).sort(),
     operation: gitOperation(root),
   };
@@ -146,8 +187,10 @@ export function headCommit(root: string): string | null {
 export function fileWorkingState(root: string, rel: string): "clean" | "modified" | "untracked" | "no-git" {
   if (!findWorkTreeRoot(root)) return "no-git";
   const tracked = git(root, ["ls-files", "-z", "--", rel]);
-  if (!tracked) return "untracked";
-  const status = git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", rel]) ?? "";
+  // A failed Git read is never reported as clean (or as merely untracked).
+  if (tracked === null) return "modified";
+  if (tracked === "") return "untracked";
+  const status = git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", rel]);
   return status === "" ? "clean" : "modified";
 }
 
@@ -178,8 +221,10 @@ export function fileAtCommit(root: string, commit: string, rel: string, max: num
   if (!/^[0-9a-f]{40,64}$/.test(commit) || rel.startsWith("-") || rel.includes("\0")) return null;
   const size = git(root, ["cat-file", "-s", `${commit}:${rel}`]);
   if (size === null || Number(size.trim()) > max) return null;
+  if (!isDirectory(root)) return null;
+  const drivers = driverOptions(root);
   try {
-    return execFileSync("git", ["-C", root, ...SAFE_OPTIONS, ...driverOptions(root), "cat-file", "blob", `${commit}:${rel}`], {
+    return execFileSync("git", ["-C", root, ...SAFE_OPTIONS, ...drivers, "cat-file", "blob", `${commit}:${rel}`], {
       stdio: ["ignore", "pipe", "ignore"],
       maxBuffer: max + 1,
       env: safeEnv(root),

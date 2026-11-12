@@ -61,9 +61,26 @@ export const GATE_LIMITS = {
   /** Criteria evaluated per call when the full criteria report had to be cut. */
   criteriaBatch: 25,
   bytes: 512 * 1024,
-  /** Entries of the .vcv/ store hashed into the snapshot. */
-  storeFiles: 50_000,
+  /**
+   * The .vcv/ store is hashed whole into the snapshot (entries, nesting depth, total file bytes).
+   * Past any of them the gate refuses (SOURCE_IDENTITY_UNAVAILABLE) rather than decide on a store
+   * it did not fully observe.
+   */
+  storeEntries: 50_000,
+  storeDepth: 32,
+  storeBytes: 256 * 1024 * 1024,
 } as const;
+
+/** The store walk's bounds; GATE_LIMITS by default, lower ones only make the gate refuse sooner. */
+export type StoreBudget = { entries: number; depth: number; bytes: number };
+const DEFAULT_STORE_BUDGET: StoreBudget = { entries: GATE_LIMITS.storeEntries, depth: GATE_LIMITS.storeDepth, bytes: GATE_LIMITS.storeBytes };
+/** Options for tests and hosts; each budget is clamped to GATE_LIMITS (a host can only lower it). */
+export type GateOptions = { storeBudget?: Partial<StoreBudget> };
+const budgetOf = (o: GateOptions): StoreBudget => ({
+  entries: Math.min(o.storeBudget?.entries ?? Infinity, DEFAULT_STORE_BUDGET.entries),
+  depth: Math.min(o.storeBudget?.depth ?? Infinity, DEFAULT_STORE_BUDGET.depth),
+  bytes: Math.min(o.storeBudget?.bytes ?? Infinity, DEFAULT_STORE_BUDGET.bytes),
+});
 
 // ---- policy ------------------------------------------------------------------------------------
 
@@ -265,7 +282,8 @@ export type GateRequest = {
 const cut = (s: string, n: number = GATE_LIMITS.messageChars) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 /** Decide whether the candidate containing `path` may merge into `base`. Read-only; runs nothing. */
-export function preMergeGate(path: string, req: GateRequest, host: TestRunHost, hooks: ProposalHooks = {}): ProposalResult<GateReport> {
+export function preMergeGate(path: string, req: GateRequest, host: TestRunHost, hooks: ProposalHooks = {}, options: GateOptions = {}): ProposalResult<GateReport> {
+  const budget = budgetOf(options);
   const bad = (message: string): ProposalResult<GateReport> => ({ ok: false, error: { code: "INVALID_REQUEST", message } });
   if (typeof req?.base !== "string" || !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(req.base)) return bad("base must be the protected base's full commit ID, as the host supplies it");
   if (req.policy !== undefined && req.policyAtBase !== undefined) return bad("give either policy or policyAtBase, not both");
@@ -286,7 +304,7 @@ export function preMergeGate(path: string, req: GateRequest, host: TestRunHost, 
   //    observation cites), before anything else reads them. Checked again after every phase and
   //    before answering: the parts of the answer describe one state.
   const cited = citedPaths(observations, req.policyAtBase);
-  const first = snapshotNow(path, cited, hooks);
+  const first = snapshotNow(path, cited, hooks, budget);
   if (!first.ok) {
     // A candidate whose model cannot be loaded (hand-edited revision, conflict, no project) is a
     // decision, not a setup error: it blocks, with the reason.
@@ -296,8 +314,9 @@ export function preMergeGate(path: string, req: GateRequest, host: TestRunHost, 
   const root = first.data.root;
   if (!resolveCommit(root, req.base)) return { ok: false, error: { code: "UNKNOWN_COMMIT", message: `${req.base} is not a commit in this repository (fetch the base first)` } };
   const moved = (phase: string): ProposalResult<GateReport> | null => {
-    const now = snapshotNow(path, cited, hooks);
+    const now = snapshotNow(path, cited, hooks, budget);
     if (now.ok && now.data.key === first.data.key) return null;
+    if (!now.ok && now.error.code === "SOURCE_IDENTITY_UNAVAILABLE") return now;
     return { ok: false, error: { code: "STATE_CHANGED", message: `the candidate changed while the gate was reading it (${phase}: source, claims, model, approvals or cited files); run the gate again` } };
   };
 
@@ -341,7 +360,7 @@ export function preMergeGate(path: string, req: GateRequest, host: TestRunHost, 
     const report = decide(rec.data, allFindings!, crit.data, verified, pol, first.data.identity, baseContext);
     const bounded = fitBudget(redact(report, root));
     if (!bounded) return { ok: false, error: { code: "REPORT_TOO_LARGE", message: `the gate report exceeds ${GATE_LIMITS.bytes} bytes even with every list cut` } } as ProposalResult<GateReport>;
-    return finish(obs, hooks, bounded, { key: first.data.key, again: () => snapshotKey(obs, cited) });
+    return finish(obs, hooks, bounded, { key: first.data.key, again: () => snapshotKey(obs, cited, budget) ?? "incomplete" });
   });
 }
 
@@ -356,10 +375,19 @@ function citedPaths(observations: z.infer<typeof observationsSchema> | null, pol
   return [...out].sort();
 }
 
-function snapshotNow(path: string, cited: string[], hooks: ProposalHooks): ProposalResult<{ key: string; identity: string; root: string }> {
+function snapshotNow(path: string, cited: string[], hooks: ProposalHooks, budget: StoreBudget): ProposalResult<{ key: string; identity: string; root: string }> {
   return observed(path, hooks, (obs) => {
-    const key = snapshotKey(obs, cited);
-    return finish(obs, hooks, { key, identity: identityDigest(candidateIdentityOf(obs).candidate), root: obs.status.root }, { key, again: () => snapshotKey(obs, cited) });
+    const key = snapshotKey(obs, cited, budget);
+    if (key === null) {
+      return {
+        ok: false,
+        error: {
+          code: "SOURCE_IDENTITY_UNAVAILABLE",
+          message: `the .vcv/ store cannot be observed completely (an unreadable entry, or more than ${budget.entries} entries, ${budget.depth} levels or ${budget.bytes} bytes); the decision depends on all of it, so the gate does not decide`,
+        },
+      };
+    }
+    return finish(obs, hooks, { key, identity: identityDigest(candidateIdentityOf(obs).candidate), root: obs.status.root }, { key, again: () => snapshotKey(obs, cited, budget) ?? "incomplete" });
   });
 }
 
@@ -368,55 +396,69 @@ function snapshotNow(path: string, cited: string[], hooks: ProposalHooks): Propo
  * bytes of every file in the .vcv/ store (revisions, change records, attestations, the trust list:
  * the integrity check's inputs) and of every cited path, ignored files included.
  */
-function snapshotKey(obs: Observation, cited: string[]): string {
-  return canonicalJson([identityDigest(candidateIdentityOf(obs).candidate), storeDigest(obs.status.storeDir), worktreeState(obs.status.root, cited).digest]);
+function snapshotKey(obs: Observation, cited: string[], budget: StoreBudget): string | null {
+  const store = storeDigest(obs.status.storeDir, budget);
+  if (store === null) return null;
+  return canonicalJson([identityDigest(candidateIdentityOf(obs).candidate), store, worktreeState(obs.status.root, cited).digest]);
 }
 
-/** sha256 over every entry under the store directory: path, type, and bytes (or link text). */
-function storeDigest(dir: string): string {
+/**
+ * sha256 over every entry under the store directory: path, type, and bytes (or link text). Null
+ * when the store cannot be observed completely (an unreadable entry, too many entries, too deep,
+ * too many bytes): the decision depends on every attestation and trust-list byte, so a partial
+ * walk would let an unobserved change through (M4.4 review round 2).
+ */
+function storeDigest(dir: string, budget: StoreBudget): string | null {
   const h = createHash("sha256");
-  let files = 0;
-  const walk = (abs: string, rel: string) => {
+  let entries = 0;
+  let bytes = 0;
+  const walk = (abs: string, rel: string, depth: number): boolean => {
+    if (depth > budget.depth) return false;
     let names: string[];
     try {
       names = readdirSync(abs).sort();
     } catch {
-      h.update(`unreadable-dir\0${rel}\0`);
-      return;
+      return false;
     }
     for (const n of names) {
       const a = join(abs, n);
       const r = rel ? `${rel}/${n}` : n;
-      if (++files > GATE_LIMITS.storeFiles) {
-        h.update(`too-many\0`);
-        return;
-      }
+      if (++entries > budget.entries) return false;
       let st;
       try {
         st = lstatSync(a);
       } catch {
-        h.update(`unreadable\0${r}\0`);
-        continue;
+        return false;
       }
-      if (st.isDirectory()) walk(a, r);
-      else if (st.isSymbolicLink()) h.update(`link\0${r}\0${safeReadlink(a)}\0`);
-      else if (st.isFile()) h.update(`file\0${r}\0${st.size}\0${fileSha(a)}\0`);
-      else h.update(`other\0${r}\0`);
+      if (st.isDirectory()) {
+        h.update(`dir\0${r}\0`);
+        if (!walk(a, r, depth + 1)) return false;
+      } else if (st.isSymbolicLink()) {
+        const target = safeReadlink(a);
+        if (target === null) return false;
+        h.update(`link\0${r}\0${target}\0`);
+      } else if (st.isFile()) {
+        bytes += st.size;
+        if (bytes > budget.bytes) return false;
+        const sha = fileSha(a, st.size);
+        if (sha === null) return false;
+        h.update(`file\0${r}\0${st.size}\0${sha}\0`);
+      } else h.update(`other\0${r}\0`);
     }
+    return true;
   };
-  walk(dir, "");
-  return h.digest("hex");
+  return walk(dir, "", 0) ? h.digest("hex") : null;
 }
-const safeReadlink = (a: string) => {
+const safeReadlink = (a: string): string | null => {
   try {
     return readlinkSync(a);
   } catch {
-    return "unreadable";
+    return null;
   }
 };
-const fileSha = (a: string) => {
-  const b = boundedRead(a, 64 * 1024 * 1024);
-  return b ? createHash("sha256").update(b).digest("hex") : "unreadable";
+const fileSha = (a: string, max: number): string | null => {
+  const b = boundedRead(a, max);
+  return b ? createHash("sha256").update(b).digest("hex") : null;
 };
 
 type BaseContext = { objects: Set<Id>; complete: boolean; problem: string | null };

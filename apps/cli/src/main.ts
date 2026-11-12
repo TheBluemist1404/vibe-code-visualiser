@@ -12,6 +12,7 @@ import { FileStore, ModelEngine, StoreError } from "../../../packages/core/src/i
 import { createQueryApi } from "../../../packages/query/src/index.ts";
 import {
   ApprovalError,
+  GitRefusedError,
   BindingError,
   addTrustedReviewer,
   checkIntegrity,
@@ -995,7 +996,7 @@ try {
   // Store problems (e.g. CONFLICTED or DIVERGED after a Git merge) and unreadable inputs are
   // reported, not thrown at the user.
   if (err instanceof InputError) console.error(`✗ INPUT: ${err.message}`);
-  else if (err instanceof StoreError || err instanceof BindingError || err instanceof ApprovalError) console.error(`✗ ${err.code}: ${err.message}`);
+  else if (err instanceof StoreError || err instanceof BindingError || err instanceof ApprovalError || err instanceof GitRefusedError) console.error(`✗ ${err.code}: ${err.message}`);
   else throw err;
   process.exitCode = 2;
 }
