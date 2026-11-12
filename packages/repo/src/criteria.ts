@@ -29,6 +29,9 @@ import { redact } from "./handoff.ts";
 import { failFinal, finish, moduleOf, observed, readClaims } from "./proposals.ts";
 import type { ProposalHooks, ProposalResult } from "./proposals.ts";
 import { worktreeState } from "./worktree.ts";
+import { caseKey } from "./junit.ts";
+import { candidateIdentityOf, identityDigest, isTrustedCapture, recordIdentityProblem, recordProblem, testRunRecordSchema } from "./testruns.ts";
+import type { CandidateIdentity, TestRunRecord } from "./testruns.ts";
 
 export const CRITERIA_LIMITS = {
   criteria: 200,
@@ -38,6 +41,7 @@ export const CRITERIA_LIMITS = {
   relatedCriteria: 20,
   tests: 500,
   invalidClaims: 50,
+  runs: 10,
   textChars: 1000,
   testNameChars: 300,
   /** The whole serialized report (JSON, 2-space indent). Lists are cut further, and flagged, to fit; past that, REPORT_TOO_LARGE. */
@@ -48,6 +52,10 @@ export const criteriaRequest = z
   .object({
     /** Only these criteria (all when absent). */
     ids: z.array(z.string().min(1).max(256)).min(1).max(CRITERIA_LIMITS.criteria).optional(),
+    /** M4.3: test-run records (captureTestRun) to evaluate the mappings against. */
+    runs: z.array(testRunRecordSchema).min(1).max(CRITERIA_LIMITS.runs).optional(),
+    /** M4.3: optional code coverage, supporting context only (never criterion coverage). */
+    coverage: z.object({ linesPct: z.number().min(0).max(100), source: z.string().min(1).max(200) }).strict().optional(),
   })
   .strict();
 export type CriteriaRequest = z.input<typeof criteriaRequest>;
@@ -73,7 +81,22 @@ export type MappingProblemCode =
    * Some claim files cannot be read, or the claim store cannot be read at all. Which criterion an
    * unreadable file is about is unknown, so every criterion's assessment is then incomplete.
    */
-  | "MAPPING_INVALID";
+  | "MAPPING_INVALID"
+  // ---- M4.3: results of the mapped test cases in the supplied runs -----------------------
+  /** A mapped test case failed (the exact case and message are given). */
+  | "TEST_FAILED"
+  /** A mapped test case ended with an error. */
+  | "TEST_ERRORED"
+  /** A mapped test case was skipped: it did not check anything. */
+  | "TEST_SKIPPED"
+  /** A mapped test case is in no fresh run (filtered out, renamed, or not part of the invocation). */
+  | "TEST_NOT_RUN"
+  /** The only results for a mapped test case come from runs of another candidate. */
+  | "RESULT_STALE"
+  /** A run reports the mapped test identity more than once. */
+  | "RESULT_AMBIGUOUS"
+  /** Some passing results come only from claimed runs (imported records, or agent captures); host evidence would need a capture here. */
+  | "RESULT_CLAIMED";
 
 export type TestIdentity = {
   path: string;
@@ -96,7 +119,26 @@ export type CriterionMapping = {
   /** Other criteria mapped to the same test case (many-to-many), at most CRITERIA_LIMITS.relatedCriteria. */
   alsoMapsTo: Id[];
   alsoMapsToTotal: number;
+  /** M4.3: this test case's result in the supplied runs; null when no runs were supplied or it is not a test mapping. */
+  result: MappingResult | null;
 };
+
+export type MappingResult = {
+  status: "passed" | "failed" | "error" | "skipped" | "not-run" | "ambiguous" | "stale";
+  /** Indexes into `runs` of the runs that reported this test case. */
+  runs: number[];
+  /** Effective provenance of the runs behind this status: host only for runs captured in this process for a trusted caller. */
+  observedBy: ("host" | "claimed")[];
+  message?: string;
+};
+
+/**
+ * M4.3, per criterion: passed (every mapped test case ran in a fresh run and passed, every mapping
+ * resolved, assessment complete); failed (a mapped case failed or errored); stale (results only from
+ * another candidate, or a mapping is stale); missing (no mapping, or a mapped case skipped, not run
+ * or ambiguous); unknown (the mappings could not all be read); unverified (no runs supplied).
+ */
+export type CriterionResult = "passed" | "failed" | "stale" | "missing" | "unknown" | "unverified";
 
 export type CriterionEvidence = {
   id: Id;
@@ -120,6 +162,32 @@ export type CriterionEvidence = {
   problems: { code: MappingProblemCode; message: string; bindingId?: string }[];
   problemsTotal: number;
   problemsTruncated: boolean;
+  result: CriterionResult;
+  /** Who observed the results behind a `passed` verdict: host only, or some only claimed. Null otherwise. */
+  resultObservedBy: "host" | "claimed" | null;
+};
+
+export type RunSummary = {
+  index: number;
+  /**
+   * Effective provenance: host only when this process captured the run itself for a caller holding
+   * `tests:observe` (captured-here). An imported record is a claim, whatever it declares.
+   */
+  observedBy: "host" | "claimed";
+  /** What the record says about itself. Never trusted on its own. */
+  declaredObservedBy: "host" | "agent";
+  admittedAs: "captured-here" | "imported";
+  principalId: string;
+  runner: { name: string; version?: string };
+  invocation: string;
+  report: { format: "junit"; sha256: string; bytes: number };
+  digest: string;
+  /** The run describes this candidate: same commit, uncommitted bytes, model revision and claims. */
+  fresh: boolean;
+  staleBecause: string[];
+  summary: { tests: number; passed: number; failed: number; errors: number; skipped: number };
+  /** The ordinary suite summary: no failures and no errors. Never a substitute for the per-criterion results. */
+  green: boolean;
 };
 
 export type CriteriaReport = {
@@ -154,12 +222,20 @@ export type CriteriaReport = {
   /** Every claim file that could not be read. Not attributed to a criterion: its content is what would say which. */
   invalidClaims: { items: { bindingId: string; file: string; problem: string }[]; total: number; truncated: boolean };
   budget: { limit: number; bytes: number; shrunk: boolean };
+  /** M4.3: the supplied runs (empty when none were). */
+  runs: RunSummary[];
+  /** The candidate the runs are compared with. */
+  candidate: CandidateIdentity & { identityDigest: string; problem: string | null };
+  results: Record<"required" | "optional", Record<CriterionResult, number>>;
+  coverage: { linesPct: number; source: string; note: string } | null;
+  /** Report-level observations (e.g. a green suite while a required criterion has no passing result). */
+  notes: { code: "SUITE_GREEN_REQUIRED_NOT_PASSED" | "COVERAGE_IS_NOT_CRITERION_COVERAGE" | "NO_FRESH_RUN"; message: string }[];
   meaning: string;
   implementationChecked: false;
 };
 
 const MEANING =
-  "A mapping is an agent's claim that a test case checks a criterion. It is not a test result (runner evidence is M4.3) and not evidence that the test is sufficient. Changing a criterion or its verification policy is a model change (proposal + approval); remapping a renamed test is not.";
+  "A mapping is an agent's claim that a test case checks a criterion; a result says whether that test case ran and passed in a run of this exact candidate. Neither shows that the test is sufficient. Changing a criterion or its verification policy is a model change (proposal + approval); remapping a renamed test is not.";
 
 const cut = (t: string, max: number = CRITERIA_LIMITS.textChars) => (t.length > max ? `${t.slice(0, max - 1)}…` : t);
 const sha = (t: string) => createHash("sha256").update(t).digest("hex");
@@ -183,6 +259,67 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
       const unknown = [...wanted].filter((id) => !all.some((c) => c.id === id)).sort();
       if (unknown.length) return failFinal({ code: "INVALID_REQUEST", message: `no criterion ${unknown.map((u) => `"${u}"`).join(", ")} at ${model.project.modelRevision}` }, obs, hooks);
     }
+    const runs = (parsed.data.runs ?? []) as TestRunRecord[];
+    for (const [i, r] of runs.entries()) {
+      const p = recordProblem(r);
+      if (p) return failFinal({ code: "RUN_INVALID", message: `run ${i}: ${p}` }, obs, hooks);
+    }
+    // Host-observed only for the very record objects this process captured for a trusted caller;
+    // the parsed copies above are never trusted, nor is anything a record says about itself.
+    const rawRuns = ((input ?? {}) as { runs?: unknown[] }).runs ?? [];
+    const trusted = runs.map((_, i) => isTrustedCapture(rawRuns[i]));
+    const { candidate, problem: identityProblem } = candidateIdentityOf(obs);
+    const candidateDigest = identityDigest(candidate);
+    const runSummaries: RunSummary[] = runs.map((r, index) => {
+      const staleBecause = [
+        identityProblem ? `the candidate's source cannot be identified exactly: ${identityProblem}` : null,
+        recordIdentityProblem(r.candidate),
+        r.candidate.commit !== candidate.commit ? `it ran at commit ${String(r.candidate.commit).slice(0, 12)}, the candidate is ${String(candidate.commit).slice(0, 12)}` : null,
+        r.candidate.uncommitted.digest !== candidate.uncommitted.digest ? "uncommitted files differ from when it ran" : null,
+        r.candidate.bound.digest !== candidate.bound.digest ? "bound files (implementation, route or test files a claim points at, tracked or not) differ from when it ran" : null,
+        r.candidate.modelRevision !== candidate.modelRevision ? `it ran at model revision ${r.candidate.modelRevision}, the candidate is at ${candidate.modelRevision}` : null,
+        r.candidate.claims !== candidate.claims ? "the binding claims changed since it ran" : null,
+      ].filter((x): x is string => !!x);
+      return {
+        index,
+        observedBy: trusted[index] ? "host" : "claimed",
+        declaredObservedBy: r.observedBy,
+        admittedAs: trusted[index] ? "captured-here" : "imported",
+        principalId: cut(r.principalId, 256),
+        runner: r.runner,
+        invocation: cut(r.invocation, 300),
+        report: r.report,
+        digest: r.digest,
+        fresh: staleBecause.length === 0,
+        staleBecause,
+        summary: r.summary,
+        green: r.summary.failed === 0 && r.summary.errors === 0,
+      };
+    });
+    const byRun = runs.map((r) => ({ cases: new Map(r.cases.map((x) => [x.key, x] as const)), dup: new Set(r.duplicates) }));
+    const resultOf = (path: string, name: string): MappingResult | null => {
+      if (!runs.length) return null;
+      const k = caseKey(path, name);
+      const hits: { i: number; status: JUnitStatus; message?: string }[] = [];
+      let ambiguous = false;
+      const staleHits: number[] = [];
+      byRun.forEach((b, i) => {
+        const hit = b.cases.get(k);
+        if (!hit) return;
+        if (!runSummaries[i]!.fresh) return void staleHits.push(i);
+        if (b.dup.has(k)) ambiguous = true;
+        hits.push({ i, status: hit.status, ...(hit.message ? { message: hit.message } : {}) });
+      });
+      const observedBy = (is: number[]) => [...new Set(is.map((i) => runSummaries[i]!.observedBy))].sort();
+      if (ambiguous) return { status: "ambiguous", runs: hits.map((h) => h.i), observedBy: observedBy(hits.map((h) => h.i)) };
+      if (hits.length) {
+        const worst = (["error", "failed", "skipped", "passed"] as const).find((s) => hits.some((h) => h.status === s))!;
+        const at = hits.filter((h) => h.status === worst);
+        return { status: worst, runs: at.map((h) => h.i), observedBy: observedBy(at.map((h) => h.i)), ...(at[0]!.message ? { message: at[0]!.message } : {}) };
+      }
+      // Not in any run of this candidate: not run if some run is fresh, otherwise only stale evidence (or none).
+      return { status: runSummaries.some((r) => r.fresh) ? "not-run" : "stale", runs: staleHits, observedBy: observedBy(staleHits) };
+    };
     const claims = readClaims(root);
     const available = !claims.key.startsWith("unreadable:");
     const criterionIds = new Set(all.map((c) => c.id));
@@ -207,7 +344,7 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
     const evidence = all
       .filter((c) => !wanted || wanted.has(c.id))
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-      .map((c) => criterionOf(c, about, verified, byTest, key, available ? invalid.length : null, claims.key, moduleOf(model, c.id)));
+      .map((c) => criterionOf(c, about, verified, byTest, key, available ? invalid.length : null, claims.key, moduleOf(model, c.id), runs.length ? resultOf : null));
     const shown = evidence.slice(0, CRITERIA_LIMITS.criteria);
     const tests = [...byTest.entries()]
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
@@ -245,15 +382,22 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
         truncated: invalid.length > CRITERIA_LIMITS.invalidClaims,
       },
       budget: { limit: CRITERIA_LIMITS.bytes, bytes: 0, shrunk: false },
+      runs: runSummaries,
+      candidate: { ...candidate, identityDigest: candidateDigest, problem: identityProblem },
+      results: tally(evidence),
+      coverage: parsed.data.coverage
+        ? { ...parsed.data.coverage, source: cut(parsed.data.coverage.source, 200), note: "line coverage says which lines ran, not which approved criteria a passing test checks; it never counts as criterion evidence" }
+        : null,
+      notes: notesOf(evidence, runSummaries, parsed.data.coverage ?? null),
       meaning: MEANING,
       implementationChecked: false,
     };
     const guard = {
-      key: canonicalJson([claims.key, tree.digest]),
+      key: canonicalJson([claims.key, tree.digest, candidateDigest]),
       again: () => {
         const c = readClaims(root);
         const f = [...new Set(c.entries.filter((e) => e.claim && criterionIds.has(e.claim.modelObjectId)).map((e) => e.claim!.locator.path))].sort();
-        return canonicalJson([c.key, worktreeState(root, f.length ? f : files).digest]);
+        return canonicalJson([c.key, worktreeState(root, f.length ? f : files).digest, identityDigest(candidateIdentityOf(obs).candidate)]);
       },
     };
     const bounded = fitBudget(redact(data, root));
@@ -295,6 +439,29 @@ function fitBudget(r: CriteriaReport): CriteriaReport | null {
   return r;
 }
 
+type JUnitStatus = "passed" | "failed" | "error" | "skipped";
+
+function tally(evidence: readonly CriterionEvidence[]): CriteriaReport["results"] {
+  const zero = (): Record<CriterionResult, number> => ({ passed: 0, failed: 0, stale: 0, missing: 0, unknown: 0, unverified: 0 });
+  const out = { required: zero(), optional: zero() };
+  for (const e of evidence) out[e.verification][e.result]++;
+  return out;
+}
+
+function notesOf(evidence: readonly CriterionEvidence[], runs: readonly RunSummary[], coverage: { linesPct: number } | null): CriteriaReport["notes"] {
+  const notes: CriteriaReport["notes"] = [];
+  const requiredNotPassed = evidence.filter((e) => e.verification === "required" && e.result !== "passed").map((e) => e.id);
+  const list = (ids: string[]) => `${ids.slice(0, 10).join(", ")}${ids.length > 10 ? ` and ${ids.length - 10} more` : ""}`;
+  if (runs.length && !runs.some((r) => r.fresh)) notes.push({ code: "NO_FRESH_RUN", message: "no supplied run describes this candidate (different commit, uncommitted bytes, model revision or claims); every result is stale" });
+  if (runs.some((r) => r.fresh && r.green) && requiredNotPassed.length) {
+    notes.push({ code: "SUITE_GREEN_REQUIRED_NOT_PASSED", message: cut(`the suite is green (no failures or errors), but required criteria have no passing result for every mapped test case: ${list(requiredNotPassed)}. A green suite does not stand in for a missing, skipped or failed mapped case`) });
+  }
+  if (coverage && requiredNotPassed.length) {
+    notes.push({ code: "COVERAGE_IS_NOT_CRITERION_COVERAGE", message: cut(`line coverage is ${coverage.linesPct}%, yet required criteria are not verified: ${list(requiredNotPassed)}. Coverage says which lines ran, not which approved behaviour a passing test checks`) });
+  }
+  return notes;
+}
+
 function criterionOf(
   c: Criterion,
   about: readonly ClaimEntry[],
@@ -305,6 +472,7 @@ function criterionOf(
   invalidCount: number | null,
   claimsKey: string,
   moduleId: Id | null,
+  resultOf: ((path: string, name: string) => MappingResult | null) | null,
 ): CriterionEvidence {
   const base = { id: c.id, name: cut(c.name, 200), statement: cut(c.statement), verification: c.verification, verifies: c.verifies.map(refId).filter((x): x is Id => !!x), moduleId };
   if (invalidCount === null) {
@@ -318,6 +486,8 @@ function criterionOf(
       problems: [{ code: "MAPPING_INVALID", message: cut(`the binding claims could not be read (${claimsKey.slice("unreadable:".length)}); whether this criterion is mapped is unknown`) }],
       problemsTotal: 1,
       problemsTruncated: false,
+      result: resultOf ? "unknown" : "unverified",
+      resultObservedBy: null,
     };
   }
   const mine = about.filter((e) => e.claim?.modelObjectId === c.id).sort((a, b) => (a.bindingId < b.bindingId ? -1 : 1));
@@ -326,6 +496,7 @@ function criterionOf(
   const seen = new Map<string, string>();
   let resolved = 0;
   let testMappings = 0;
+  const results: { r: MappingResult; v: Verification }[] = [];
   for (const e of mine) {
     const v = verified.get(e.bindingId)!;
     const cl = e.claim!;
@@ -350,6 +521,21 @@ function criterionOf(
       } else if (v.state === "invalid") problems.push({ code: "MAPPING_INVALID", bindingId: e.bindingId, message: cut(`mapping ${e.bindingId} is invalid: ${[v.locator?.detail, v.source?.cause, v.model?.cause].filter(Boolean).join("; ") || "the claim does not verify"}`) });
       else problems.push({ code: "MAPPING_NOT_CHECKED", bindingId: e.bindingId, message: cut(`mapping ${e.bindingId} is ${v.state}: ${[v.source?.cause, v.model?.cause, v.locator?.detail].filter(Boolean).join("; ")}`) });
     }
+    let result: MappingResult | null = null;
+    if (isTest && resultOf && name !== null) {
+      result = resultOf(cl.locator.path, name);
+      if (result) {
+        results.push({ r: result, v });
+        const msg = result.message ? `: ${result.message}` : "";
+        const runsAt = result.runs.length ? ` (run ${result.runs.join(", ")})` : "";
+        if (result.status === "failed") problems.push({ code: "TEST_FAILED", bindingId: e.bindingId, message: cut(`mapped test ${at} failed${runsAt}${msg}`) });
+        else if (result.status === "error") problems.push({ code: "TEST_ERRORED", bindingId: e.bindingId, message: cut(`mapped test ${at} ended with an error${runsAt}${msg}`) });
+        else if (result.status === "skipped") problems.push({ code: "TEST_SKIPPED", bindingId: e.bindingId, message: cut(`mapped test ${at} was skipped${runsAt}; a skipped test checks nothing`) });
+        else if (result.status === "not-run") problems.push({ code: "TEST_NOT_RUN", bindingId: e.bindingId, message: cut(`mapped test ${at} is in no run of this candidate (filtered out, renamed, or outside the invocation)${result.runs.length ? `; only runs of another candidate (${result.runs.join(", ")}) report it` : ""}`) });
+        else if (result.status === "stale") problems.push({ code: "RESULT_STALE", bindingId: e.bindingId, message: cut(`the only results for mapped test ${at} come from runs of another candidate${runsAt}; run the tests again on this one`) });
+        else if (result.status === "ambiguous") problems.push({ code: "RESULT_AMBIGUOUS", bindingId: e.bindingId, message: cut(`a run reports mapped test ${at} more than once${runsAt}; its result is ambiguous`) });
+      }
+    }
     mappings.push({
       bindingId: e.bindingId,
       test: name !== null ? identityOf(cl.locator.path, name) : null,
@@ -363,12 +549,33 @@ function criterionOf(
         const others = k ? [...(byTest.get(k) ?? [])].filter((x) => x !== c.id).sort() : [];
         return { alsoMapsTo: others.slice(0, CRITERIA_LIMITS.relatedCriteria), alsoMapsToTotal: others.length };
       })(),
+      result,
     });
   }
   const incomplete = invalidCount > 0;
   // Unreadable claim files are not attributed by name: any of them may be a mapping of this criterion.
   if (incomplete) problems.unshift({ code: "MAPPING_INVALID", message: `${invalidCount} claim file(s) in .vcv/bindings/ cannot be read, and any of them may map ${c.id}; this assessment is incomplete (see invalidClaims)` });
   if (testMappings === 0 && !incomplete) problems.unshift({ code: "NO_MAPPING", message: `no test case is mapped to ${c.verification} criterion ${c.id}` });
+  const has = (...ss: MappingResult["status"][]) => results.some((x) => ss.includes(x.r.status));
+  const verdict: CriterionResult = !resultOf
+    ? "unverified"
+    : incomplete && testMappings === 0
+      ? "unknown"
+      : testMappings === 0
+        ? "missing"
+        : has("failed", "error")
+          ? "failed"
+          : has("stale") || results.some((x) => ["stale", "indeterminate", "unchecked", "invalid"].includes(x.v.state))
+            ? "stale"
+            : has("skipped", "not-run", "ambiguous") || results.some((x) => x.v.state === "missing" || x.v.state === "ambiguous")
+              ? "missing"
+              : incomplete
+                ? "unknown"
+                : "passed";
+  const passedBy = verdict === "passed" ? [...new Set(results.flatMap((x) => x.r.observedBy))] : [];
+  // A case passed in a host run counts as host-observed; agent-only passes are labelled.
+  const agentOnly = verdict === "passed" && results.some((x) => !x.r.observedBy.includes("host"));
+  if (agentOnly) problems.push({ code: "RESULT_CLAIMED", message: `every mapped test case passed, but some results come only from claimed runs (imported records or agent captures, whatever they declare); host evidence needs the host to capture the run itself` });
   return {
     ...base,
     mapping: testMappings === 0 ? (incomplete ? "unknown" : "none") : resolved === testMappings ? "resolved" : resolved > 0 ? "partial" : "unresolved",
@@ -379,6 +586,8 @@ function criterionOf(
     problems: problems.slice(0, CRITERIA_LIMITS.problemsPerCriterion),
     problemsTotal: problems.length,
     problemsTruncated: problems.length > CRITERIA_LIMITS.problemsPerCriterion,
+    result: verdict,
+    resultObservedBy: verdict === "passed" ? (agentOnly ? "claimed" : passedBy.includes("host") ? "host" : "claimed") : null,
   };
 }
 

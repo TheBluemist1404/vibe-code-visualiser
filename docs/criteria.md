@@ -128,9 +128,12 @@ sha256 of the full name. The checkout's path never appears.
 In `vcv reconcile`, a criterion the candidate adds or revises without a mapping gives
 `OBJECT_UNBOUND` ("no test case is mapped to it").
 
+With `--run`, each mapping also gets the result of its test case in runs of this exact candidate,
+and each criterion gets a verdict: see [test-evidence.md](test-evidence.md).
+
 ## Not established here
 
-- Whether any mapped test passed. That is runner evidence (M4.3).
+- Whether any mapped test passed, unless runs are supplied ([test-evidence.md](test-evidence.md)).
 - Whether a test is enough to show the criterion holds. That stays an agent's or a person's
   judgement.
 - A pre-merge decision. The gate is M4.4.

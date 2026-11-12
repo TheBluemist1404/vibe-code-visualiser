@@ -24,7 +24,18 @@ export function pathProblem(path: string): string | undefined {
 
 export type PathResolution =
   | { ok: true; abs: string }
-  | { ok: false; reason: "missing" | "unsafe" | "case-mismatch" | "not-a-file"; message: string };
+  | {
+      ok: false;
+      reason: "missing" | "unsafe" | "case-mismatch" | "not-a-file";
+      message: string;
+      /** Set when "missing" is a read failure (EACCES, EIO…), not observed absence. */
+      unreadable?: true;
+    };
+
+const absence = (e: unknown) => {
+  const code = (e as NodeJS.ErrnoException | null)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+};
 
 /**
  * Find `rel` under `root` one segment at a time. Each segment must exist with exactly this
@@ -43,8 +54,11 @@ export function resolveInside(root: string, rel: string): PathResolution {
     let entries: string[];
     try {
       entries = readdirSync(dir);
-    } catch {
-      return { ok: false, reason: "missing", message: `${segments.slice(0, i).join("/") || "."} is not a readable directory` };
+    } catch (e) {
+      const at = segments.slice(0, i).join("/") || ".";
+      return absence(e)
+        ? { ok: false, reason: "missing", message: `${at} is not a directory` }
+        : { ok: false, reason: "missing", message: `${at} is not a readable directory`, unreadable: true };
     }
     if (!entries.includes(name)) {
       const other = entries.find((e) => e.toLowerCase() === name.toLowerCase());
@@ -58,8 +72,11 @@ export function resolveInside(root: string, rel: string): PathResolution {
       let target: string;
       try {
         target = realpathSync(next);
-      } catch {
-        return { ok: false, reason: "missing", message: `${segments.slice(0, i + 1).join("/")} is a dangling symlink` };
+      } catch (e) {
+        const at = segments.slice(0, i + 1).join("/");
+        return absence(e)
+          ? { ok: false, reason: "missing", message: `${at} is a dangling symlink` }
+          : { ok: false, reason: "missing", message: `${at} is a symlink that cannot be resolved`, unreadable: true };
       }
       if (!inside(target)) return { ok: false, reason: "unsafe", message: `${segments.slice(0, i + 1).join("/")} is a symlink that leaves the checkout` };
       next = target;

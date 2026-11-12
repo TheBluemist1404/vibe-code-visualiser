@@ -110,6 +110,70 @@ post-merge rewrite and no inference.
 - **`verifies` is a query filter.** `getContext` accepts the relation it returns. A compile-time
   check now keeps the accepted relations equal to every relation the snapshot can emit.
 
+## M4.3 decisions
+
+- **The runner's own per-case report, not a new format.** VCV reads JUnit XML, which Vitest, Jest
+  (jest-junit), pytest and Surefire already emit, and runs no tests itself. The fixtures are real
+  Vitest reports of the Course Desk server. The reader is a strict, bounded subset parser: no DTD or
+  entities, explicit size, case, element and depth limits, and declared counts that must match the
+  cases (`REPORT_INCONSISTENT`), so truncated or carelessly edited reports are refused.
+- **A result is bound to a candidate identity.** A test-run record carries the commit, the bytes of
+  every uncommitted path, the model revision and the claims digest. A result counts only while all
+  four still match. Anything else is `stale` with the reason, so a run from commit A never passes B.
+  `testIdentity` read before the run and passed as `before` closes the gap between running and
+  capturing (`TEST_RUN_RACED`).
+- **Provenance from the host's permission, not from the record.** `observedBy` is `host` only when
+  the capturing caller holds `tests:observe`. The CLI's local user does by default; an agent wrapper
+  (`VCV_HOST_PERMISSIONS`) does not. The record's digest detects edits but is not a signature, so
+  M4.4's gate captures in its own trusted job instead of trusting candidate-supplied records.
+- **Results are per test case, verdicts per criterion.** Precedence is failed, stale, missing,
+  unknown, then passed. Skipped, not-run and ambiguous cases are `missing`, never passed. The suite
+  summary is shown next to the verdicts but never decides them. Line coverage is accepted only as
+  labelled context.
+- **Faster verification.** The criteria read reuses M4.2's per-read `verifyMemo`. Adding runs adds
+  one identity read to the guard.
+
+### Review round 1 (PR #25)
+
+- **Provenance is decided by the consumer, not by the record.** A record's `observedBy` is only what
+  its capturer declared. The criteria report treats a run as host-observed only for the record
+  object `captureTestRun` returned in the same process to a `tests:observe` caller, unmodified (a
+  module-private WeakMap keyed by that object). Every imported record is `claimed`, including a
+  correctly re-digested agent→host forgery. `vcv criteria --junit` is the CLI's in-process path;
+  `--run` files are claims.
+- **No exact source identity, no evidence.** No Git commit, a failed Git listing, or an exhausted
+  hashing budget refuses capture (`SOURCE_IDENTITY_UNAVAILABLE`) and makes every run stale. A
+  failed read is never coalesced into a clean tree.
+- **Report reading.** The root `skipped` total is checked like the others. A runner path is
+  validated as written before it is joined to the root, with no normalization, so `/src/a.ts` can
+  never alias `server/src/a.ts`.
+- **Sizes that round-trip.** Capture refuses a record larger than the 16 MiB VCV reads back. The
+  CLI checks a file's size before reading it, for reports and records alike.
+
+### Review round 2 (PR #25)
+
+- **Bound files are part of the run identity.** `candidate.bound` hashes every path a binding
+  claim points at, through the same `worktreeState` reader the M3 observations use (links resolved
+  inside the checkout, target bytes hashed). This covers files Git ignores and the targets of
+  tracked links, which `changedFilesSince` cannot see. An unreadable bound file, claim file or
+  claim store makes the identity unusable (`SOURCE_IDENTITY_UNAVAILABLE`) instead of counting as
+  complete.
+- **Inputs are opened nonblocking.** The CLI opens reports and records with `O_NONBLOCK` and checks
+  the type before reading, so a FIFO or device is refused instead of blocking the open.
+
+### Review round 3 (PR #25)
+
+- **Availability is a structured outcome, not a string suffix.** The worktree reader returns
+  `unavailable` for every path whose content it did not observe: a link that leaves the checkout
+  (file or directory link, or a Windows junction) or cannot be resolved (a loop), an unreadable
+  link, a stat or read failure other than `ENOENT`/`ENOTDIR` (an inaccessible parent is `EACCES`,
+  no longer `absent`), and a non-portable path. Any unavailable uncommitted or bound path refuses
+  capture and makes every run stale. Escaping targets are still never read.
+- **Known absence stays a fact.** A deleted file, a path through a file, and a link to a missing or
+  case-mismatched target inside the checkout keep their stable identities and do not block capture.
+  `.git/`, `.vcv/` and `node_modules/` paths stay excluded from hashing, since the model and the
+  claims are bound separately.
+
 ## Consequences
 
 - A code-first PR that edits bound code shows stale claims and the exact declarations, but VCV
