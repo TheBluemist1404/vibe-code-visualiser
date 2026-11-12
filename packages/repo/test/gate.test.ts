@@ -12,6 +12,7 @@ import {
   preMergeGate,
   testIdentity,
   projectStatus,
+  submitProposal,
 } from "../src/index.ts";
 import type { GateReport, GateRequest } from "../src/index.ts";
 import { SERVICE, SPEC, edit, git } from "./course-desk.ts";
@@ -246,6 +247,19 @@ test("a report is host-observed only with the identity read before the run: an o
   assert.equal(unbound.decision, "block");
   assert.equal(unbound.runs[0]!.observedBy, "claimed");
   assert.ok(blocking(unbound).some((r) => r.code === "RESULT_CLAIMED" && r.criterionId === "crt-full-course"));
+});
+
+test("a pending proposal the candidate carries is shown, and is not part of the model the gate used", () => {
+  const { repo, base } = codeFirst();
+  const sub = submitProposal(repo, { changeId: "chg-pending", projectId: "prj-course-desk", expectedRevision: projectStatus(repo).model!.revision, operations: [
+    { type: "reviseCriterion", criterionId: "crt-full-course", verification: "optional" },
+  ] }, { principalId: "agent:coder", permissions: ["model:propose"] });
+  assert.ok(sub.ok);
+  git(repo, "add", "-A");
+  git(repo, "commit", "-qm", "propose making the criterion optional");
+  const g = gate(repo, { base, junit: junit(PASS, repo) });
+  assert.deepEqual(g.reasons.filter((r) => r.code === "PROPOSAL_PENDING").map((r) => [r.severity, r.message.includes("chg-pending")]), [["warn", true]]);
+  assert.equal(g.criteria.items.find((c) => c.id === "crt-full-course")?.verification, "required", "the approved policy still applies");
 });
 
 test("Git reads in the candidate run none of its configured commands (fsmonitor, hooks, filter drivers)", () => {

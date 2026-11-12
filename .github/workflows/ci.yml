@@ -48,3 +48,8 @@ jobs:
       # M3.4: the recorded model-first golden path, replayed from a fresh checkout and a fresh reviewer key
       # (proposal, separate approval, implementation, host gate, branch views, negative paths), with the app's checks.
       - run: examples/reference-app/golden-path/replay.sh "$RUNNER_TEMP/golden-path" --app-tests
+      # M4.5: the code-first pre-merge golden path from a fresh checkout (criteria, mapped tests, the gate
+      # on broken / fixed / harmless / weak-evidence / intent-change candidates, negative paths, merge views).
+      - run: |
+          examples/reference-app/premerge/setup.sh "$RUNNER_TEMP/premerge"
+          examples/reference-app/premerge/scenarios.sh "$RUNNER_TEMP/premerge" "$RUNNER_TEMP/premerge-out"

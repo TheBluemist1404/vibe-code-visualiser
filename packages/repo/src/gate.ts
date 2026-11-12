@@ -357,7 +357,8 @@ export function preMergeGate(path: string, req: GateRequest, host: TestRunHost, 
   return observed(path, hooks, (obs) => {
     const index = buildIndex(obs.model);
     const verified = (observations?.observations ?? []).map((o) => verifyObservation(o, obs.status.root, index, crit.data, runs as TestRunRecord[]));
-    const report = decide(rec.data, allFindings!, crit.data, verified, pol, first.data.identity, baseContext);
+    const pending = obs.records.flatMap((r) => (r.record?.status === "pending" ? [r.changeId] : [])).sort();
+    const report = decide(rec.data, allFindings!, crit.data, verified, pol, first.data.identity, baseContext, pending);
     const bounded = fitBudget(redact(report, root));
     if (!bounded) return { ok: false, error: { code: "REPORT_TOO_LARGE", message: `the gate report exceeds ${GATE_LIMITS.bytes} bytes even with every list cut` } } as ProposalResult<GateReport>;
     return finish(obs, hooks, bounded, { key: first.data.key, again: () => snapshotKey(obs, cited, budget) ?? "incomplete" });
@@ -697,7 +698,7 @@ function verifyObservation(o: z.infer<typeof observationsSchema>["observations"]
 
 const BINDING_CODES = new Set(["CLAIM_STALE", "LOCATOR_MISSING", "LOCATOR_AMBIGUOUS", "CLAIM_INVALID", "CLAIM_REMOVED", "CLAIM_DISPUTED"]);
 
-function decide(rec: Reconciliation, findings: ReconcileFinding[], crit: CriteriaReport, observations: VerifiedObservation[], pol: ResolvedPolicy, digest: string, baseContext: BaseContext): GateReport {
+function decide(rec: Reconciliation, findings: ReconcileFinding[], crit: CriteriaReport, observations: VerifiedObservation[], pol: ResolvedPolicy, digest: string, baseContext: BaseContext, pending: string[] = []): GateReport {
   const p = pol.policy;
   const reasons: GateReason[] = [];
   const add = (severity: GateSeverity | "off", r: Omit<GateReason, "severity">) => {
@@ -797,6 +798,11 @@ function decide(rec: Reconciliation, findings: ReconcileFinding[], crit: Criteri
     });
   }
 
+  // A proposal the candidate carries but nobody has approved: the approved model (and so this
+  // check) does not include it. Shown so the reviewer knows an intent change is waiting on M3.
+  for (const id of pending.slice(0, GATE_LIMITS.reasons)) {
+    add("warn", { code: "PROPOSAL_PENDING", rule: "integrity", basis: "observed", message: `the candidate carries the pending proposal ${id}; it is not part of the approved model this check used. If the code depends on it, a separate reviewer approves it through M3 (vcv review approve)` });
+  }
   if (pol.changedByCandidate) add(p.policyChanged, { code: "POLICY_CHANGED", rule: "policyChanged", basis: "observed", message: `the candidate changes the gate policy (${pol.source}); this check used the base's, and the change applies only after the merge` });
 
   const order = { block: 0, warn: 1 };

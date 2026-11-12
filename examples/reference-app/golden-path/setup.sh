@@ -10,6 +10,7 @@
 #     to an agent) and commits its public entry to .vcv/reviewers.json: the trust list on main;
 #  4. authorizes the baseline: the bootstrap agent proposes `approveDraft`, the reviewer approves
 #     it against the pinned trust commit, and the result is committed on main.
+# REVIEWER_ID sets the reviewer's principal (default user:reviewer).
 # Identity, dates and Git config are fixed. The reviewer is simulated (a key on this machine),
 # which demonstrates the protocol, not a production trust boundary (docs/approvals.md).
 set -euo pipefail
@@ -46,7 +47,7 @@ claim --id impl.cap-list-notifications --object cap-list-notifications --relatio
 echo "== the reviewer's key (outside the checkout) and the trust list on main"
 mkdir -p "$keys"
 chmod 700 "$keys"
-vcv reviewer init "$keys/reviewer.pem" --id user:reviewer --add "$repo" | sed "s|$keys|<keys>|g; s|$repo|<repo>|g"
+vcv reviewer init "$keys/reviewer.pem" --id "${REVIEWER_ID:-user:reviewer}" --add "$repo" | sed "s|$keys|<keys>|g; s|$repo|<repo>|g"
 commit "vcv: draft model, binding claims and the reviewer trust list"
 trust=$(git -C "$repo" rev-parse HEAD)
 
