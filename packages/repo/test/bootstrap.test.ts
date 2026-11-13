@@ -21,7 +21,8 @@ const tmp = () => realpathSync(mkdtempSync(join(tmpdir(), "vcv-bootstrap-")));
 const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
 
 /** Words that would tell an agent what the fixture app contains. */
-const FIXTURE_TERMS = /\b(courses?|enrol\w*|students?|seats?|notif\w*|nest(js)?|react|vite|poetry|algebra|outbox|catalog)\b/i;
+const FIXTURE_TERMS =
+  /\b(courses?|enrol\w*|students?|seats?|notif\w*|nest(js)?|react|vite|poetry|algebra|outbox|catalog)\b/i;
 
 test("the bootstrap guide and prompt are general: no fixture-specific answers", () => {
   for (const file of [GUIDE, join(BOOTSTRAP, "prompt.md")]) {
@@ -48,14 +49,23 @@ test("the agent toolkit holds the engine and the guide, but no examples, tests, 
   const dest = join(tmp(), "vcv");
   execFileSync("bash", [join(BOOTSTRAP, "toolkit.sh"), dest], { encoding: "utf8" });
   assert.equal(readFileSync(join(dest, "AGENT_GUIDE.md"), "utf8"), readFileSync(GUIDE, "utf8"));
-  assert.deepEqual(readdirSync(dest).sort(), ["AGENT_GUIDE.md", "apps", "bin", "node_modules", "package.json", "packages"]);
+  assert.deepEqual(readdirSync(dest).sort(), [
+    "AGENT_GUIDE.md",
+    "apps",
+    "bin",
+    "node_modules",
+    "package.json",
+    "packages",
+  ]);
   for (const p of readdirSync(join(dest, "packages"))) {
     const own = existsSync(join(ROOT, "packages", p, "node_modules")) ? ["node_modules"] : [];
     assert.deepEqual(readdirSync(join(dest, "packages", p)).sort(), [...own, "package.json", "src"]);
   }
   assert.deepEqual(readdirSync(join(dest, "apps")), ["cli"]);
   // Nothing outside node_modules mentions the fixture or the oracle.
-  const grep = spawnSync("grep", ["-rIliE", "oracle|course desk|enrol", dest, "--exclude-dir=node_modules"], { encoding: "utf8" });
+  const grep = spawnSync("grep", ["-rIliE", "oracle|course desk|enrol", dest, "--exclude-dir=node_modules"], {
+    encoding: "utf8",
+  });
   assert.equal(grep.status, 1, `grep found: ${grep.stdout}`); // 1 = no match
 });
 
@@ -76,10 +86,24 @@ test("the recorded agent draft replays into a ready, queryable draft project on 
   assert.equal(loaded.model!.project.status, "draft");
 
   const repo = join(tmp(), "course-desk");
-  const baseline = execFileSync("bash", [join(ROOT, "examples/reference-app/materialize.sh"), repo], { encoding: "utf8" }).trim();
+  const baseline = execFileSync("bash", [join(ROOT, "examples/reference-app/materialize.sh"), repo], {
+    encoding: "utf8",
+  }).trim();
   assert.equal(projectStatus(repo).state, "absent");
   // The same supported operation the agent used (`vcv project init`), never a hand-written .vcv/.
-  const out = execFileSync("node", ["--experimental-strip-types", "--no-warnings", join(ROOT, "apps/cli/src/main.ts"), "project", "init", repo, join(RUN, "agent-output/model.yaml")], { encoding: "utf8" });
+  const out = execFileSync(
+    "node",
+    [
+      "--experimental-strip-types",
+      "--no-warnings",
+      join(ROOT, "apps/cli/src/main.ts"),
+      "project",
+      "init",
+      repo,
+      join(RUN, "agent-output/model.yaml"),
+    ],
+    { encoding: "utf8" },
+  );
   assert.match(out, /project: ready/);
 
   // Reopen from scratch, as after a restart, and query through the existing APIs.

@@ -1,6 +1,6 @@
 // A read-only view over one model snapshot. Everything here is derived on demand from the
 // canonical IR via buildIndex/collectRefs; no relationship is stored a second time.
-import { COLLECTIONS, buildIndex, collectionOf, collectRefs, isUnresolved, refId, validateModel } from "@vcv/ir";
+import { COLLECTIONS, buildIndex, collectionOf, collectRefs, isUnresolved, validateModel } from "@vcv/ir";
 import type { CollectionName, Diagnostic, Id, IndexEntry, Kind, Model, RefRole } from "@vcv/ir";
 import type { Edge, ObjectSummary, QueryContext, Relation, RelationCategory } from "./types.ts";
 
@@ -28,7 +28,21 @@ const CATEGORY: Record<Relation, RelationCategory> = {
 };
 
 /** Stable order for kinds in results (architecture first, nested elements last). */
-export const KIND_ORDER: Kind[] = ["project", "module", "contract", "event", "capability", "behavior", "data", "rule", "criterion", "actor", "state", "transition", "attribute"];
+export const KIND_ORDER: Kind[] = [
+  "project",
+  "module",
+  "contract",
+  "event",
+  "capability",
+  "behavior",
+  "data",
+  "rule",
+  "criterion",
+  "actor",
+  "state",
+  "transition",
+  "attribute",
+];
 
 export class Snapshot {
   readonly model: Model;
@@ -117,7 +131,9 @@ export class Snapshot {
   /** Diagnostics declared at or under the object's IR path. */
   diagnosticsFor(ids: Iterable<Id>): Diagnostic[] {
     const paths = [...ids].map((i) => this.index.get(i)?.path).filter((p): p is string => !!p);
-    return this.diagnostics.filter((d) => paths.some((p) => d.path === p || d.path.startsWith(p + ".") || d.path.startsWith(p + "[")));
+    return this.diagnostics.filter((d) =>
+      paths.some((p) => d.path === p || d.path.startsWith(`${p}.`) || d.path.startsWith(`${p}[`)),
+    );
   }
 }
 
@@ -126,7 +142,9 @@ export function compareObjects(a: { kind: Kind; id: Id }, b: { kind: Kind; id: I
 }
 
 function compareEdges(a: Edge, b: Edge): number {
-  return cmp(a.from, b.from) || cmp(a.relation, b.relation) || cmp(target(a), target(b)) || cmp(a.declaredAt, b.declaredAt);
+  return (
+    cmp(a.from, b.from) || cmp(a.relation, b.relation) || cmp(target(a), target(b)) || cmp(a.declaredAt, b.declaredAt)
+  );
 }
 
 export const target = (e: Edge): string => (typeof e.to === "string" ? e.to : `?${e.to.unresolved}`);

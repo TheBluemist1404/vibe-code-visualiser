@@ -114,7 +114,11 @@ export class ModelEngine {
     const claimedId = typeof raw.changeId === "string" ? raw.changeId : undefined;
 
     if (!ctx.permissions.includes("model:propose")) {
-      return this.log("propose", ctx, { status: "denied", changeId: claimedId, diagnostics: [diag("NOT_AUTHORIZED", "", `${ctx.principalId} may not propose changes`)] });
+      return this.log("propose", ctx, {
+        status: "denied",
+        changeId: claimedId,
+        diagnostics: [diag("NOT_AUTHORIZED", "", `${ctx.principalId} may not propose changes`)],
+      });
     }
     const parsed = proposedChangeSchema.safeParse(input);
     if (!parsed.success) {
@@ -152,7 +156,12 @@ export class ModelEngine {
     // Every record write is guarded by the same snapshot: a new record may only be created where
     // none exists, in the store state it was validated against.
     const fresh = { token: snap.token, previous: null };
-    if (check.errors.length) return this.log("propose", ctx, this.save({ ...record, status: "rejected", validationResults: check.errors }, fresh));
+    if (check.errors.length)
+      return this.log(
+        "propose",
+        ctx,
+        this.save({ ...record, status: "rejected", validationResults: check.errors }, fresh),
+      );
     record.validationResults = check.warnings;
 
     const needsApproval =
@@ -169,21 +178,44 @@ export class ModelEngine {
   approve(changeId: string, ctx: HostContext, opts: ApproveOptions = {}): Outcome {
     const idProblem = persistedIdProblem(changeId);
     if (idProblem) {
-      return this.log("approve", ctx, { status: "rejected", changeId, diagnostics: [diag("INVALID_ID", "changeId", `change id ${idProblem}`)] });
+      return this.log("approve", ctx, {
+        status: "rejected",
+        changeId,
+        diagnostics: [diag("INVALID_ID", "changeId", `change id ${idProblem}`)],
+      });
     }
     const snap = this.store.snapshot();
     const record = this.store.getChange(changeId);
     if (!record) {
-      return this.log("approve", ctx, { status: "rejected", changeId, diagnostics: [diag("UNKNOWN_CHANGE", "changeId", `no change "${changeId}"`)] });
+      return this.log("approve", ctx, {
+        status: "rejected",
+        changeId,
+        diagnostics: [diag("UNKNOWN_CHANGE", "changeId", `no change "${changeId}"`)],
+      });
     }
     if (record.status !== "pending") {
-      return this.log("approve", ctx, { status: "rejected", changeId, diagnostics: [diag("NOT_PENDING", "", `change is ${record.status}`)], record });
+      return this.log("approve", ctx, {
+        status: "rejected",
+        changeId,
+        diagnostics: [diag("NOT_PENDING", "", `change is ${record.status}`)],
+        record,
+      });
     }
     if (!ctx.permissions.includes("model:approve")) {
-      return this.log("approve", ctx, { status: "denied", changeId, diagnostics: [diag("NOT_AUTHORIZED", "", `${ctx.principalId} may not approve changes`)], record });
+      return this.log("approve", ctx, {
+        status: "denied",
+        changeId,
+        diagnostics: [diag("NOT_AUTHORIZED", "", `${ctx.principalId} may not approve changes`)],
+        record,
+      });
     }
     if (ctx.principalId === record.proposerId && !this.policy.allowSelfApproval) {
-      return this.log("approve", ctx, { status: "denied", changeId, diagnostics: [diag("SELF_APPROVAL", "", "a proposer cannot approve their own change")], record });
+      return this.log("approve", ctx, {
+        status: "denied",
+        changeId,
+        diagnostics: [diag("SELF_APPROVAL", "", "a proposer cannot approve their own change")],
+        record,
+      });
     }
     // M3.2: bind the decision to the content the reviewer saw. A record edited after the preview
     // no longer matches; nothing is changed and the proposal stays pending.
@@ -191,15 +223,37 @@ export class ModelEngine {
       return this.log("approve", ctx, {
         status: "rejected",
         changeId,
-        diagnostics: [diag("DIGEST_MISMATCH", "", `the proposal's content digest is ${proposalDigest(record.change)}, not the reviewed ${opts.expectedDigest}; preview it again`)],
+        diagnostics: [
+          diag(
+            "DIGEST_MISMATCH",
+            "",
+            `the proposal's content digest is ${proposalDigest(record.change)}, not the reviewed ${opts.expectedDigest}; preview it again`,
+          ),
+        ],
         record,
       });
     }
     const check = this.dryRun(record.change, snap.model);
     if (check.errors.length) {
-      return this.log("approve", ctx, this.save({ ...record, approverId: ctx.principalId, status: "rejected", validationResults: check.errors }, { token: snap.token, previous: record }));
+      return this.log(
+        "approve",
+        ctx,
+        this.save(
+          { ...record, approverId: ctx.principalId, status: "rejected", validationResults: check.errors },
+          { token: snap.token, previous: record },
+        ),
+      );
     }
-    return this.log("approve", ctx, this.commit({ ...record, approverId: ctx.principalId, validationResults: check.warnings }, check.model!, snap, record));
+    return this.log(
+      "approve",
+      ctx,
+      this.commit(
+        { ...record, approverId: ctx.principalId, validationResults: check.warnings },
+        check.model!,
+        snap,
+        record,
+      ),
+    );
   }
 
   private dryRun(change: ProposedModelChange, current: Model): ChangeCheck {
@@ -248,7 +302,9 @@ export class ModelEngine {
       ...(outcome.changeId !== undefined ? { changeId: outcome.changeId } : {}),
       status: outcome.status,
       codes: outcome.diagnostics.filter((d) => d.severity === "error").map((d) => d.code),
-      ...(outcome.status === "applied" && outcome.record?.resultingRevision ? { resultingRevision: outcome.record.resultingRevision } : {}),
+      ...(outcome.status === "applied" && outcome.record?.resultingRevision
+        ? { resultingRevision: outcome.record.resultingRevision }
+        : {}),
     });
     return outcome;
   }
@@ -264,11 +320,26 @@ export type ChangeCheck = { model?: Model; errors: Diagnostic[]; warnings: Diagn
  */
 export function checkChange(change: ProposedModelChange, current: Model): ChangeCheck {
   if (change.projectId !== current.project.id) {
-    return { errors: [diag("WRONG_PROJECT", "projectId", `change targets "${change.projectId}", engine holds "${current.project.id}"`)], warnings: [] };
+    return {
+      errors: [
+        diag(
+          "WRONG_PROJECT",
+          "projectId",
+          `change targets "${change.projectId}", engine holds "${current.project.id}"`,
+        ),
+      ],
+      warnings: [],
+    };
   }
   if (change.expectedRevision !== current.project.modelRevision) {
     return {
-      errors: [diag("STALE_REVISION", "expectedRevision", `expected ${change.expectedRevision}, current is ${current.project.modelRevision}`)],
+      errors: [
+        diag(
+          "STALE_REVISION",
+          "expectedRevision",
+          `expected ${change.expectedRevision}, current is ${current.project.modelRevision}`,
+        ),
+      ],
       warnings: [],
     };
   }
@@ -287,7 +358,9 @@ export function checkChange(change: ProposedModelChange, current: Model): Change
  * edited after the preview no longer matches what was reviewed.
  */
 export function proposalDigest(change: ProposedModelChange): string {
-  return createHash("sha256").update(`vcv-proposal-v1\0${canonicalJson(change)}`).digest("hex");
+  return createHash("sha256")
+    .update(`vcv-proposal-v1\0${canonicalJson(change)}`)
+    .digest("hex");
 }
 
 /**

@@ -75,7 +75,10 @@ export class StoreError extends Error {
 /** Size bounds for store files (bytes). Change records hold at most one bounded proposal plus diagnostics. */
 export const STORE_FILE_LIMITS = { head: 4 * 1024 * 1024, revision: 8 * 1024 * 1024, change: 1024 * 1024 } as const;
 
-export type StoreFileRead = { kind: "file"; bytes: Buffer; text: string } | { kind: "absent" } | { kind: "unsafe"; problem: string };
+export type StoreFileRead =
+  | { kind: "file"; bytes: Buffer; text: string }
+  | { kind: "absent" }
+  | { kind: "unsafe"; problem: string };
 
 function lstatOrNull(p: string) {
   try {
@@ -201,10 +204,16 @@ function assertCommittable(model: Model, record: ChangeRecord, history: readonly
   // validated against another line (or an earlier state) to this one.
   const head = history.at(-1)!;
   if (record.baseRevision !== head) {
-    throw new StoreError("HEAD_CHANGED", `change ${record.changeId} was validated against ${record.baseRevision}, but the store is now at ${head}; nothing was written`);
+    throw new StoreError(
+      "HEAD_CHANGED",
+      `change ${record.changeId} was validated against ${record.baseRevision}, but the store is now at ${head}; nothing was written`,
+    );
   }
   if (parseRevisionId(rev).scheme === "branch-safe" && !isChildRevision(rev, model, head, history.length + 1)) {
-    throw new StoreError("BAD_COMMIT", `${rev} is not the digest of this model as revision ${history.length + 1} after ${head}; nothing was written`);
+    throw new StoreError(
+      "BAD_COMMIT",
+      `${rev} is not the digest of this model as revision ${history.length + 1} after ${head}; nothing was written`,
+    );
   }
 }
 
@@ -237,10 +246,16 @@ export class MemoryStore implements ModelStore {
   commit(model: Model, record: ChangeRecord, guard?: string | ChangeGuard): void {
     const g = typeof guard === "string" ? { token: guard } : guard;
     if (g && g.token !== this.order.join("\0")) {
-      throw new StoreError("HEAD_CHANGED", "the store moved since the snapshot this change was validated against; nothing was written");
+      throw new StoreError(
+        "HEAD_CHANGED",
+        "the store moved since the snapshot this change was validated against; nothing was written",
+      );
     }
     if (g && "previous" in g && !sameRecord(this.changes.get(record.changeId) ?? null, g.previous)) {
-      throw new StoreError("STORE_CHANGED", `change ${record.changeId} is not in the state it was validated in; nothing was written`);
+      throw new StoreError(
+        "STORE_CHANGED",
+        `change ${record.changeId} is not in the state it was validated in; nothing was written`,
+      );
     }
     assertCommittable(model, record, this.order);
     this.revs.set(model.project.modelRevision, structuredClone(model));
@@ -257,7 +272,10 @@ export class MemoryStore implements ModelStore {
     if (guard) {
       const onDisk = this.changes.get(record.changeId);
       if (guard.token !== this.order.join("\0") || !sameRecord(onDisk ?? null, guard.previous)) {
-        throw new StoreError("STORE_CHANGED", `change ${record.changeId} or the store changed since validation; nothing was written`);
+        throw new StoreError(
+          "STORE_CHANGED",
+          `change ${record.changeId} or the store changed since validation; nothing was written`,
+        );
       }
     }
     this.changes.set(record.changeId, structuredClone(record));
@@ -307,20 +325,22 @@ export class FileStore implements ModelStore {
   constructor(dir: string, opts: FileStoreOptions = {}) {
     this.dir = dir;
     this.opts = opts;
-    if (!existsSync(join(dir, "HEAD"))) throw new StoreError("NOT_INITIALIZED", `${dir} is not an initialized model store (run init first)`);
+    if (!existsSync(join(dir, "HEAD")))
+      throw new StoreError("NOT_INITIALIZED", `${dir} is not an initialized model store (run init first)`);
     this.head = this.readHead();
     this.recovery = this.recover();
     this.validated = storeFingerprint(dir);
   }
 
   static init(dir: string, initial: Model, opts: FileStoreOptions = {}): FileStore {
-    if (existsSync(join(dir, "HEAD"))) throw new StoreError("ALREADY_INITIALIZED", `${dir} already holds a model store`);
+    if (existsSync(join(dir, "HEAD")))
+      throw new StoreError("ALREADY_INITIALIZED", `${dir} already holds a model store`);
     const rev = initial.project.modelRevision;
     assertPersistedId("revision", rev);
     for (const sub of ["revisions", "changes", "orphaned"]) mkdirSync(join(dir, sub), { recursive: true });
     durableWrite(join(dir, "revisions", `${rev}.yaml`), dumpModel(initial));
     const head: Head = { format: 1, revision: rev, history: [rev] };
-    durableWrite(join(dir, "HEAD"), JSON.stringify(head, null, 2) + "\n"); // initialized only once HEAD exists
+    durableWrite(join(dir, "HEAD"), `${JSON.stringify(head, null, 2)}\n`); // initialized only once HEAD exists
     return new FileStore(dir, opts);
   }
 
@@ -346,7 +366,11 @@ export class FileStore implements ModelStore {
 
   snapshot(): StoreSnapshot {
     this.sync();
-    return { model: readRevisionFile(this.dir, this.head.revision, this.head.history), history: [...this.head.history], token: this.validated };
+    return {
+      model: readRevisionFile(this.dir, this.head.revision, this.head.history),
+      history: [...this.head.history],
+      token: this.validated,
+    };
   }
 
   commit(model: Model, record: ChangeRecord, guard?: string | ChangeGuard): void {
@@ -375,15 +399,18 @@ export class FileStore implements ModelStore {
     // Change identity: the record this commit replaces must be exactly the one the decision was
     // made on (none for a new proposal, the pending record for an approval).
     if (g && "previous" in g && !sameRecord(this.recordOnDisk(record.changeId), g.previous)) {
-      throw new StoreError("STORE_CHANGED", `change ${record.changeId} on disk is not the record this change was validated with; nothing was written`);
+      throw new StoreError(
+        "STORE_CHANGED",
+        `change ${record.changeId} on disk is not the record this change was validated with; nothing was written`,
+      );
     }
     const rev = model.project.modelRevision;
     const next: Head = { format: 1, revision: rev, history: [...this.head.history, rev], lastCommit: record };
 
     this.write("revision", join(this.dir, "revisions", `${rev}.yaml`), dumpModel(model));
-    this.write("head", join(this.dir, "HEAD"), JSON.stringify(next, null, 2) + "\n");
+    this.write("head", join(this.dir, "HEAD"), `${JSON.stringify(next, null, 2)}\n`);
     this.head = next; // committed: from here on the revision exists
-    this.write("change", this.changePath(record.changeId), JSON.stringify(record, null, 2) + "\n");
+    this.write("change", this.changePath(record.changeId), `${JSON.stringify(record, null, 2)}\n`);
     this.validated = storeFingerprint(this.dir); // our own writes are known-good
   }
 
@@ -414,7 +441,7 @@ export class FileStore implements ModelStore {
         );
       }
     }
-    durableWrite(path, JSON.stringify(record, null, 2) + "\n");
+    durableWrite(path, `${JSON.stringify(record, null, 2)}\n`);
     // Only bless our own write if nothing else had changed; otherwise the next read re-checks.
     if (before === this.validated) this.validated = storeFingerprint(this.dir);
   }
@@ -431,7 +458,7 @@ export class FileStore implements ModelStore {
         readSync(fd, last, 0, 1, size - 1);
         if (last[0] !== 0x0a) prefix = "\n";
       }
-      appendFileSync(fd, prefix + JSON.stringify(event) + "\n");
+      appendFileSync(fd, `${prefix}${JSON.stringify(event)}\n`);
       fsyncSync(fd);
     } finally {
       closeSync(fd);
@@ -466,7 +493,12 @@ export class FileStore implements ModelStore {
    * missing or unverifiable revisions) are raised before anything is moved or rewritten.
    */
   private recoverFor(head: Head): RecoveryReport {
-    const report: RecoveryReport = { removedTempFiles: [], orphanedRevisions: [], orphanedChangeRecords: [], repairedChangeRecords: [] };
+    const report: RecoveryReport = {
+      removedTempFiles: [],
+      orphanedRevisions: [],
+      orphanedChangeRecords: [],
+      repairedChangeRecords: [],
+    };
     mkdirSync(join(this.dir, "orphaned"), { recursive: true });
     mkdirSync(join(this.dir, "changes"), { recursive: true });
 
@@ -521,7 +553,7 @@ export class FileStore implements ModelStore {
     if (last) {
       const onDisk = this.getChange(last.changeId);
       if (onDisk?.status !== "applied" || onDisk.resultingRevision !== last.resultingRevision) {
-        durableWrite(this.changePath(last.changeId), JSON.stringify(last, null, 2) + "\n");
+        durableWrite(this.changePath(last.changeId), `${JSON.stringify(last, null, 2)}\n`);
         report.repairedChangeRecords.push(last.changeId);
       }
     }
@@ -589,7 +621,8 @@ export class FileStoreReader {
 
   constructor(dir: string) {
     this.dir = dir;
-    if (!existsSync(join(dir, "HEAD"))) throw new StoreError("NOT_INITIALIZED", `${dir} is not an initialized model store (run init first)`);
+    if (!existsSync(join(dir, "HEAD")))
+      throw new StoreError("NOT_INITIALIZED", `${dir} is not an initialized model store (run init first)`);
     this.current(); // fail at open, not on the first query, if HEAD or the current revision is unreadable
   }
 
@@ -657,7 +690,8 @@ function readHeadFile(dir: string): Head {
   if (head.format !== 1 || !Array.isArray(head.history) || head.history.at(-1) !== head.revision) {
     throw new StoreError("CORRUPT", "HEAD is not a valid format-1 head");
   }
-  if (new Set(head.history).size !== head.history.length) throw new StoreError("CORRUPT", "HEAD lists a revision twice");
+  if (new Set(head.history).size !== head.history.length)
+    throw new StoreError("CORRUPT", "HEAD lists a revision twice");
   return head;
 }
 
@@ -682,7 +716,9 @@ export function conflictedFiles(dir: string): string[] {
     } catch {
       continue; // reported by the regular checks
     }
-    for (const f of names) if (!f.includes(".tmp-")) check(`${sub}/${f}`, sub === "revisions" ? STORE_FILE_LIMITS.revision : STORE_FILE_LIMITS.change);
+    for (const f of names)
+      if (!f.includes(".tmp-"))
+        check(`${sub}/${f}`, sub === "revisions" ? STORE_FILE_LIMITS.revision : STORE_FILE_LIMITS.change);
   }
   return out;
 }
@@ -709,7 +745,10 @@ export type UnlistedRevision = {
  *      verified children (e.g. two branches merged with HEAD resolved to their common ancestor)
  *      mean real branch revisions.
  */
-export function unlistedRevisions(dir: string, head: { revision: string; history: readonly string[] }): UnlistedRevision[] {
+export function unlistedRevisions(
+  dir: string,
+  head: { revision: string; history: readonly string[] },
+): UnlistedRevision[] {
   const committed = new Set(head.history);
   if (!existsSync(join(dir, "revisions"))) return [];
   const seq = head.history.length + 1;
@@ -724,7 +763,12 @@ export function unlistedRevisions(dir: string, head: { revision: string; history
       found.push(
         id === nextRevision(head.revision)
           ? { id, file, kind: "leftover", reason: `named as the next sequential revision after ${head.revision}` }
-          : { id, file, kind: "foreign", reason: `not in HEAD's history and not the next revision after ${head.revision}` },
+          : {
+              id,
+              file,
+              kind: "foreign",
+              reason: `not in HEAD's history and not the next revision after ${head.revision}`,
+            },
       );
       continue;
     }
@@ -738,7 +782,12 @@ export function unlistedRevisions(dir: string, head: { revision: string; history
     if (model && model.project.modelRevision === id && isChildRevision(id, model, head.revision, seq)) {
       found.push({ id, file, kind: "leftover", reason: `content digest matches a child of ${head.revision}` });
     } else {
-      found.push({ id, file, kind: "foreign", reason: model ? `not a child of HEAD revision ${head.revision}` : "unreadable revision file" });
+      found.push({
+        id,
+        file,
+        kind: "foreign",
+        reason: model ? `not a child of HEAD revision ${head.revision}` : "unreadable revision file",
+      });
     }
   }
   const candidates = found.filter((u) => u.kind === "leftover");
@@ -774,7 +823,12 @@ function readChangeRecordFiles(dir: string): (ChangeRecordEntry & { file: string
     const changeId = file.replace(/\.json$/, "");
     const f = readStoreFile(dir, `changes/${file}`, STORE_FILE_LIMITS.change);
     if (f.kind !== "file") {
-      out.push({ changeId, file, unreadable: true, problem: f.kind === "unsafe" ? f.problem : `changes/${file} disappeared while reading` });
+      out.push({
+        changeId,
+        file,
+        unreadable: true,
+        problem: f.kind === "unsafe" ? f.problem : `changes/${file} disappeared while reading`,
+      });
       continue;
     }
     let rec: unknown;
@@ -785,7 +839,12 @@ function readChangeRecordFiles(dir: string): (ChangeRecordEntry & { file: string
       continue;
     }
     if (typeof rec !== "object" || rec === null || (rec as Partial<ChangeRecord>).changeId !== changeId) {
-      out.push({ changeId, file, unreadable: true, problem: `changes/${file} does not hold the record for ${changeId}` });
+      out.push({
+        changeId,
+        file,
+        unreadable: true,
+        problem: `changes/${file} does not hold the record for ${changeId}`,
+      });
       continue;
     }
     out.push({ changeId, file, unreadable: false, record: rec as ChangeRecord });
@@ -828,13 +887,17 @@ function appliedRevisions(dir: string): Map<string, string> {
   }
   for (const e of entries) {
     const rec = e.record;
-    if (rec?.status === "applied" && typeof rec.resultingRevision === "string") out.set(rec.resultingRevision, rec.changeId);
+    if (rec?.status === "applied" && typeof rec.resultingRevision === "string")
+      out.set(rec.resultingRevision, rec.changeId);
   }
   return out;
 }
 
 function conflictError(files: string[]): StoreError {
-  return new StoreError("CONFLICTED", `unresolved Git merge conflict in ${files.join(", ")}; VCV does not merge model histories, resolve the merge (or check out one side) first`);
+  return new StoreError(
+    "CONFLICTED",
+    `unresolved Git merge conflict in ${files.join(", ")}; VCV does not merge model histories, resolve the merge (or check out one side) first`,
+  );
 }
 
 function divergedError(foreign: UnlistedRevision[]): StoreError {
@@ -850,7 +913,14 @@ export type StoreInspection =
   | { state: "uninitialized"; dir: string }
   | { state: "conflicted"; dir: string; files: string[] }
   | { state: "invalid"; dir: string; message: string }
-  | { state: "diverged"; dir: string; revision: string; history: string[]; foreign: UnlistedRevision[]; leftovers: UnlistedRevision[] }
+  | {
+      state: "diverged";
+      dir: string;
+      revision: string;
+      history: string[];
+      foreign: UnlistedRevision[];
+      leftovers: UnlistedRevision[];
+    }
   | { state: "ok"; dir: string; revision: string; history: string[]; leftovers: UnlistedRevision[] };
 
 /**
@@ -909,11 +979,15 @@ export function readHeadRevision(dir: string): Model {
 export function storeFingerprint(dir: string): string {
   const h = createHash("sha256");
   const headFile = readStoreFile(dir, "HEAD", STORE_FILE_LIMITS.head);
-  const headText = headFile.kind === "file" ? headFile.text : `\0${headFile.kind === "unsafe" ? headFile.problem : "no-head"}`;
+  const headText =
+    headFile.kind === "file" ? headFile.text : `\0${headFile.kind === "unsafe" ? headFile.problem : "no-head"}`;
   h.update(headText).update("\0");
   try {
     const rev = (JSON.parse(headText) as { revision?: unknown }).revision;
-    const f = typeof rev === "string" && !persistedIdProblem(rev) ? readStoreFile(dir, `revisions/${rev}.yaml`, STORE_FILE_LIMITS.revision) : undefined;
+    const f =
+      typeof rev === "string" && !persistedIdProblem(rev)
+        ? readStoreFile(dir, `revisions/${rev}.yaml`, STORE_FILE_LIMITS.revision)
+        : undefined;
     if (f?.kind === "file") h.update(f.bytes);
     else if (f) h.update(`\0${f.kind}`);
   } catch {
@@ -929,7 +1003,11 @@ export function storeFingerprint(dir: string): string {
     for (const n of names) {
       // lstat: a symlink is fingerprinted as itself, never followed.
       const st = lstatOrNull(join(dir, sub, n));
-      h.update(st ? `\0${sub}/${n}:${st.isFile() ? "f" : st.isSymbolicLink() ? "l" : "o"}:${st.size}:${st.mtimeMs}` : `\0${sub}/${n}:gone`);
+      h.update(
+        st
+          ? `\0${sub}/${n}:${st.isFile() ? "f" : st.isSymbolicLink() ? "l" : "o"}:${st.size}:${st.mtimeMs}`
+          : `\0${sub}/${n}:gone`,
+      );
     }
   }
   return h.digest("hex");
@@ -943,9 +1021,11 @@ function revisionCacheKey(dir: string, head: Head): string {
   return `${createHash("sha256").update(bytes).digest("hex")}\0${head.history.join("\0")}`;
 }
 
-const sameRecord = (a: ChangeRecord | null, b: ChangeRecord | null) => (a === null || b === null ? a === b : canonicalJson(a) === canonicalJson(b));
+const sameRecord = (a: ChangeRecord | null, b: ChangeRecord | null) =>
+  a === null || b === null ? a === b : canonicalJson(a) === canonicalJson(b);
 
-const sameLine = (a: Head, b: Head) => a.revision === b.revision && a.history.length === b.history.length && a.history.every((r, i) => b.history[i] === r);
+const sameLine = (a: Head, b: Head) =>
+  a.revision === b.revision && a.history.length === b.history.length && a.history.every((r, i) => b.history[i] === r);
 
 /**
  * Read a committed revision. With `history`, also check that the file still is the revision its
@@ -955,16 +1035,29 @@ const sameLine = (a: Head, b: Head) => a.revision === b.revision && a.history.le
  */
 function readRevisionFile(dir: string, rev: string, history?: readonly string[]): Model {
   if (persistedIdProblem(rev)) throw new StoreError("CORRUPT", `HEAD lists an invalid revision ID "${rev}"`);
-  const text = readStoreText(dir, `revisions/${rev}.yaml`, STORE_FILE_LIMITS.revision, `committed revision ${rev} is missing`);
+  const text = readStoreText(
+    dir,
+    `revisions/${rev}.yaml`,
+    STORE_FILE_LIMITS.revision,
+    `committed revision ${rev} is missing`,
+  );
   if (hasConflictMarkers(text)) throw conflictError([`revisions/${rev}.yaml`]);
   const r = loadModel(text);
-  if (!r.model) throw new StoreError("CORRUPT", `committed revision ${rev} is unreadable: ${r.diagnostics.map((d) => d.message).join("; ")}`);
+  if (!r.model)
+    throw new StoreError(
+      "CORRUPT",
+      `committed revision ${rev} is unreadable: ${r.diagnostics.map((d) => d.message).join("; ")}`,
+    );
   if (history) {
     if (r.model.project.modelRevision !== rev) {
       throw new StoreError("CORRUPT", `revisions/${rev}.yaml says it is ${r.model.project.modelRevision}`);
     }
     const i = history.indexOf(rev);
-    if (i > 0 && parseRevisionId(rev).scheme === "branch-safe" && !isChildRevision(rev, r.model, history[i - 1]!, i + 1)) {
+    if (
+      i > 0 &&
+      parseRevisionId(rev).scheme === "branch-safe" &&
+      !isChildRevision(rev, r.model, history[i - 1]!, i + 1)
+    ) {
       throw new StoreError(
         "CORRUPT",
         `revisions/${rev}.yaml does not match its ID: its content digest does not verify as revision ${i + 1} after ${history[i - 1]} (edited after commit, or listed out of place in HEAD)`,

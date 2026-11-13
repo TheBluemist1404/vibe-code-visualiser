@@ -8,7 +8,14 @@ import { FileStore, ModelEngine, StoreError } from "../src/index.ts";
 import type { CommitStep } from "../src/index.ts";
 import { assertRev, baseModel, mcpAgent, owner, reviewer, timeoutChange } from "./helpers.ts";
 
-const STEPS: CommitStep[] = ["revision.write", "revision.rename", "head.write", "head.rename", "change.write", "change.rename"];
+const STEPS: CommitStep[] = [
+  "revision.write",
+  "revision.rename",
+  "head.write",
+  "head.rename",
+  "change.write",
+  "change.rename",
+];
 /** HEAD is the commit point: a crash before its rename leaves the old revision current. */
 const committedIfCrashAt = (s: CommitStep) => s.startsWith("change.");
 
@@ -30,8 +37,15 @@ for (const step of STEPS) {
 
     const store = new FileStore(dir); // reopening runs recovery
     const e = new ModelEngine(store);
-    assert.deepEqual(readdirSync(join(dir, "revisions")).filter((f) => f.includes(".tmp-")), [], "no temp files left");
-    assert.deepEqual(readdirSync(join(dir, "changes")).filter((f) => f.includes(".tmp-")), []);
+    assert.deepEqual(
+      readdirSync(join(dir, "revisions")).filter((f) => f.includes(".tmp-")),
+      [],
+      "no temp files left",
+    );
+    assert.deepEqual(
+      readdirSync(join(dir, "changes")).filter((f) => f.includes(".tmp-")),
+      [],
+    );
 
     if (committedIfCrashAt(step)) {
       assertRev(e.current().project.modelRevision, 2);
@@ -40,7 +54,11 @@ for (const step of STEPS) {
       const rec = e.record("ch-timeout-01")!;
       assert.equal(rec.status, "applied");
       assertRev(rec.resultingRevision, 2);
-      assert.deepEqual(store.recovery.repairedChangeRecords, ["ch-timeout-01"], "the lost record was rebuilt from HEAD");
+      assert.deepEqual(
+        store.recovery.repairedChangeRecords,
+        ["ch-timeout-01"],
+        "the lost record was rebuilt from HEAD",
+      );
       // A retry is recognised as a replay, not applied twice.
       assert.equal(e.propose(timeoutChange(), owner).diagnostics[0]!.code, "DUPLICATE_CHANGE");
     } else {
@@ -51,18 +69,27 @@ for (const step of STEPS) {
       if (step === "head.write" || step === "head.rename") {
         assert.equal(store.recovery.orphanedRevisions.length, 1);
         leftover = assertRev(store.recovery.orphanedRevisions[0], 2);
-        assert.ok(existsSync(join(dir, "orphaned", `revision.${leftover}.yaml`)), "leftover kept for inspection, not deleted");
+        assert.ok(
+          existsSync(join(dir, "orphaned", `revision.${leftover}.yaml`)),
+          "leftover kept for inspection, not deleted",
+        );
       }
       // Safe retry: the same change now applies cleanly.
       const retry = e.propose(timeoutChange(), owner);
       assert.equal(retry.status, "applied");
       assertRev(retry.record!.resultingRevision, 2);
-      if (leftover) assert.equal(retry.record!.resultingRevision, leftover, "same parent + same content = same revision ID");
+      if (leftover)
+        assert.equal(retry.record!.resultingRevision, leftover, "same parent + same content = same revision ID");
     }
 
     // Whatever happened, a further reopen finds nothing to fix.
     const again = new FileStore(dir).recovery;
-    assert.deepEqual(again, { removedTempFiles: [], orphanedRevisions: [], orphanedChangeRecords: [], repairedChangeRecords: [] });
+    assert.deepEqual(again, {
+      removedTempFiles: [],
+      orphanedRevisions: [],
+      orphanedChangeRecords: [],
+      repairedChangeRecords: [],
+    });
   });
 }
 
@@ -70,7 +97,10 @@ test("an approval interrupted after HEAD moved repairs the pending record to app
   const dir = freshDir();
   FileStore.init(dir, baseModel());
   new ModelEngine(new FileStore(dir)).propose(timeoutChange(), mcpAgent);
-  assert.throws(() => new ModelEngine(new FileStore(dir, crashAt("change.write"))).approve("ch-timeout-01", reviewer), Crash);
+  assert.throws(
+    () => new ModelEngine(new FileStore(dir, crashAt("change.write"))).approve("ch-timeout-01", reviewer),
+    Crash,
+  );
 
   const e = new ModelEngine(new FileStore(dir));
   const rec = e.record("ch-timeout-01")!;
@@ -83,7 +113,10 @@ test("an approval interrupted before HEAD moved leaves the proposal pending and 
   const dir = freshDir();
   FileStore.init(dir, baseModel());
   new ModelEngine(new FileStore(dir)).propose(timeoutChange(), mcpAgent);
-  assert.throws(() => new ModelEngine(new FileStore(dir, crashAt("head.rename"))).approve("ch-timeout-01", reviewer), Crash);
+  assert.throws(
+    () => new ModelEngine(new FileStore(dir, crashAt("head.rename"))).approve("ch-timeout-01", reviewer),
+    Crash,
+  );
 
   const e = new ModelEngine(new FileStore(dir));
   assert.equal(e.record("ch-timeout-01")!.status, "pending");
@@ -96,7 +129,16 @@ test("an applied record pointing at an uncommitted revision is moved aside", () 
   FileStore.init(dir, baseModel());
   writeFileSync(
     join(dir, "changes", "ch-ghost.json"),
-    JSON.stringify({ changeId: "ch-ghost", status: "applied", resultingRevision: "rev-9", projectId: "prj-lms", proposerId: "x", baseRevision: "rev-8", validationResults: [], change: {} }),
+    JSON.stringify({
+      changeId: "ch-ghost",
+      status: "applied",
+      resultingRevision: "rev-9",
+      projectId: "prj-lms",
+      proposerId: "x",
+      baseRevision: "rev-8",
+      validationResults: [],
+      change: {},
+    }),
   );
   const store = new FileStore(dir);
   assert.deepEqual(store.recovery.orphanedChangeRecords, ["ch-ghost"]);
@@ -107,14 +149,26 @@ test("a corrupt or missing HEAD, or a missing committed revision, is a structure
   const dir = freshDir();
   FileStore.init(dir, baseModel());
   writeFileSync(join(dir, "HEAD"), "{not json");
-  assert.throws(() => new FileStore(dir), (e: unknown) => e instanceof StoreError && e.code === "CORRUPT");
+  assert.throws(
+    () => new FileStore(dir),
+    (e: unknown) => e instanceof StoreError && e.code === "CORRUPT",
+  );
 
   const dir2 = freshDir();
-  assert.throws(() => new FileStore(dir2), (e: unknown) => e instanceof StoreError && e.code === "NOT_INITIALIZED");
+  assert.throws(
+    () => new FileStore(dir2),
+    (e: unknown) => e instanceof StoreError && e.code === "NOT_INITIALIZED",
+  );
   FileStore.init(dir2, baseModel());
-  assert.throws(() => FileStore.init(dir2, baseModel()), (e: unknown) => e instanceof StoreError && e.code === "ALREADY_INITIALIZED");
+  assert.throws(
+    () => FileStore.init(dir2, baseModel()),
+    (e: unknown) => e instanceof StoreError && e.code === "ALREADY_INITIALIZED",
+  );
   writeFileSync(join(dir2, "HEAD"), JSON.stringify({ format: 1, revision: "rev-2", history: ["rev-1", "rev-2"] }));
-  assert.throws(() => new FileStore(dir2), (e: unknown) => e instanceof StoreError && e.code === "CORRUPT");
+  assert.throws(
+    () => new FileStore(dir2),
+    (e: unknown) => e instanceof StoreError && e.code === "CORRUPT",
+  );
 });
 
 test("a torn final line in the audit log is skipped, earlier events survive", () => {
@@ -126,7 +180,10 @@ test("a torn final line in the audit log is skipped, earlier events survive", ()
   const events = new FileStore(dir).audit();
   assert.equal(events.length, 1);
   assert.equal(events[0]!.status, "applied");
-  assert.ok(readFileSync(join(dir, "audit.jsonl"), "utf8").includes('{"at":"2026-'), "the log itself is never rewritten");
+  assert.ok(
+    readFileSync(join(dir, "audit.jsonl"), "utf8").includes('{"at":"2026-'),
+    "the log itself is never rewritten",
+  );
 });
 
 test("after a crash leaves a torn audit line, new events are appended intact and stay visible", () => {
@@ -151,6 +208,10 @@ test("after a crash leaves a torn audit line, new events are appended intact and
     "no event after the torn line is lost",
   );
   const lines = readFileSync(join(dir, "audit.jsonl"), "utf8").split("\n");
-  assert.equal(lines[1], '{"at":"2026-11-10T15:00:00Z","action":"appr', "the torn fragment is kept on its own line as evidence");
+  assert.equal(
+    lines[1],
+    '{"at":"2026-11-10T15:00:00Z","action":"appr',
+    "the torn fragment is kept on its own line as evidence",
+  );
   assert.equal(lines.at(-1), "", "the log ends with a newline");
 });

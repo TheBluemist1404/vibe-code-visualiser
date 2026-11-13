@@ -10,12 +10,24 @@ import type { Model } from "@vcv/ir";
 import { FileStore, ModelEngine, StoreError } from "@vcv/core";
 import type { HostContext, ModelStore, ProposedModelChange } from "@vcv/core";
 import { createQueryApi } from "@vcv/query";
-import { RepositoryProject, ProjectError, VCV_DIR, compareLines, initProject, parsePorcelainZ, projectStatus } from "../src/index.ts";
+import {
+  RepositoryProject,
+  ProjectError,
+  VCV_DIR,
+  compareLines,
+  initProject,
+  parsePorcelainZ,
+  projectStatus,
+} from "../src/index.ts";
 
 const FIXTURES = join(import.meta.dirname, "../../../examples/enrollment");
 const baseModel = (): Model => loadModel(readFileSync(join(FIXTURES, "model.rev-1.yaml"), "utf8")).model!;
-const timeoutChange = () => parseYaml(readFileSync(join(FIXTURES, "change.timeout.yaml"), "utf8")) as ProposedModelChange;
-const owner: HostContext = { principalId: "user:hoang", permissions: ["model:propose", "model:apply", "model:approve"] };
+const timeoutChange = () =>
+  parseYaml(readFileSync(join(FIXTURES, "change.timeout.yaml"), "utf8")) as ProposedModelChange;
+const owner: HostContext = {
+  principalId: "user:hoang",
+  permissions: ["model:propose", "model:apply", "model:approve"],
+};
 const rename = (changeId: string, expectedRevision: string, name: string): ProposedModelChange => ({
   changeId,
   projectId: "prj-lms",
@@ -33,7 +45,11 @@ const GIT_ENV = {
   GIT_CONFIG_GLOBAL: "/dev/null",
 };
 function git(cwd: string, ...args: string[]): string {
-  return execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", env: GIT_ENV, stdio: ["ignore", "pipe", "pipe"] }).trim();
+  return execFileSync("git", ["-C", cwd, ...args], {
+    encoding: "utf8",
+    env: GIT_ENV,
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
 }
 function tryGit(cwd: string, ...args: string[]): boolean {
   try {
@@ -65,7 +81,7 @@ function snapshot(dir: string): string {
   const walk = (d: string): string[] =>
     readdirSync(d, { withFileTypes: true })
       .filter((e) => e.name !== ".git")
-      .flatMap((e) => (e.isDirectory() ? [join(d, e.name) + "/", ...walk(join(d, e.name))] : [join(d, e.name)]));
+      .flatMap((e) => (e.isDirectory() ? [`${join(d, e.name)}/`, ...walk(join(d, e.name))] : [join(d, e.name)]));
   return walk(dir)
     .sort()
     .map((f) => (f.endsWith("/") ? f : `${f}:${statSync(f).mtimeMs}:${readFileSync(f, "utf8").length}`))
@@ -79,7 +95,10 @@ test("a checkout without .vcv/ is reported as absent, and nothing is created", (
   assert.equal(s.state, "absent");
   assert.equal(s.diagnostics[0]!.code, "NO_PROJECT");
   assert.deepEqual(readdirSync(dir), [".git"], "no invented model");
-  assert.throws(() => RepositoryProject.open(dir), (e: unknown) => e instanceof ProjectError && e.status.state === "absent");
+  assert.throws(
+    () => RepositoryProject.open(dir),
+    (e: unknown) => e instanceof ProjectError && e.status.state === "absent",
+  );
 
   mkdirSync(join(dir, VCV_DIR));
   assert.equal(projectStatus(dir).state, "uninitialized");
@@ -135,7 +154,8 @@ test("the same repo cloned into two paths resolves the same model; .vcv/ holds n
     const files = readdirSync(join(root, VCV_DIR), { recursive: true, withFileTypes: true }).filter((f) => f.isFile());
     for (const f of files) {
       const text = readFileSync(join(f.parentPath, f.name), "utf8");
-      for (const abs of [origin, one, two, tmpdir()]) assert.ok(!text.includes(abs), `${relative(root, join(f.parentPath, f.name))} mentions ${abs}`);
+      for (const abs of [origin, one, two, tmpdir()])
+        assert.ok(!text.includes(abs), `${relative(root, join(f.parentPath, f.name))} mentions ${abs}`);
     }
   }
 });
@@ -147,7 +167,10 @@ test("uncommitted model changes are observation context, not a different model",
   assert.equal(s.state, "ready");
   assert.equal(s.git!.dirty, true);
   assert.ok(s.git!.storeChanges.includes(`${VCV_DIR}/HEAD`));
-  assert.ok(s.git!.storeChanges.every((p) => !p.includes("audit.jsonl")), "the local audit log is git-ignored");
+  assert.ok(
+    s.git!.storeChanges.every((p) => !p.includes("audit.jsonl")),
+    "the local audit log is git-ignored",
+  );
   assert.ok(s.diagnostics.some((d) => d.code === "UNCOMMITTED_MODEL_CHANGES"));
 });
 
@@ -171,7 +194,11 @@ test("switching branches: refresh reports a different model line; nothing is res
   const r = p.refresh();
   assert.equal(r.modelLine, "switched");
   assert.ok(r.branchChanged && r.gitCommitChanged);
-  assert.equal(p.reader.current().project.modelRevision, revA, "the reader follows the checkout; no stale model is served");
+  assert.equal(
+    p.reader.current().project.modelRevision,
+    revA,
+    "the reader follows the checkout; no stale model is served",
+  );
   assert.equal(p.reader.current().behaviors[0]!.states.find((s) => s.id === "st-pending")!.name, "Waiting (A)");
 
   git(repo, "checkout", "-q", "main");
@@ -198,7 +225,10 @@ test("merging two diverged model branches is detected (conflict, then foreign hi
   assert.equal(conflicted.state, "conflicted");
   assert.ok(conflicted.diagnostics.some((d) => d.code === "CONFLICTED" && d.message.includes(`${VCV_DIR}/HEAD`)));
   assert.equal(conflicted.git!.operation, "merge");
-  assert.throws(() => new FileStore(join(repo, VCV_DIR)), (e: unknown) => e instanceof StoreError && e.code === "CONFLICTED");
+  assert.throws(
+    () => new FileStore(join(repo, VCV_DIR)),
+    (e: unknown) => e instanceof StoreError && e.code === "CONFLICTED",
+  );
   assert.throws(() => RepositoryProject.open(repo), ProjectError);
 
   // Resolving by taking our HEAD keeps A's revision file around: that is detected, not dropped.
@@ -207,8 +237,14 @@ test("merging two diverged model branches is detected (conflict, then foreign hi
   assert.equal(diverged.state, "diverged");
   assert.equal(diverged.model!.revision, revB);
   assert.ok(diverged.inspection.state === "diverged" && diverged.inspection.foreign.some((f) => f.id === revA));
-  assert.throws(() => new FileStore(join(repo, VCV_DIR)), (e: unknown) => e instanceof StoreError && e.code === "DIVERGED");
-  assert.ok(readdirSync(join(repo, VCV_DIR, "revisions")).includes(`${revA}.yaml`), "the other branch's revision was not moved");
+  assert.throws(
+    () => new FileStore(join(repo, VCV_DIR)),
+    (e: unknown) => e instanceof StoreError && e.code === "DIVERGED",
+  );
+  assert.ok(
+    readdirSync(join(repo, VCV_DIR, "revisions")).includes(`${revA}.yaml`),
+    "the other branch's revision was not moved",
+  );
 
   // Backing out of the merge restores a clean, ready project at B.
   git(repo, "merge", "--abort");
@@ -229,15 +265,21 @@ test("merging diverged branches and resolving .vcv/HEAD to the common ancestor k
 
   assert.equal(tryGit(repo, "merge", "-q", "feature-a"), false);
   // Resolve HEAD to main's version (rev-1): both rev-2 files now verify as "children of HEAD".
-  writeFileSync(join(repo, VCV_DIR, "HEAD"), git(repo, "show", `main:${VCV_DIR}/HEAD`) + "\n");
+  writeFileSync(join(repo, VCV_DIR, "HEAD"), `${git(repo, "show", `main:${VCV_DIR}/HEAD`)}\n`);
   git(repo, "add", `${VCV_DIR}/HEAD`);
   git(repo, "commit", "-q", "-m", "merge, model reset to ancestor");
 
   const s = projectStatus(repo);
   assert.equal(s.state, "diverged");
   assert.equal(s.model!.revision, "rev-1");
-  assert.ok(s.inspection.state === "diverged" && [revA, revB].every((r) => s.inspection.state === "diverged" && s.inspection.foreign.some((f) => f.id === r)));
-  assert.throws(() => new FileStore(join(repo, VCV_DIR)), (e: unknown) => e instanceof StoreError && e.code === "DIVERGED");
+  assert.ok(
+    s.inspection.state === "diverged" &&
+      [revA, revB].every((r) => s.inspection.state === "diverged" && s.inspection.foreign.some((f) => f.id === r)),
+  );
+  assert.throws(
+    () => new FileStore(join(repo, VCV_DIR)),
+    (e: unknown) => e instanceof StoreError && e.code === "DIVERGED",
+  );
   const files = readdirSync(join(repo, VCV_DIR, "revisions"));
   assert.ok(files.includes(`${revA}.yaml`) && files.includes(`${revB}.yaml`), "neither branch revision was orphaned");
   assert.equal(git(repo, "status", "--porcelain"), "", "nothing in the checkout changed");
@@ -304,15 +346,22 @@ test("a writer that rejected a diverged checkout keeps rejecting it on later cal
   // A merge commit whose .vcv/HEAD was resolved to the common ancestor.
   git(repo, "checkout", "-q", "-b", "bad-merge");
   assert.equal(tryGit(repo, "merge", "-q", "feature-a"), false);
-  writeFileSync(join(repo, VCV_DIR, "HEAD"), git(repo, "show", `main:${VCV_DIR}/HEAD`) + "\n");
+  writeFileSync(join(repo, VCV_DIR, "HEAD"), `${git(repo, "show", `main:${VCV_DIR}/HEAD`)}\n`);
   commitAll(repo, "merge, model reset to ancestor");
   git(repo, "checkout", "-q", "feature-a");
 
   const e = new ModelEngine(new FileStore(join(repo, VCV_DIR))); // opened on a healthy branch
   assert.equal(e.current().project.modelRevision, revA);
   git(repo, "checkout", "-q", "bad-merge");
-  for (let i = 0; i < 2; i++) assert.throws(() => e.current(), (err: unknown) => err instanceof StoreError && err.code === "DIVERGED");
-  assert.throws(() => e.propose(rename("ch-x", "rev-1", "x"), owner), (err: unknown) => err instanceof StoreError && err.code === "DIVERGED");
+  for (let i = 0; i < 2; i++)
+    assert.throws(
+      () => e.current(),
+      (err: unknown) => err instanceof StoreError && err.code === "DIVERGED",
+    );
+  assert.throws(
+    () => e.propose(rename("ch-x", "rev-1", "x"), owner),
+    (err: unknown) => err instanceof StoreError && err.code === "DIVERGED",
+  );
   assert.equal(git(repo, "status", "--porcelain"), "", "HEAD, revisions and records untouched");
 });
 
@@ -417,7 +466,12 @@ test("a proposal record is never written into another branch after a checkout (P
   const racing = racingAfter(repo, "getChange", "feature-b");
   // An invalid change with the colliding ID, validated on main, would be saved as "rejected".
   const r = new ModelEngine(racing).propose(
-    { changeId: "ch-x", projectId: "prj-lms", expectedRevision: "rev-1", operations: [{ type: "removeObject", objectId: "st-rejected" }] },
+    {
+      changeId: "ch-x",
+      projectId: "prj-lms",
+      expectedRevision: "rev-1",
+      operations: [{ type: "removeObject", objectId: "st-rejected" }],
+    },
     owner,
   );
   assert.equal(r.status, "rejected");
@@ -433,7 +487,10 @@ test("an auto-applied proposal never overwrites another branch's same-ID pending
   commitAll(repo, "pending proposal ch-x on B");
   git(repo, "checkout", "-q", "main"); // main: no ch-x
 
-  const r = new ModelEngine(racingAfter(repo, "getChange", "feature-b")).propose(rename("ch-x", "rev-1", "Waiting (main)"), owner);
+  const r = new ModelEngine(racingAfter(repo, "getChange", "feature-b")).propose(
+    rename("ch-x", "rev-1", "Waiting (main)"),
+    owner,
+  );
   assert.equal(r.status, "rejected");
   assert.equal(r.diagnostics[0]!.code, "STORE_CHANGED");
   assert.equal(git(repo, "status", "--porcelain"), "", "B's HEAD, revisions and pending ch-x are byte-identical");
@@ -479,7 +536,10 @@ test("a plain directory (no Git) still loads, with a warning that commit context
   assert.equal(s.state, "ready");
   assert.equal(s.git, null);
   assert.ok(s.diagnostics.some((d) => d.code === "NOT_A_GIT_REPOSITORY"));
-  assert.throws(() => initProject(dir, baseModel()), (e: unknown) => e instanceof StoreError && e.code === "ALREADY_INITIALIZED");
+  assert.throws(
+    () => initProject(dir, baseModel()),
+    (e: unknown) => e instanceof StoreError && e.code === "ALREADY_INITIALIZED",
+  );
 });
 
 test("compareLines classifies history movement", () => {
@@ -501,7 +561,10 @@ test("project status reports an unreadable change record like the writer does (P
   assert.equal(s.diagnostics[0]!.code, "INVALID_STORE");
   assert.match(s.diagnostics[0]!.message, /ch-p is unreadable/);
   assert.throws(() => RepositoryProject.open(repo), ProjectError);
-  assert.throws(() => engineFor(repo), (e: unknown) => e instanceof StoreError && e.code === "CORRUPT");
+  assert.throws(
+    () => engineFor(repo),
+    (e: unknown) => e instanceof StoreError && e.code === "CORRUPT",
+  );
 });
 
 test("Git observation keeps both paths of staged and unstaged renames (PR #8 review, round 8)", () => {
@@ -514,6 +577,10 @@ test("Git observation keeps both paths of staged and unstaged renames (PR #8 rev
   git(repo, "mv", `${VCV_DIR}/.gitignore`, `${VCV_DIR}/ignore-renamed`);
   git(repo, "reset", "-q", "HEAD");
   git(repo, "add", "-N", `${VCV_DIR}/ignore-renamed`);
-  assert.match(git(repo, "status", "--porcelain=v1", "-z"), /^R \.vcv\/ignore-renamed\0\.vcv\/\.gitignore\0/, "Git 2.18+ reports \" R\" (the helper trims the leading space)");
+  assert.match(
+    git(repo, "status", "--porcelain=v1", "-z"),
+    /^R \.vcv\/ignore-renamed\0\.vcv\/\.gitignore\0/,
+    'Git 2.18+ reports " R" (the helper trims the leading space)',
+  );
   assert.deepEqual(projectStatus(repo).git!.storeChanges, [`${VCV_DIR}/.gitignore`, `${VCV_DIR}/ignore-renamed`]);
 });

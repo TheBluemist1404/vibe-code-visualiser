@@ -17,7 +17,8 @@ const HERE = join(ROOT, "examples/reference-app/maintenance");
 const RUN = join(ROOT, "docs/samples/m2.5-maintenance");
 const CLI = join(ROOT, "apps/cli/src/main.ts");
 const tmp = () => realpathSync(mkdtempSync(join(tmpdir(), "vcv-maint-")));
-const FIXTURE_TERMS = /\b(courses?|enrol\w*|students?|seats?|notif\w*|nest(js)?|react|vite|poetry|algebra|outbox|catalog|waitlist\w*)\b/i;
+const FIXTURE_TERMS =
+  /\b(courses?|enrol\w*|students?|seats?|notif\w*|nest(js)?|react|vite|poetry|algebra|outbox|catalog|waitlist\w*)\b/i;
 
 /** The CLI as the agent's wrapper runs it: identity and permissions fixed by the host. */
 const asAgent = (args: string[], cwd?: string) =>
@@ -51,7 +52,9 @@ test("the maintenance toolkit carries the maintenance guide and nothing about th
   const dest = join(tmp(), "vcv");
   execFileSync("bash", [join(ROOT, "examples/reference-app/bootstrap/toolkit.sh"), dest, GUIDE], { encoding: "utf8" });
   assert.equal(readFileSync(join(dest, "AGENT_GUIDE.md"), "utf8"), readFileSync(GUIDE, "utf8"));
-  const grep = spawnSync("grep", ["-rIliE", "oracle|course desk|enrol|waitlist", dest, "--exclude-dir=node_modules"], { encoding: "utf8" });
+  const grep = spawnSync("grep", ["-rIliE", "oracle|course desk|enrol|waitlist", dest, "--exclude-dir=node_modules"], {
+    encoding: "utf8",
+  });
   assert.equal(grep.status, 1, `grep found: ${grep.stdout}`);
 });
 
@@ -80,13 +83,17 @@ test("a host-fixed agent identity can propose but never apply or approve, and ca
   execFileSync("mkdir", ["-p", dir]);
   const change = join(dir, "change.yaml");
   execFileSync("bash", ["-c", 'cat > "$1"', "_", change], {
-    input: "changeId: ch-test-01\nprojectId: prj-course-desk\nexpectedRevision: rev-1\nrationale: test\noperations:\n  - { type: setRuleStatement, ruleId: rul-seat-limit, statement: A full course takes requests onto a waitlist. }\n",
+    input:
+      "changeId: ch-test-01\nprojectId: prj-course-desk\nexpectedRevision: rev-1\nrationale: test\noperations:\n  - { type: setRuleStatement, ruleId: rul-seat-limit, statement: A full course takes requests onto a waitlist. }\n",
   });
   const p = asAgent(["propose", join(repo, ".vcv"), change]);
   assert.equal(p.status, 0, p.stderr);
   assert.match(p.stdout, /ch-test-01: pending \(proposed by agent:maintainer; record is pending\)/);
   assert.match(asAgent(["approve", join(repo, ".vcv"), "ch-test-01"]).stdout, /denied/);
-  for (const flags of [["--perm", "propose,apply,approve"], ["--as", "user:hoang"]]) {
+  for (const flags of [
+    ["--perm", "propose,apply,approve"],
+    ["--as", "user:hoang"],
+  ]) {
     const r = asAgent(["approve", join(repo, ".vcv"), "ch-test-01", ...flags]);
     assert.equal(r.status, 2);
     assert.match(r.stderr, /fixed by this host/);
@@ -94,7 +101,9 @@ test("a host-fixed agent identity can propose but never apply or approve, and ca
   assert.match(asAgent(["show", join(repo, ".vcv")]).stdout, /rev-1 \[draft\]/);
 });
 
-test("the recorded agent proposal replays as a validated pending change on a fresh setup; evidence is unchanged by it", { skip: !existsSync(join(RUN, "change-records")) }, () => {
+test("the recorded agent proposal replays as a validated pending change on a fresh setup; evidence is unchanged by it", {
+  skip: !existsSync(join(RUN, "change-records")),
+}, () => {
   const records = readdirSync(join(RUN, "change-records")).filter((f) => f.endsWith(".json"));
   assert.equal(records.length, 1, "one proposal");
   const record = JSON.parse(readFileSync(join(RUN, "change-records", records[0]!), "utf8"));
@@ -110,5 +119,9 @@ test("the recorded agent proposal replays as a validated pending change on a fre
   assert.equal(p.status, 0, p.stdout + p.stderr);
   assert.match(p.stdout, /: pending /);
   assert.doesNotMatch(p.stdout, /✗/);
-  assert.equal(JSON.stringify(createEvidenceApi(repo).refreshEvidence()), before, "a pending proposal changes no evidence");
+  assert.equal(
+    JSON.stringify(createEvidenceApi(repo).refreshEvidence()),
+    before,
+    "a pending proposal changes no evidence",
+  );
 });

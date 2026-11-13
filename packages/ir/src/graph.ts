@@ -45,7 +45,9 @@ export function buildIndex(model: Model): ModelIndex {
     ),
   );
   model.behaviors.forEach((b, i) => {
-    b.states.forEach((s, j) => add({ id: s.id, kind: "state", parentId: b.id, path: `behaviors[${i}].states[${j}]`, name: s.name }));
+    b.states.forEach((s, j) =>
+      add({ id: s.id, kind: "state", parentId: b.id, path: `behaviors[${i}].states[${j}]`, name: s.name }),
+    );
     b.transitions.forEach((t, j) =>
       add({ id: t.id, kind: "transition", parentId: b.id, path: `behaviors[${i}].transitions[${j}]`, name: t.id }),
     );
@@ -107,7 +109,9 @@ export function collectRefs(model: Model): RefSite[] {
   });
   model.data.forEach((d, i) => {
     push(d.id, `data[${i}].owner`, d.owner, "owner", ["module"]);
-    d.attributes.forEach((a, j) => push(a.id, `data[${i}].attributes[${j}].refDataId`, a.refDataId, "attributeRef", ["data"]));
+    d.attributes.forEach((a, j) =>
+      push(a.id, `data[${i}].attributes[${j}].refDataId`, a.refDataId, "attributeRef", ["data"]),
+    );
   });
   model.rules.forEach((r, i) => {
     push(r.id, `rules[${i}].owner`, r.owner, "owner", ["module"]);
@@ -124,7 +128,18 @@ export function collectRefs(model: Model): RefSite[] {
   });
   (model.criteria ?? []).forEach((c, i) => {
     push(c.id, `criteria[${i}].owner`, c.owner, "owner", ["module"]);
-    c.verifies.forEach((r, j) => push(c.id, `criteria[${i}].verifies[${j}]`, r, "verifies", ["capability", "rule", "contract", "event", "behavior", "transition", "data", "module"]));
+    c.verifies.forEach((r, j) =>
+      push(c.id, `criteria[${i}].verifies[${j}]`, r, "verifies", [
+        "capability",
+        "rule",
+        "contract",
+        "event",
+        "behavior",
+        "transition",
+        "data",
+        "module",
+      ]),
+    );
   });
   model.behaviors.forEach((b, i) => {
     const p = `behaviors[${i}]`;

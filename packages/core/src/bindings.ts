@@ -15,7 +15,17 @@ export type ClaimSource = "agent" | "human" | "tool";
 export const HTTP_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "ALL"] as const;
 export type HttpMethod = (typeof HTTP_METHODS)[number];
 
-export const SYMBOL_DECLARATIONS = ["class", "function", "method", "property", "accessor", "const", "interface", "type", "enum"] as const;
+export const SYMBOL_DECLARATIONS = [
+  "class",
+  "function",
+  "method",
+  "property",
+  "accessor",
+  "const",
+  "interface",
+  "type",
+  "enum",
+] as const;
 export type SymbolDeclaration = (typeof SYMBOL_DECLARATIONS)[number];
 
 export type Selector =

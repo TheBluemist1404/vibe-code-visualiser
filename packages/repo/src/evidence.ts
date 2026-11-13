@@ -31,7 +31,15 @@ import { RESOLVER_ID, fileFingerprintAt } from "./resolver.ts";
 
 // ---- requests --------------------------------------------------------------------------
 
-export const EVIDENCE_STATES = ["resolved", "stale", "missing", "ambiguous", "unchecked", "indeterminate", "invalid"] as const;
+export const EVIDENCE_STATES = [
+  "resolved",
+  "stale",
+  "missing",
+  "ambiguous",
+  "unchecked",
+  "indeterminate",
+  "invalid",
+] as const;
 export type EvidenceState = (typeof EVIDENCE_STATES)[number];
 const SELECTOR_KINDS = ["file", "symbol", "route", "test"] as const;
 
@@ -41,7 +49,9 @@ const persistedId = z
   .string()
   .min(1)
   .max(256)
-  .refine((v) => persistedIdProblem(v) === undefined, { message: "must use the persisted-ID grammar (lowercase letters, digits, '.', '-', '_')" });
+  .refine((v) => persistedIdProblem(v) === undefined, {
+    message: "must use the persisted-ID grammar (lowercase letters, digits, '.', '-', '_')",
+  });
 const revision = { expectedRevision: persistedId.optional() };
 const page = {
   limit: z.number().int().min(1).max(EVIDENCE_LIMITS.max).default(EVIDENCE_LIMITS.default),
@@ -71,7 +81,10 @@ export const refreshEvidenceRequest = z
     /** Recheck only these claims (all when absent). */
     bindingIds: z.array(persistedId).min(1).max(EVIDENCE_LIMITS.max).optional(),
     /** The observationToken of an earlier refresh; the result says whether anything changed since. */
-    since: z.string().regex(/^[0-9a-f]{64}$/, "must be an observationToken from an earlier refreshEvidence").optional(),
+    since: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/, "must be an observationToken from an earlier refreshEvidence")
+      .optional(),
   })
   .strict();
 
@@ -251,18 +264,29 @@ export function createEvidenceApi(path: string, hooks: EvidenceHooks = {}): Evid
         error: {
           code: "PROJECT_NOT_READY",
           message: `project is ${status.state}; evidence is only read from a ready project`,
-          details: status.diagnostics.filter((d) => d.severity === "error").map((d) => ({ path: "project", message: `${d.code}: ${d.message}` })),
+          details: status.diagnostics
+            .filter((d) => d.severity === "error")
+            .map((d) => ({ path: "project", message: `${d.code}: ${d.message}` })),
         },
       });
     }
     const context = contextOf(status);
     if (req.expectedRevision !== undefined && req.expectedRevision !== status.model.revision) {
-      return scrub({ ok: false, context, error: { code: "REVISION_MISMATCH", message: `expected revision ${req.expectedRevision}, current is ${status.model.revision}; restart the analysis` } });
+      return scrub({
+        ok: false,
+        context,
+        error: {
+          code: "REVISION_MISMATCH",
+          message: `expected revision ${req.expectedRevision}, current is ${status.model.revision}; restart the analysis`,
+        },
+      });
     }
     const obs = observe(path, status, which === "all" ? null : which(req), hooks);
     if ("error" in obs) return scrub({ ok: false, context, error: obs.error });
     const result = body(req, obs);
-    return scrub("error" in result ? { ok: false, context, error: result.error } : { ok: true, context, data: result.data });
+    return scrub(
+      "error" in result ? { ok: false, context, error: result.error } : { ok: true, context, data: result.data },
+    );
   }
 
   return {
@@ -289,7 +313,12 @@ type Observation = {
  * Git commit, the claim files and every bound source file are still what was read. A checkout landing mid-read is
  * reported as STATE_CHANGED instead of mixing two branches' evidence.
  */
-function observe(path: string, status: ProjectStatus, only: string | null, hooks: EvidenceHooks): Observation | { error: EvidenceError } {
+function observe(
+  path: string,
+  status: ProjectStatus,
+  only: string | null,
+  hooks: EvidenceHooks,
+): Observation | { error: EvidenceError } {
   const store = storeFingerprint(status.storeDir);
   const commit = status.git?.commit ?? null;
   let entries: ClaimEntry[];
@@ -300,14 +329,21 @@ function observe(path: string, status: ProjectStatus, only: string | null, hooks
       entries = e ? [e] : [];
     }
   } catch (e) {
-    if (e instanceof BindingError && e.code === "UNSAFE_PATH") return { error: { code: "UNSAFE_PATH", message: e.message } };
+    if (e instanceof BindingError && e.code === "UNSAFE_PATH")
+      return { error: { code: "UNSAFE_PATH", message: e.message } };
     throw e;
   }
   // The working tree is part of the observation too: fingerprint every bound source file before
   // and after verification, so a dirty edit mid-read cannot mix two generations of the source.
   const sources = [...new Set(entries.map((e) => e.claim?.locator.path).filter((p): p is string => !!p))].sort();
   const sourcesBefore = sourceState(status.root, sources);
-  const changed = { error: { code: "STATE_CHANGED" as const, message: "the model store, Git commit or claim files changed while evidence was read (a checkout or an edit?); nothing was mixed, retry the call" } };
+  const changed = {
+    error: {
+      code: "STATE_CHANGED" as const,
+      message:
+        "the model store, Git commit or claim files changed while evidence was read (a checkout or an edit?); nothing was mixed, retry the call",
+    },
+  };
   let verifications: Verification[];
   let model: ReturnType<typeof readHeadRevision>;
   try {
@@ -325,7 +361,10 @@ function observe(path: string, status: ProjectStatus, only: string | null, hooks
   hooks.afterRead?.();
 
   const again = only === null ? safeList(path) : safeOne(path, only);
-  const sameClaims = again !== null && again.length === entries.length && again.every((e, i) => e.bindingId === entries[i]!.bindingId && e.digest === entries[i]!.digest);
+  const sameClaims =
+    again !== null &&
+    again.length === entries.length &&
+    again.every((e, i) => e.bindingId === entries[i]!.bindingId && e.digest === entries[i]!.digest);
   if (
     storeFingerprint(status.storeDir) !== store ||
     (status.git ? headCommit(status.root) : null) !== commit ||
@@ -336,7 +375,13 @@ function observe(path: string, status: ProjectStatus, only: string | null, hooks
   }
   const objects = new Map<string, { kind: string; name: string }>();
   for (const e of buildIndex(model).byId.values()) objects.set(e.id, { kind: e.kind, name: e.name });
-  return { status, verifications, entries, objects, ...(only !== null && entries.length === 0 ? { absent: only } : {}) };
+  return {
+    status,
+    verifications,
+    entries,
+    objects,
+    ...(only !== null && entries.length === 0 ? { absent: only } : {}),
+  };
 }
 
 /**
@@ -405,9 +450,21 @@ function scrubber(root: string) {
 
 function evidenceOf(v: Verification, entry: ClaimEntry): BindingEvidence {
   const c = v.claim;
-  const approval = { approved: false as const, note: "binding claims are never approved; context.snapshotStatus is the model's own status" };
+  const approval = {
+    approved: false as const,
+    note: "binding claims are never approved; context.snapshotStatus is the model's own status",
+  };
   const base = { bindingId: v.bindingId, file: entry.file, digest: entry.digest, state: v.state as EvidenceState };
-  if (!c) return { ...base, problem: v.problem ?? "unreadable claim", claim: null, locator: null, freshness: null, disputed: null, approval };
+  if (!c)
+    return {
+      ...base,
+      problem: v.problem ?? "unreadable claim",
+      claim: null,
+      locator: null,
+      freshness: null,
+      disputed: null,
+      approval,
+    };
   const matches = v.locator!.matches;
   return {
     ...base,
@@ -422,7 +479,9 @@ function evidenceOf(v: Verification, entry: ClaimEntry): BindingEvidence {
     locator: {
       state: v.locator!.state,
       detail: v.locator!.detail,
-      matches: matches.slice(0, EVIDENCE_LIMITS.matches).map((m) => ({ label: m.label, declaration: m.declaration, line: m.line })),
+      matches: matches
+        .slice(0, EVIDENCE_LIMITS.matches)
+        .map((m) => ({ label: m.label, declaration: m.declaration, line: m.line })),
       matchesTotal: matches.length,
     },
     freshness: { source: v.source!, model: v.model!, git: v.git },
@@ -461,21 +520,45 @@ function claimSet(entries: readonly ClaimEntry[]) {
   return entries.map((e) => [e.bindingId, e.digest]);
 }
 
-function paginate<T>(items: readonly T[], cursor: string | undefined, limit: number, scope: string, revision: string, what: string):
-  | { page: T[]; truncated: boolean; nextCursor?: string }
-  | { error: EvidenceError } {
+function paginate<T>(
+  items: readonly T[],
+  cursor: string | undefined,
+  limit: number,
+  scope: string,
+  revision: string,
+  what: string,
+): { page: T[]; truncated: boolean; nextCursor?: string } | { error: EvidenceError } {
   let start = 0;
   if (cursor !== undefined) {
     const m = /^([^:]+):([0-9a-f]{16}):(0|[1-9]\d{0,8})$/.exec(cursor);
     if (!m) return { error: { code: "INVALID_CURSOR", message: `cursor is not one returned by ${what}` } };
-    if (m[1] !== revision) return { error: { code: "REVISION_MISMATCH", message: `cursor belongs to revision ${m[1]}, current is ${revision}; start again` } };
-    if (m[2] !== scope) return { error: { code: "INVALID_CURSOR", message: `cursor was issued for a different ${what} request, or the claims changed since; start again` } };
+    if (m[1] !== revision)
+      return {
+        error: {
+          code: "REVISION_MISMATCH",
+          message: `cursor belongs to revision ${m[1]}, current is ${revision}; start again`,
+        },
+      };
+    if (m[2] !== scope)
+      return {
+        error: {
+          code: "INVALID_CURSOR",
+          message: `cursor was issued for a different ${what} request, or the claims changed since; start again`,
+        },
+      };
     start = Number(m[3]);
-    if (start >= items.length) return { error: { code: "INVALID_CURSOR", message: `cursor offset ${start} is past the end of ${items.length} results` } };
+    if (start >= items.length)
+      return {
+        error: { code: "INVALID_CURSOR", message: `cursor offset ${start} is past the end of ${items.length} results` },
+      };
   }
   const page = items.slice(start, start + limit);
   const end = start + page.length;
-  return { page, truncated: end < items.length, ...(end < items.length ? { nextCursor: `${revision}:${scope}:${end}` } : {}) };
+  return {
+    page,
+    truncated: end < items.length,
+    ...(end < items.length ? { nextCursor: `${revision}:${scope}:${end}` } : {}),
+  };
 }
 
 /** What a query body returns; `run` adds the context envelope. */
@@ -491,7 +574,11 @@ function overview(req: z.output<typeof evidenceOverviewRequest>, obs: Observatio
   const scope = scopeOf(["overview", req.states ? [...new Set(req.states)].sort() : null, claimSet(obs.entries)]);
   const p = paginate(filtered, req.cursor, req.limit, scope, obs.status.model!.revision, "getEvidenceOverview");
   if ("error" in p) return fail(p.error);
-  const missing = [...new Set(obs.verifications.map((v) => v.claim?.modelObjectId).filter((id): id is string => !!id && !obs.objects.has(id)))].sort();
+  const missing = [
+    ...new Set(
+      obs.verifications.map((v) => v.claim?.modelObjectId).filter((id): id is string => !!id && !obs.objects.has(id)),
+    ),
+  ].sort();
   return okResult({
     counts: countsOf(obs.verifications),
     objectsMissingFromModel: missing,
@@ -506,16 +593,33 @@ function overview(req: z.output<typeof evidenceOverviewRequest>, obs: Observatio
 
 function objectEvidence(req: z.output<typeof objectEvidenceRequest>, obs: Observation): Body<ObjectEvidence> {
   const obj = obs.objects.get(req.id);
-  const about = obs.verifications.map((v, i) => [v, obs.entries[i]!] as const).filter(([v]) => v.claim?.modelObjectId === req.id);
+  const about = obs.verifications
+    .map((v, i) => [v, obs.entries[i]!] as const)
+    .filter(([v]) => v.claim?.modelObjectId === req.id);
   if (!obj && about.length === 0) {
-    return fail({ code: "UNKNOWN_ID", message: `no object with ID "${req.id}" in revision ${obs.status.model!.revision}, and no claim names it` });
+    return fail({
+      code: "UNKNOWN_ID",
+      message: `no object with ID "${req.id}" in revision ${obs.status.model!.revision}, and no claim names it`,
+    });
   }
   const rel = req.relations ? new Set<string>(req.relations) : null;
   const kinds = req.selectorKinds ? new Set<string>(req.selectorKinds) : null;
   const wanted = req.states ? new Set<string>(req.states) : null;
-  const filtered = about.filter(([v]) => (!rel || rel.has(v.claim!.relation)) && (!kinds || kinds.has(v.claim!.locator.selector.kind)) && (!wanted || wanted.has(v.state)));
+  const filtered = about.filter(
+    ([v]) =>
+      (!rel || rel.has(v.claim!.relation)) &&
+      (!kinds || kinds.has(v.claim!.locator.selector.kind)) &&
+      (!wanted || wanted.has(v.state)),
+  );
   const norm = (a?: readonly string[]) => (a ? [...new Set(a)].sort() : null);
-  const scope = scopeOf(["object", req.id, norm(req.relations), norm(req.selectorKinds), norm(req.states), claimSet(obs.entries)]);
+  const scope = scopeOf([
+    "object",
+    req.id,
+    norm(req.relations),
+    norm(req.selectorKinds),
+    norm(req.states),
+    claimSet(obs.entries),
+  ]);
   const p = paginate(filtered, req.cursor, req.limit, scope, obs.status.model!.revision, "getObjectEvidence");
   if ("error" in p) return fail(p.error);
   return okResult({
@@ -532,7 +636,11 @@ function objectEvidence(req: z.output<typeof objectEvidenceRequest>, obs: Observ
 // ---- getBindingEvidence --------------------------------------------------------------
 
 function bindingEvidence(req: z.output<typeof bindingEvidenceRequest>, obs: Observation): Body<BindingEvidence> {
-  if (obs.absent !== undefined) return fail({ code: "UNKNOWN_BINDING", message: `no claim file .vcv/bindings/${req.bindingId}.json in this checkout; list claims with getEvidenceOverview` });
+  if (obs.absent !== undefined)
+    return fail({
+      code: "UNKNOWN_BINDING",
+      message: `no claim file .vcv/bindings/${req.bindingId}.json in this checkout; list claims with getEvidenceOverview`,
+    });
   return okResult(evidenceOf(obs.verifications[0]!, obs.entries[0]!));
 }
 
@@ -543,13 +651,27 @@ function refresh(req: z.output<typeof refreshEvidenceRequest>, obs: Observation)
   if (req.bindingIds) {
     const ids = [...new Set(req.bindingIds)].sort();
     const unknown = ids.filter((id) => !obs.entries.some((e) => e.bindingId === id));
-    if (unknown.length) return fail({ code: "UNKNOWN_BINDING", message: `no claim file for ${unknown.map((i) => `"${i}"`).join(", ")} in this checkout` });
+    if (unknown.length)
+      return fail({
+        code: "UNKNOWN_BINDING",
+        message: `no claim file for ${unknown.map((i) => `"${i}"`).join(", ")} in this checkout`,
+      });
     pairs = pairs.filter(([v]) => ids.includes(v.bindingId));
   }
   const token = createHash("sha256")
-    .update(canonicalJson({ revision: obs.status.model!.revision, revisionFile: obs.status.model!.fileDigest, evidence: pairs.map(([v, e]) => ({ ...evidenceOf(v, e) })) }))
+    .update(
+      canonicalJson({
+        revision: obs.status.model!.revision,
+        revisionFile: obs.status.model!.fileDigest,
+        evidence: pairs.map(([v, e]) => ({ ...evidenceOf(v, e) })),
+      }),
+    )
     .digest("hex");
-  const scope = scopeOf(["refresh", req.bindingIds ? [...new Set(req.bindingIds)].sort() : null, claimSet(obs.entries)]);
+  const scope = scopeOf([
+    "refresh",
+    req.bindingIds ? [...new Set(req.bindingIds)].sort() : null,
+    claimSet(obs.entries),
+  ]);
   const p = paginate(pairs, req.cursor, req.limit, scope, obs.status.model!.revision, "refreshEvidence");
   if ("error" in p) return fail(p.error);
   return okResult({

@@ -37,7 +37,16 @@ import { LIMITS as QUERY_LIMITS, createQueryApi } from "@vcv/query";
 import type { ImpactCandidate } from "@vcv/query";
 import { MAX_CLAIM_BYTES, verifyBinding } from "./bindings.ts";
 import type { ClaimEntry, Verification } from "./bindings.ts";
-import { changedFilesBetween, changedFilesSince, fileAtCommit, filesAtCommit, headCommit, isAncestor, mergeBase, resolveCommit } from "./git.ts";
+import {
+  changedFilesBetween,
+  changedFilesSince,
+  fileAtCommit,
+  filesAtCommit,
+  headCommit,
+  isAncestor,
+  mergeBase,
+  resolveCommit,
+} from "./git.ts";
 import { checkIntegrity } from "./integrity.ts";
 import type { IntegrityReport } from "./integrity.ts";
 import { APPROVALS_DIR, REVIEWERS_FILE, readPlainFile } from "./approval.ts";
@@ -155,7 +164,14 @@ export type ReconciledBinding = {
 };
 
 export type SourceImpact = {
-  seeds: { objectId: Id; kind: string; name: string; moduleId: Id | null; bindings: string[]; why: ("bound-file-changed" | "claim-added" | "claim-reasserted" | "claim-unresolved")[] }[];
+  seeds: {
+    objectId: Id;
+    kind: string;
+    name: string;
+    moduleId: Id | null;
+    bindings: string[];
+    why: ("bound-file-changed" | "claim-added" | "claim-reasserted" | "claim-unresolved")[];
+  }[];
   seedsTotal: number;
   modules: { id: Id; name: string; via: "seed" | "impacted" }[];
   crossModule: "yes" | "no" | "not-determined";
@@ -181,13 +197,28 @@ export type Reconciliation = {
     containedInCandidate: boolean;
     modelRevision: string | null;
   };
-  candidate: { commit: string; branch: string | null; dirty: boolean; modelRevision: string; projectId: string; worktree: WorktreeState };
+  candidate: {
+    commit: string;
+    branch: string | null;
+    dirty: boolean;
+    modelRevision: string;
+    projectId: string;
+    worktree: WorktreeState;
+  };
   model: {
     /** unchanged: same revision; extends: base line is a prefix; new-model: no .vcv/ at the base; rewritten: base history not a prefix, or a base revision's bytes changed. */
     lineage: "unchanged" | "extends" | "new-model" | "rewritten";
     introduced: { revision: string; changeId: string | null; derivation: string; approval: string }[];
     introducedTotal: number;
-    integrity: { ok: boolean; errors: { code: string; message: string }[]; warnings: { code: string; message: string }[]; errorsTotal: number; warningsTotal: number; trust: string | null; authorization: string };
+    integrity: {
+      ok: boolean;
+      errors: { code: string; message: string }[];
+      warnings: { code: string; message: string }[];
+      errorsTotal: number;
+      warningsTotal: number;
+      trust: string | null;
+      authorization: string;
+    };
     delta: { from: string | null; changes: ObjectChange[]; total: number; truncated: boolean };
     impact: ProposalPreview["impact"];
   };
@@ -241,25 +272,44 @@ const LIMITS = [
   "Source changes are measured from the merge base with the base, so changes that landed on the base after the branch point are not counted as the candidate's.",
 ];
 
-const SEMANTIC_NOTE = "VCV makes no semantic observations. Agent-authored interpretations are added to the pre-merge report (M4.4) and labelled as claims.";
+const SEMANTIC_NOTE =
+  "VCV makes no semantic observations. Agent-authored interpretations are added to the pre-merge report (M4.4) and labelled as claims.";
 
 /** Compare the candidate checkout containing `path` with a protected base. Read-only, one observation. */
 /**
  * `collect`, when given, receives every finding before any list is cut (the M4.4 gate decides on
  * all of them; the report shows the bounded list).
  */
-export function reconcile(path: string, input: unknown, hooks: ProposalHooks = {}, collect?: (all: ReconcileFinding[]) => void): ProposalResult<Reconciliation> {
+export function reconcile(
+  path: string,
+  input: unknown,
+  hooks: ProposalHooks = {},
+  collect?: (all: ReconcileFinding[]) => void,
+): ProposalResult<Reconciliation> {
   const parsed = reconcileRequest.safeParse(input);
   if (!parsed.success) {
-    return { ok: false, error: { code: "INVALID_REQUEST", message: "request does not match the reconciliation input schema", details: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })) } };
+    return {
+      ok: false,
+      error: {
+        code: "INVALID_REQUEST",
+        message: "request does not match the reconciliation input schema",
+        details: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+      },
+    };
   }
   const req = parsed.data as ReconcileRequest;
   return observed(path, hooks, (obs) => {
     const root = obs.status.root;
-    const fail = (code: "UNKNOWN_COMMIT" | "STORE_ERROR", message: string) => failFinal<Reconciliation>({ code, message }, obs, hooks);
-    if (!obs.status.git || !obs.commit) return fail("UNKNOWN_COMMIT", "the candidate is not a Git checkout with a commit: there is nothing to compare with a base");
+    const fail = (code: "UNKNOWN_COMMIT" | "STORE_ERROR", message: string) =>
+      failFinal<Reconciliation>({ code, message }, obs, hooks);
+    if (!obs.status.git || !obs.commit)
+      return fail(
+        "UNKNOWN_COMMIT",
+        "the candidate is not a Git checkout with a commit: there is nothing to compare with a base",
+      );
     const baseCommit = resolveCommit(root, req.base);
-    if (!baseCommit) return fail("UNKNOWN_COMMIT", `${req.base} is not a commit in this repository (fetch the base first)`);
+    if (!baseCommit)
+      return fail("UNKNOWN_COMMIT", `${req.base} is not a commit in this repository (fetch the base first)`);
     const mb = mergeBase(root, baseCommit, obs.commit);
     if (!mb) return fail("UNKNOWN_COMMIT", `${req.base} (${baseCommit.slice(0, 12)}) shares no history with HEAD`);
 
@@ -272,13 +322,33 @@ export function reconcile(path: string, input: unknown, hooks: ProposalHooks = {
     // trust source), read before checkIntegrity and again before answering.
     const evidence = evidenceKey(root, obs.status.storeDir, tree, req.trust);
 
-    const integrity = checkIntegrity(root, { base: baseCommit, ...(req.trust ? { trust: req.trust } : {}), requireAttestation: !!req.requireAttestation });
+    const integrity = checkIntegrity(root, {
+      base: baseCommit,
+      ...(req.trust ? { trust: req.trust } : {}),
+      requireAttestation: !!req.requireAttestation,
+    });
     const baseModel = modelAt(root, baseCommit);
     const fromModel = mb === baseCommit ? baseModel : modelAt(root, mb);
-    const verifications = new Map(claims.entries.map((e) => [e.bindingId, verifyBinding(root, e, obs.status)] as const));
+    const verifications = new Map(
+      claims.entries.map((e) => [e.bindingId, verifyBinding(root, e, obs.status)] as const),
+    );
     const baseClaims = claimsAt(root, mb);
 
-    const data = assemble({ obs, req, baseCommit, mb, tree, integrity, baseModel, fromModel, entries: claims.entries, verifications, baseClaims, claimsProblem, collect });
+    const data = assemble({
+      obs,
+      req,
+      baseCommit,
+      mb,
+      tree,
+      integrity,
+      baseModel,
+      fromModel,
+      entries: claims.entries,
+      verifications,
+      baseClaims,
+      claimsProblem,
+      collect,
+    });
     const guard = {
       key: guardKey(claims.key, tree, baseCommit, evidence),
       again: () => {
@@ -289,13 +359,26 @@ export function reconcile(path: string, input: unknown, hooks: ProposalHooks = {
       },
     };
     const bounded = fitBudget(redact(data, root));
-    if (!bounded) return failFinal({ code: "REPORT_TOO_LARGE", message: `the reconciliation report exceeds ${RECONCILE_LIMITS.bytes} bytes even with every list cut to one item; narrow the change or inspect it with vcv evidence` }, obs, hooks);
+    if (!bounded)
+      return failFinal(
+        {
+          code: "REPORT_TOO_LARGE",
+          message: `the reconciliation report exceeds ${RECONCILE_LIMITS.bytes} bytes even with every list cut to one item; narrow the change or inspect it with vcv evidence`,
+        },
+        obs,
+        hooks,
+      );
     return finish(obs, hooks, bounded, guard);
   });
 }
 
 const guardKey = (claimsKey: string, tree: Tree | null, base: string | null, evidence: string) =>
-  canonicalJson([claimsKey, base, tree ? [tree.committed, tree.uncommitted, tree.state.digest] : "unreadable", evidence]);
+  canonicalJson([
+    claimsKey,
+    base,
+    tree ? [tree.committed, tree.uncommitted, tree.state.digest] : "unreadable",
+    evidence,
+  ]);
 
 const sha = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
 
@@ -310,7 +393,10 @@ function evidenceKey(root: string, storeDir: string, tree: Tree | null, trust: T
   let listing: string[] | string;
   try {
     const st = lstatSync(join(storeDir, APPROVALS_DIR));
-    listing = st.isSymbolicLink() || !st.isDirectory() ? `unsafe:${st.isSymbolicLink() ? "symlink" : "not-a-directory"}` : readdirSync(join(storeDir, APPROVALS_DIR)).sort();
+    listing =
+      st.isSymbolicLink() || !st.isDirectory()
+        ? `unsafe:${st.isSymbolicLink() ? "symlink" : "not-a-directory"}`
+        : readdirSync(join(storeDir, APPROVALS_DIR)).sort();
   } catch (e) {
     listing = (e as NodeJS.ErrnoException).code === "ENOENT" ? [] : `unreadable:${(e as NodeJS.ErrnoException).code}`;
   }
@@ -332,7 +418,8 @@ function evidenceKey(root: string, storeDir: string, tree: Tree | null, trust: T
   return sha(canonicalJson([listing, files, source]));
 }
 
-const cutText = (t: string, max: number = RECONCILE_LIMITS.textChars) => (t.length > max ? `${t.slice(0, max - 1)}…` : t);
+const cutText = (t: string, max: number = RECONCILE_LIMITS.textChars) =>
+  t.length > max ? `${t.slice(0, max - 1)}…` : t;
 
 /**
  * Fit the serialized report into RECONCILE_LIMITS.bytes: halve the longest list (flagging it
@@ -344,15 +431,43 @@ function fitBudget(r: Reconciliation): Reconciliation | null {
   let shrunk = false;
   const lists: { get: () => unknown[]; set: (n: number) => void }[] = [
     { get: () => r.findings, set: (n) => ((r.findings = r.findings.slice(0, n)), (r.findingsTruncated = true)) },
-    { get: () => r.bindings.items, set: (n) => ((r.bindings.items = r.bindings.items.slice(0, n)), (r.bindings.truncated = true)) },
-    { get: () => r.source.files, set: (n) => ((r.source.files = r.source.files.slice(0, n)), (r.source.truncated = true)) },
-    { get: () => r.model.delta.changes, set: (n) => ((r.model.delta.changes = r.model.delta.changes.slice(0, n)), (r.model.delta.truncated = true)) },
-    { get: () => r.model.impact?.candidates ?? [], set: (n) => r.model.impact && ((r.model.impact.candidates = r.model.impact.candidates.slice(0, n)), (r.model.impact.truncated = true)) },
-    { get: () => r.sourceImpact?.candidates ?? [], set: (n) => r.sourceImpact && ((r.sourceImpact.candidates = r.sourceImpact.candidates.slice(0, n)), (r.sourceImpact.truncated = true)) },
-    { get: () => r.sourceImpact?.seeds ?? [], set: (n) => r.sourceImpact && (r.sourceImpact.seeds = r.sourceImpact.seeds.slice(0, n)) },
+    {
+      get: () => r.bindings.items,
+      set: (n) => ((r.bindings.items = r.bindings.items.slice(0, n)), (r.bindings.truncated = true)),
+    },
+    {
+      get: () => r.source.files,
+      set: (n) => ((r.source.files = r.source.files.slice(0, n)), (r.source.truncated = true)),
+    },
+    {
+      get: () => r.model.delta.changes,
+      set: (n) => ((r.model.delta.changes = r.model.delta.changes.slice(0, n)), (r.model.delta.truncated = true)),
+    },
+    {
+      get: () => r.model.impact?.candidates ?? [],
+      set: (n) =>
+        r.model.impact &&
+        ((r.model.impact.candidates = r.model.impact.candidates.slice(0, n)), (r.model.impact.truncated = true)),
+    },
+    {
+      get: () => r.sourceImpact?.candidates ?? [],
+      set: (n) =>
+        r.sourceImpact &&
+        ((r.sourceImpact.candidates = r.sourceImpact.candidates.slice(0, n)), (r.sourceImpact.truncated = true)),
+    },
+    {
+      get: () => r.sourceImpact?.seeds ?? [],
+      set: (n) => r.sourceImpact && (r.sourceImpact.seeds = r.sourceImpact.seeds.slice(0, n)),
+    },
     { get: () => r.model.introduced, set: (n) => (r.model.introduced = r.model.introduced.slice(0, n)) },
-    { get: () => r.model.integrity.errors, set: (n) => (r.model.integrity.errors = r.model.integrity.errors.slice(0, n)) },
-    { get: () => r.model.integrity.warnings, set: (n) => (r.model.integrity.warnings = r.model.integrity.warnings.slice(0, n)) },
+    {
+      get: () => r.model.integrity.errors,
+      set: (n) => (r.model.integrity.errors = r.model.integrity.errors.slice(0, n)),
+    },
+    {
+      get: () => r.model.integrity.warnings,
+      set: (n) => (r.model.integrity.warnings = r.model.integrity.warnings.slice(0, n)),
+    },
   ];
   while (bytes > RECONCILE_LIMITS.bytes) {
     const longest = lists.reduce((a, b) => (b.get().length > a.get().length ? b : a));
@@ -388,12 +503,21 @@ type BaseModel = { revision: string; history: string[]; model: Model } | { absen
 /** The model `.vcv/HEAD` names at a commit, read from Git objects only. */
 function modelAt(root: string, commit: string): BaseModel {
   const head = fileAtCommit(root, commit, `${VCV_DIR}/HEAD`, STORE_FILE_LIMITS.head);
-  if (!head) return filesAtCommit(root, commit, VCV_DIR).length ? { unreadable: `${VCV_DIR}/HEAD is missing or too large` } : { absent: true };
+  if (!head)
+    return filesAtCommit(root, commit, VCV_DIR).length
+      ? { unreadable: `${VCV_DIR}/HEAD is missing or too large` }
+      : { absent: true };
   let revision: string;
   let history: string[];
   try {
     const h = JSON.parse(head.toString("utf8")) as { revision?: unknown; history?: unknown };
-    if (typeof h.revision !== "string" || persistedIdProblem(h.revision) || !Array.isArray(h.history) || !h.history.every((x) => typeof x === "string")) throw new Error("bad");
+    if (
+      typeof h.revision !== "string" ||
+      persistedIdProblem(h.revision) ||
+      !Array.isArray(h.history) ||
+      !h.history.every((x) => typeof x === "string")
+    )
+      throw new Error("bad");
     revision = h.revision;
     history = h.history as string[];
   } catch {
@@ -413,7 +537,10 @@ function claimsAt(root: string, commit: string): Map<string, string> {
   for (const rel of filesAtCommit(root, commit, `${VCV_DIR}/bindings`)) {
     if (!rel.startsWith(dir) || !rel.endsWith(".json") || rel.slice(dir.length).includes("/")) continue;
     const bytes = fileAtCommit(root, commit, rel, MAX_CLAIM_BYTES);
-    out.set(rel.slice(dir.length, -".json".length), bytes ? createHash("sha256").update(bytes).digest("hex") : "unreadable");
+    out.set(
+      rel.slice(dir.length, -".json".length),
+      bytes ? createHash("sha256").update(bytes).digest("hex") : "unreadable",
+    );
   }
   return out;
 }
@@ -422,7 +549,8 @@ function areaOf(path: string): FileArea {
   if (path.startsWith(`${VCV_DIR}/`)) {
     const sub = path.slice(VCV_DIR.length + 1);
     if (sub.startsWith("bindings/")) return "vcv-bindings";
-    if (sub === "HEAD" || sub.startsWith("revisions/") || sub.startsWith("changes/") || sub.startsWith("approvals/")) return "vcv-model";
+    if (sub === "HEAD" || sub.startsWith("revisions/") || sub.startsWith("changes/") || sub.startsWith("approvals/"))
+      return "vcv-model";
     return "vcv-other";
   }
   return /(^|\/)(test|tests|__tests__)\/|[.-](test|spec)\.[cm]?[jt]sx?$/.test(path) ? "test" : "source";
@@ -451,7 +579,8 @@ function assemble(p: Parts): Reconciliation {
   const { obs, tree, integrity } = p;
   const findings: ReconcileFinding[] = [];
   // Messages quote locators, causes and paths that can be long: every finding's text is bounded.
-  const add = (f: ReconcileFinding) => findings.push({ ...f, message: cutText(f.message), checked: cutText(f.checked) });
+  const add = (f: ReconcileFinding) =>
+    findings.push({ ...f, message: cutText(f.message), checked: cutText(f.checked) });
   const claimsReadable = p.claimsProblem === null;
   const candidateModel = obs.model;
   const candidateRev = candidateModel.project.modelRevision;
@@ -459,10 +588,18 @@ function assemble(p: Parts): Reconciliation {
   // Model line and delta.
   const baseRev = "model" in p.baseModel ? p.baseModel.revision : null;
   const lineage: Reconciliation["model"]["lineage"] =
-    "absent" in p.baseModel ? "new-model" : !("model" in p.baseModel) || integrity.problems.some((x) => x.code === "BASE_HISTORY_REWRITTEN" || x.code === "BASE_REVISION_CHANGED") ? "rewritten" : baseRev === candidateRev ? "unchanged" : "extends";
+    "absent" in p.baseModel
+      ? "new-model"
+      : !("model" in p.baseModel) ||
+          integrity.problems.some((x) => x.code === "BASE_HISTORY_REWRITTEN" || x.code === "BASE_REVISION_CHANGED")
+        ? "rewritten"
+        : baseRev === candidateRev
+          ? "unchanged"
+          : "extends";
   const from = "model" in p.fromModel ? p.fromModel : null;
   const allChanges = from ? diffModels(from.model, candidateModel) : [];
-  const impact = from && allChanges.length ? impactOf(from.model, candidateModel, allChanges, RECONCILE_LIMITS.candidates) : null;
+  const impact =
+    from && allChanges.length ? impactOf(from.model, candidateModel, allChanges, RECONCILE_LIMITS.candidates) : null;
   const inChange = new Map<Id, ObjectInChange>();
   for (const c of allChanges) inChange.set(c.id, c.change);
   for (const c of impact?.candidates ?? []) if (!inChange.has(c.id)) inChange.set(c.id, "impacted");
@@ -470,11 +607,44 @@ function assemble(p: Parts): Reconciliation {
   const objectState = (id: Id): ObjectInChange => inChange.get(id) ?? (inModel.has(id) ? "unchanged" : "not-in-model");
 
   for (const x of integrity.problems) {
-    add({ code: x.code, category: "integrity", basis: "checked", related: true, message: x.message, checked: "the .vcv/ history against the base (derivation replay, records, attestations)", ...(x.revision ? { revision: x.revision } : {}), ...(x.changeId ? { changeId: x.changeId } : {}) });
+    add({
+      code: x.code,
+      category: "integrity",
+      basis: "checked",
+      related: true,
+      message: x.message,
+      checked: "the .vcv/ history against the base (derivation replay, records, attestations)",
+      ...(x.revision ? { revision: x.revision } : {}),
+      ...(x.changeId ? { changeId: x.changeId } : {}),
+    });
   }
-  if ("unreadable" in p.baseModel) add({ code: "BASE_MODEL_UNREADABLE", category: "integrity", basis: "checked", related: true, message: `the base's model cannot be read: ${p.baseModel.unreadable}`, checked: `${VCV_DIR}/ at ${p.baseCommit.slice(0, 12)} (Git objects)` });
-  if (lineage === "new-model") add({ code: "MODEL_INTRODUCED", category: "source", basis: "observed", related: true, message: `the base has no ${VCV_DIR}/; the candidate introduces the whole model (${candidateRev}), whose origin is not provable`, checked: `${VCV_DIR}/ at ${p.baseCommit.slice(0, 12)}` });
-  if (!from && !("absent" in p.fromModel) && p.mb !== p.baseCommit) add({ code: "DELTA_UNAVAILABLE", category: "unsupported", basis: "not-checked", related: true, message: "the model at the merge base cannot be read, so no model delta is reported", checked: `${VCV_DIR}/ at ${p.mb.slice(0, 12)}` });
+  if ("unreadable" in p.baseModel)
+    add({
+      code: "BASE_MODEL_UNREADABLE",
+      category: "integrity",
+      basis: "checked",
+      related: true,
+      message: `the base's model cannot be read: ${p.baseModel.unreadable}`,
+      checked: `${VCV_DIR}/ at ${p.baseCommit.slice(0, 12)} (Git objects)`,
+    });
+  if (lineage === "new-model")
+    add({
+      code: "MODEL_INTRODUCED",
+      category: "source",
+      basis: "observed",
+      related: true,
+      message: `the base has no ${VCV_DIR}/; the candidate introduces the whole model (${candidateRev}), whose origin is not provable`,
+      checked: `${VCV_DIR}/ at ${p.baseCommit.slice(0, 12)}`,
+    });
+  if (!from && !("absent" in p.fromModel) && p.mb !== p.baseCommit)
+    add({
+      code: "DELTA_UNAVAILABLE",
+      category: "unsupported",
+      basis: "not-checked",
+      related: true,
+      message: "the model at the merge base cannot be read, so no model delta is reported",
+      checked: `${VCV_DIR}/ at ${p.mb.slice(0, 12)}`,
+    });
 
   // Source files.
   const committed = new Set(tree.committed);
@@ -490,7 +660,14 @@ function assemble(p: Parts): Reconciliation {
   const changedSet = new Set(tree.changed);
   const files: ChangedFile[] = tree.changed.map((path) => {
     const f = byFile.get(path);
-    return { path, area: areaOf(path), committed: committed.has(path), uncommitted: uncommitted.has(path), bindings: f ? [...f.bindings].sort() : [], objectIds: f ? [...f.objects].sort() : [] };
+    return {
+      path,
+      area: areaOf(path),
+      committed: committed.has(path),
+      uncommitted: uncommitted.has(path),
+      bindings: f ? [...f.bindings].sort() : [],
+      objectIds: f ? [...f.objects].sort() : [],
+    };
   });
   const code = files.filter((f) => f.area === "source" || f.area === "test");
   // Without readable claims nothing is known to be mapped or unmapped.
@@ -524,15 +701,32 @@ function assemble(p: Parts): Reconciliation {
       category: "unsupported",
       basis: "not-checked",
       related: true,
-      message: `${unmapped.length} changed file(s) outside .vcv/ are not pointed at by any claim, so VCV cannot relate them to the model: ${unmapped.slice(0, RECONCILE_LIMITS.paths).map((f) => f.path).join(", ")}${unmapped.length > RECONCILE_LIMITS.paths ? ", …" : ""}`,
+      message: `${unmapped.length} changed file(s) outside .vcv/ are not pointed at by any claim, so VCV cannot relate them to the model: ${unmapped
+        .slice(0, RECONCILE_LIMITS.paths)
+        .map((f) => f.path)
+        .join(", ")}${unmapped.length > RECONCILE_LIMITS.paths ? ", …" : ""}`,
       checked: "binding claim locators against the changed file list",
     });
   }
   if (tree.uncommitted.length) {
-    add({ code: "UNCOMMITTED_CHANGES", category: "source", basis: "observed", related: true, message: `${tree.uncommitted.length} path(s) differ from HEAD; this report describes those working-tree bytes (candidate.worktree), not only commit ${obs.commit!.slice(0, 12)}`, checked: "git status against HEAD" });
+    add({
+      code: "UNCOMMITTED_CHANGES",
+      category: "source",
+      basis: "observed",
+      related: true,
+      message: `${tree.uncommitted.length} path(s) differ from HEAD; this report describes those working-tree bytes (candidate.worktree), not only commit ${obs.commit!.slice(0, 12)}`,
+      checked: "git status against HEAD",
+    });
   }
   if (p.mb !== p.baseCommit) {
-    add({ code: "BASE_NOT_CONTAINED", category: "source", basis: "observed", related: true, message: `the candidate does not contain the base ${p.baseCommit.slice(0, 12)}; its changes are measured from the merge base ${p.mb.slice(0, 12)}. Update the branch before merging.`, checked: "git merge-base" });
+    add({
+      code: "BASE_NOT_CONTAINED",
+      category: "source",
+      basis: "observed",
+      related: true,
+      message: `the candidate does not contain the base ${p.baseCommit.slice(0, 12)}; its changes are measured from the merge base ${p.mb.slice(0, 12)}. Update the branch before merging.`,
+      checked: "git merge-base",
+    });
   }
 
   // Bindings.
@@ -540,16 +734,43 @@ function assemble(p: Parts): Reconciliation {
   const ids = [...new Set([...p.entries.map((e) => e.bindingId), ...p.baseClaims.keys()])].sort();
   const entryOf = new Map(p.entries.map((e) => [e.bindingId, e] as const));
   const claimsOn = new Map<Id, string[]>();
-  for (const e of p.entries) if (e.claim) claimsOn.set(e.claim.modelObjectId, [...(claimsOn.get(e.claim.modelObjectId) ?? []), e.bindingId]);
+  for (const e of p.entries)
+    if (e.claim) claimsOn.set(e.claim.modelObjectId, [...(claimsOn.get(e.claim.modelObjectId) ?? []), e.bindingId]);
   let unaffected = 0;
   const counts: Record<string, number> = {};
   for (const id of claimsReadable ? ids : []) {
     const e = entryOf.get(id);
     const atBaseDigest = p.baseClaims.get(id);
-    const atBase: ClaimAtBase = !e ? "removed" : atBaseDigest === undefined ? "added" : atBaseDigest === e.digest ? "unchanged" : "reasserted";
+    const atBase: ClaimAtBase = !e
+      ? "removed"
+      : atBaseDigest === undefined
+        ? "added"
+        : atBaseDigest === e.digest
+          ? "unchanged"
+          : "reasserted";
     if (!e) {
-      rows.push({ bindingId: id, modelObjectId: null, relation: null, locator: null, state: null, source: null, model: null, atBase, boundFileChanged: false, object: "not-in-model", disputed: false });
-      add({ code: "CLAIM_REMOVED", category: "binding", basis: "observed", related: true, bindingId: id, message: `claim ${id} exists at the merge base but was removed here; whatever it located is no longer bound`, checked: `${VCV_DIR}/bindings/${id}.json at ${p.mb.slice(0, 12)} and in the working tree` });
+      rows.push({
+        bindingId: id,
+        modelObjectId: null,
+        relation: null,
+        locator: null,
+        state: null,
+        source: null,
+        model: null,
+        atBase,
+        boundFileChanged: false,
+        object: "not-in-model",
+        disputed: false,
+      });
+      add({
+        code: "CLAIM_REMOVED",
+        category: "binding",
+        basis: "observed",
+        related: true,
+        bindingId: id,
+        message: `claim ${id} exists at the merge base but was removed here; whatever it located is no longer bound`,
+        checked: `${VCV_DIR}/bindings/${id}.json at ${p.mb.slice(0, 12)} and in the working tree`,
+      });
       continue;
     }
     const v = p.verifications.get(id)!;
@@ -557,14 +778,20 @@ function assemble(p: Parts): Reconciliation {
     counts[v.state] = (counts[v.state] ?? 0) + 1;
     const object = c ? objectState(c.modelObjectId) : "not-in-model";
     const boundFileChanged = !!c && changedSet.has(c.locator.path);
-    const related = atBase !== "unchanged" || boundFileChanged || (object !== "unchanged" && object !== "not-in-model") || (!!c && !inModel.has(c.modelObjectId));
+    const related =
+      atBase !== "unchanged" ||
+      boundFileChanged ||
+      (object !== "unchanged" && object !== "not-in-model") ||
+      (!!c && !inModel.has(c.modelObjectId));
     const row: ReconciledBinding = {
       bindingId: id,
       modelObjectId: c?.modelObjectId ?? null,
       relation: c?.relation ?? null,
       ...locatorText(c ? formatLocator(c.locator) : null),
       state: v.state,
-      source: v.source ? { state: v.source.state, cause: cutText(v.source.cause), fileChanged: v.source.fileChanged } : null,
+      source: v.source
+        ? { state: v.source.state, cause: cutText(v.source.cause), fileChanged: v.source.fileChanged }
+        : null,
       model: v.model ? { state: v.model.state, cause: cutText(v.model.cause) } : null,
       atBase,
       boundFileChanged,
@@ -583,24 +810,48 @@ function assemble(p: Parts): Reconciliation {
   for (const ch of claimsReadable ? allChanges : []) {
     if (ch.change === "removed" || ch.kind === "project") continue;
     if (claimsOn.has(ch.id)) continue;
-    add({ code: "OBJECT_UNBOUND", category: "coverage", basis: "observed", related: true, objectIds: [ch.id], message:
+    add({
+      code: "OBJECT_UNBOUND",
+      category: "coverage",
+      basis: "observed",
+      related: true,
+      objectIds: [ch.id],
+      message:
         ch.kind === "criterion"
           ? `criterion ${ch.id} was ${ch.change} by the candidate's model change, and no test case is mapped to it (a \`tests\` claim on the criterion; see vcv criteria)`
-          : `${ch.kind} ${ch.id} was ${ch.change} by the candidate's model change, and no binding claim locates its code`, checked: "binding claims against the model delta" });
+          : `${ch.kind} ${ch.id} was ${ch.change} by the candidate's model change, and no binding claim locates its code`,
+      checked: "binding claims against the model delta",
+    });
   }
 
   const cut = <T>(xs: T[], n: number) => ({ items: xs.slice(0, n), total: xs.length, truncated: xs.length > n });
   const shownFiles = cut(files, RECONCILE_LIMITS.files);
   const shownRows = cut(rows, RECONCILE_LIMITS.bindings);
   const shownChanges = cut(allChanges, RECONCILE_LIMITS.changes);
-  const introduced = integrity.revisions.filter((r) => r.introduced).map((r) => ({ revision: r.revision, changeId: r.changeId, derivation: r.derivation, approval: r.approval.state }));
+  const introduced = integrity.revisions
+    .filter((r) => r.introduced)
+    .map((r) => ({ revision: r.revision, changeId: r.changeId, derivation: r.derivation, approval: r.approval.state }));
   const problem = (x: { code: string; message: string }) => ({ code: x.code, message: cutText(x.message) });
   const errors = integrity.problems.filter((x) => x.severity === "error").map(problem);
   const warnings = integrity.problems.filter((x) => x.severity === "warning").map(problem);
   if (shownFiles.truncated || shownRows.truncated || shownChanges.truncated) {
-    add({ code: "LIST_TRUNCATED", category: "unsupported", basis: "not-checked", related: true, message: `lists were cut at their limits (files ${RECONCILE_LIMITS.files}, bindings ${RECONCILE_LIMITS.bindings}, model changes ${RECONCILE_LIMITS.changes}); the summary counts everything`, checked: "list sizes" });
+    add({
+      code: "LIST_TRUNCATED",
+      category: "unsupported",
+      basis: "not-checked",
+      related: true,
+      message: `lists were cut at their limits (files ${RECONCILE_LIMITS.files}, bindings ${RECONCILE_LIMITS.bindings}, model changes ${RECONCILE_LIMITS.changes}); the summary counts everything`,
+      checked: "list sizes",
+    });
   }
-  const order: Record<FindingCategory, number> = { integrity: 0, structural: 1, binding: 2, coverage: 3, source: 4, unsupported: 5 };
+  const order: Record<FindingCategory, number> = {
+    integrity: 0,
+    structural: 1,
+    binding: 2,
+    coverage: 3,
+    source: 4,
+    unsupported: 5,
+  };
   findings.sort((a, b) => order[a.category] - order[b.category] || (a.related === b.related ? 0 : a.related ? -1 : 1));
   p.collect?.(findings.map((f) => ({ ...f })));
   const shownFindings = cut(findings, RECONCILE_LIMITS.findings);
@@ -616,7 +867,14 @@ function assemble(p: Parts): Reconciliation {
       containedInCandidate: p.mb === p.baseCommit && isAncestor(obs.status.root, p.baseCommit, obs.commit!),
       modelRevision: baseRev,
     },
-    candidate: { commit: obs.commit!, branch: obs.status.git?.branch ?? null, dirty: tree.uncommitted.length > 0, modelRevision: candidateRev, projectId: candidateModel.project.id, worktree: tree.state },
+    candidate: {
+      commit: obs.commit!,
+      branch: obs.status.git?.branch ?? null,
+      dirty: tree.uncommitted.length > 0,
+      modelRevision: candidateRev,
+      projectId: candidateModel.project.id,
+      worktree: tree.state,
+    },
     model: {
       lineage,
       introduced: introduced.slice(0, RECONCILE_LIMITS.revisions),
@@ -630,14 +888,39 @@ function assemble(p: Parts): Reconciliation {
         trust: integrity.trust ? `${integrity.trust.source}; ${integrity.trust.anchor}` : null,
         authorization: integrity.authorization,
       },
-      delta: { from: from?.revision ?? null, changes: shownChanges.items, total: shownChanges.total, truncated: shownChanges.truncated },
+      delta: {
+        from: from?.revision ?? null,
+        changes: shownChanges.items,
+        total: shownChanges.total,
+        truncated: shownChanges.truncated,
+      },
       impact,
     },
-    source: { files: shownFiles.items, total: shownFiles.total, truncated: shownFiles.truncated, unmapped: claimsReadable ? unmapped.length : null },
+    source: {
+      files: shownFiles.items,
+      total: shownFiles.total,
+      truncated: shownFiles.truncated,
+      unmapped: claimsReadable ? unmapped.length : null,
+    },
     sourceImpact,
     bindings: claimsReadable
-      ? { available: true, items: shownRows.items, total: shownRows.total, truncated: shownRows.truncated, unaffected, counts }
-      : { available: false, problem: cutText(p.claimsProblem!), items: [], total: 0, truncated: false, unaffected: null, counts: {} },
+      ? {
+          available: true,
+          items: shownRows.items,
+          total: shownRows.total,
+          truncated: shownRows.truncated,
+          unaffected,
+          counts,
+        }
+      : {
+          available: false,
+          problem: cutText(p.claimsProblem!),
+          items: [],
+          total: 0,
+          truncated: false,
+          unaffected: null,
+          counts: {},
+        },
     findings: shownFindings.items,
     findingsTotal: shownFindings.total,
     findingsTruncated: shownFindings.truncated,
@@ -660,28 +943,97 @@ function assemble(p: Parts): Reconciliation {
   };
 }
 
-function bindingFindings(row: ReconciledBinding, v: Verification, add: (f: ReconcileFinding) => void, related: boolean) {
+function bindingFindings(
+  row: ReconciledBinding,
+  v: Verification,
+  add: (f: ReconcileFinding) => void,
+  related: boolean,
+) {
   const id = row.bindingId;
   const objectIds = row.modelObjectId ? [row.modelObjectId] : undefined;
-  const base = { bindingId: id, related, ...(objectIds ? { objectIds } : {}), ...(v.claim ? { path: v.claim.locator.path } : {}) };
+  const base = {
+    bindingId: id,
+    related,
+    ...(objectIds ? { objectIds } : {}),
+    ...(v.claim ? { path: v.claim.locator.path } : {}),
+  };
   const at = row.locator ?? id;
   if (v.state === "invalid") {
-    add({ ...base, code: "CLAIM_INVALID", category: "binding", basis: "checked", message: `claim ${id} cannot be read: ${v.problem ?? "unreadable"}`, checked: `${VCV_DIR}/bindings/${id}.json against the claim format` });
+    add({
+      ...base,
+      code: "CLAIM_INVALID",
+      category: "binding",
+      basis: "checked",
+      message: `claim ${id} cannot be read: ${v.problem ?? "unreadable"}`,
+      checked: `${VCV_DIR}/bindings/${id}.json against the claim format`,
+    });
     return;
   }
   if (row.object === "not-in-model" || row.model?.state === "removed") {
-    add({ ...base, code: "CLAIM_ON_MISSING_OBJECT", category: "structural", basis: "checked", message: `claim ${id} binds ${row.modelObjectId}, which the candidate's approved model does not contain: the claim and the model contradict each other`, checked: "the claim's model object ID against the candidate model" });
+    add({
+      ...base,
+      code: "CLAIM_ON_MISSING_OBJECT",
+      category: "structural",
+      basis: "checked",
+      message: `claim ${id} binds ${row.modelObjectId}, which the candidate's approved model does not contain: the claim and the model contradict each other`,
+      checked: "the claim's model object ID against the candidate model",
+    });
     return;
   }
-  if (v.state === "missing") add({ ...base, code: "LOCATOR_MISSING", category: "binding", basis: "checked", message: `claim ${id} (${row.modelObjectId}) points at ${at}, which does not resolve: ${v.locator?.detail ?? ""}`.trim(), checked: "the locator against the working tree (TypeScript resolver)" });
-  else if (v.state === "ambiguous") add({ ...base, code: "LOCATOR_AMBIGUOUS", category: "binding", basis: "checked", message: `claim ${id} (${row.modelObjectId}) matches more than one artifact at ${at}: ${v.locator?.detail ?? ""}`.trim(), checked: "the locator against the working tree (TypeScript resolver)" });
+  if (v.state === "missing")
+    add({
+      ...base,
+      code: "LOCATOR_MISSING",
+      category: "binding",
+      basis: "checked",
+      message:
+        `claim ${id} (${row.modelObjectId}) points at ${at}, which does not resolve: ${v.locator?.detail ?? ""}`.trim(),
+      checked: "the locator against the working tree (TypeScript resolver)",
+    });
+  else if (v.state === "ambiguous")
+    add({
+      ...base,
+      code: "LOCATOR_AMBIGUOUS",
+      category: "binding",
+      basis: "checked",
+      message:
+        `claim ${id} (${row.modelObjectId}) matches more than one artifact at ${at}: ${v.locator?.detail ?? ""}`.trim(),
+      checked: "the locator against the working tree (TypeScript resolver)",
+    });
   else if (v.state === "stale") {
-    const why = [row.source?.state === "changed" ? `code: ${row.source.cause}` : null, row.model && row.model.state !== "unchanged" ? `model: ${row.model.cause}` : null].filter(Boolean).join("; ");
-    add({ ...base, code: "CLAIM_STALE", category: "binding", basis: "checked", message: `claim ${id} (${row.modelObjectId} at ${at}) is stale (${why}). The code or object moved since the claim; whether it still does what the model says is for an agent or a person to judge`, checked: "recorded fingerprints against the working tree and the model object at the claim's revision" });
+    const why = [
+      row.source?.state === "changed" ? `code: ${row.source.cause}` : null,
+      row.model && row.model.state !== "unchanged" ? `model: ${row.model.cause}` : null,
+    ]
+      .filter(Boolean)
+      .join("; ");
+    add({
+      ...base,
+      code: "CLAIM_STALE",
+      category: "binding",
+      basis: "checked",
+      message: `claim ${id} (${row.modelObjectId} at ${at}) is stale (${why}). The code or object moved since the claim; whether it still does what the model says is for an agent or a person to judge`,
+      checked: "recorded fingerprints against the working tree and the model object at the claim's revision",
+    });
   } else if (v.state === "unchecked" || v.state === "indeterminate") {
-    add({ ...base, code: "CLAIM_NOT_CHECKED", category: "unsupported", basis: "not-checked", message: `claim ${id} (${row.modelObjectId} at ${at}) is ${v.state}: ${v.state === "unchecked" ? v.locator?.detail ?? "" : [row.source?.cause, row.model?.cause].filter(Boolean).join("; ")}`, checked: "what the resolver supports" });
+    add({
+      ...base,
+      code: "CLAIM_NOT_CHECKED",
+      category: "unsupported",
+      basis: "not-checked",
+      message: `claim ${id} (${row.modelObjectId} at ${at}) is ${v.state}: ${v.state === "unchecked" ? (v.locator?.detail ?? "") : [row.source?.cause, row.model?.cause].filter(Boolean).join("; ")}`,
+      checked: "what the resolver supports",
+    });
   }
-  if (row.disputed) add({ ...base, code: "CLAIM_DISPUTED", category: "binding", basis: "observed", message: `claim ${id} carries a recorded dispute`, checked: "the claim file" });
+  if (row.disputed)
+    add({
+      ...base,
+      code: "CLAIM_DISPUTED",
+      category: "binding",
+      basis: "observed",
+      message: `claim ${id} carries a recorded dispute`,
+      checked: "the claim file",
+    });
 }
 
 /** A locator for display: cut at RECONCILE_LIMITS.locatorChars, with the digest of the full text when cut. */
@@ -717,13 +1069,23 @@ function sourceImpactOf(model: Model, rows: readonly ReconciledBinding[]): Sourc
   const seeds = ids.map((id) => {
     const e = index.get(id)!;
     const s = seedMap.get(id)!;
-    return { objectId: id, kind: e.kind, name: cutText(e.name, 200), moduleId: moduleOf(model, id), bindings: [...s.bindings].sort(), why: [...s.why].sort() };
+    return {
+      objectId: id,
+      kind: e.kind,
+      name: cutText(e.name, 200),
+      moduleId: moduleOf(model, id),
+      bindings: [...s.bindings].sort(),
+      why: [...s.why].sort(),
+    };
   });
   const seen = new Map<Id, ImpactCandidate>();
   let truncated = false;
   const api = createQueryApi({ current: () => model });
   for (let i = 0; i < ids.length; i += QUERY_LIMITS.impact.maxSeeds) {
-    const r = api.analyzeImpact({ ids: ids.slice(i, i + QUERY_LIMITS.impact.maxSeeds), maxResults: RECONCILE_LIMITS.candidates });
+    const r = api.analyzeImpact({
+      ids: ids.slice(i, i + QUERY_LIMITS.impact.maxSeeds),
+      maxResults: RECONCILE_LIMITS.candidates,
+    });
     if (!r.ok) continue;
     truncated ||= r.data.truncated;
     for (const c of r.data.candidates) if (!seedMap.has(c.id) && !seen.has(c.id)) seen.set(c.id, c);

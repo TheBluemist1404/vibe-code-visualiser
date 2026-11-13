@@ -1,7 +1,17 @@
 // The implementation handoff and the implementation evidence report (Issue #17, M3.3).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -29,10 +39,14 @@ const proposer: HostContext = { principalId: "agent:coder", permissions: ["model
 const implementer: HostContext = { principalId: "agent:coder", permissions: ["model:propose", "binding:record"] };
 const keys = mkdtempSync(join(tmpdir(), "vcv-keys-"));
 
-const NEW_STATEMENT = "Confirmed enrollments for a course never exceed its capacity; a request for a full course is rejected with COURSE_FULL and the student is told how many seats the course has.";
+const NEW_STATEMENT =
+  "Confirmed enrollments for a course never exceed its capacity; a request for a full course is rejected with COURSE_FULL and the student is told how many seats the course has.";
 const REQUEST = {
   behavior: "When a course is full, the rejection tells the student the course's capacity.",
-  acceptanceCriteria: ["A COURSE_FULL rejection includes the course capacity", "Enrolling into a course with free seats is unchanged"],
+  acceptanceCriteria: [
+    "A COURSE_FULL rejection includes the course capacity",
+    "Enrolling into a course with free seats is unchanged",
+  ],
   suggestedTests: ["EnrollmentService: rejects an enrollment into a full course and reports the capacity"],
   scope: ["server/src/enrollment/**"],
 };
@@ -67,7 +81,12 @@ function approved(id = "chg-capacity", over: Partial<ProposedModelChange> = {}) 
   assert.equal(sub.ok && sub.data.status, "pending", JSON.stringify(sub));
   const pv = previewProposal(s.repo, { changeId: id });
   assert.ok(pv.ok);
-  const r = reviewApprove(s.repo, { changeId: id, expectedDigest: pv.data.proposal.proposalDigest, keyFile: s.keyFile, trust: s.pin() });
+  const r = reviewApprove(s.repo, {
+    changeId: id,
+    expectedDigest: pv.data.proposal.proposalDigest,
+    keyFile: s.keyFile,
+    trust: s.pin(),
+  });
   assert.equal(r.outcome.status, "applied", JSON.stringify(r.outcome.diagnostics));
   git(s.repo, "add", "-A");
   git(s.repo, "commit", "-q", "-m", `approved ${id}`);
@@ -76,7 +95,9 @@ function approved(id = "chg-capacity", over: Partial<ProposedModelChange> = {}) 
 
 const storeModelHash = (repo: string) => {
   const h = createHash("sha256");
-  for (const d of ["revisions", "changes", "approvals"]) for (const f of readdirSync(join(repo, ".vcv", d)).sort()) h.update(f).update(readFileSync(join(repo, ".vcv", d, f)));
+  for (const d of ["revisions", "changes", "approvals"])
+    for (const f of readdirSync(join(repo, ".vcv", d)).sort())
+      h.update(f).update(readFileSync(join(repo, ".vcv", d, f)));
   return h.update(readFileSync(join(repo, ".vcv/HEAD"))).digest("hex");
 };
 
@@ -100,7 +121,11 @@ test("the implementation request is part of the proposal: previewed, covered by 
   assert.deepEqual(pv.data.proposal.implementation, REQUEST);
   const without = previewProposal(repo, { change: { ...c, implementation: undefined } });
   assert.ok(without.ok);
-  assert.notEqual(without.data.proposal.proposalDigest, pv.data.proposal.proposalDigest, "the digest covers the request");
+  assert.notEqual(
+    without.data.proposal.proposalDigest,
+    pv.data.proposal.proposalDigest,
+    "the digest covers the request",
+  );
   assert.ok(without.data.assumptions.some((a) => /no implementation request/.test(a)));
   for (const scope of [["/etc/passwd"], ["../outside/**"], ["C:/x"], ["server\\src"]]) {
     const r = submitProposal(repo, { ...c, changeId: "chg-bad", implementation: { ...REQUEST, scope } }, proposer);
@@ -153,7 +178,12 @@ test("handoff refuses anything not approved and attested", () => {
   assert.equal(!pending.ok && pending.error.code, "NOT_APPLIED");
   assert.equal(((r) => !r.ok && r.error.code)(buildHandoff(repo, "chg-nope")), "UNKNOWN_CHANGE");
   // applied directly by a host, without a reviewer: no attestation
-  const direct = new ModelEngine(new FileStore(join(repo, ".vcv"))).propose(change(repo, "chg-direct", { operations: [{ type: "setDescription", objectId: "mod-web", description: "direct" }] }), { principalId: "user:dev", permissions: ["model:propose", "model:apply"] });
+  const direct = new ModelEngine(new FileStore(join(repo, ".vcv"))).propose(
+    change(repo, "chg-direct", {
+      operations: [{ type: "setDescription", objectId: "mod-web", description: "direct" }],
+    }),
+    { principalId: "user:dev", permissions: ["model:propose", "model:apply"] },
+  );
   assert.equal(direct.status, "applied");
   const unattested = buildHandoff(repo, "chg-direct");
   assert.equal(!unattested.ok && unattested.error.code, "NOT_ATTESTED");
@@ -162,9 +192,16 @@ test("handoff refuses anything not approved and attested", () => {
   submitProposal(repo, c, proposer);
   const pv = previewProposal(repo, { changeId: "chg-b" });
   assert.ok(pv.ok);
-  assert.equal(reviewApprove(repo, { changeId: "chg-b", expectedDigest: pv.data.proposal.proposalDigest, keyFile, trust: pin() }).outcome.status, "applied");
+  assert.equal(
+    reviewApprove(repo, { changeId: "chg-b", expectedDigest: pv.data.proposal.proposalDigest, keyFile, trust: pin() })
+      .outcome.status,
+    "applied",
+  );
   const att = join(repo, ".vcv/approvals/chg-b.json");
-  writeFileSync(att, readFileSync(att, "utf8").replace(/"signedAt": "[^"]+"/, '"signedAt": "2000-01-01T00:00:00.000Z"'));
+  writeFileSync(
+    att,
+    readFileSync(att, "utf8").replace(/"signedAt": "[^"]+"/, '"signedAt": "2000-01-01T00:00:00.000Z"'),
+  );
   const forged = buildHandoff(repo, "chg-b");
   assert.equal(!forged.ok && forged.error.code, "NOT_ATTESTED");
   // on main, the approved revision is not in the history
@@ -182,9 +219,23 @@ test("implementation report: agent claims, VCV observations and warnings kept ap
 
   // The agent implements in scope, strays out of scope once, and reasserts one of two claims.
   edit(repo, SERVICE, "taken.length >= course.capacity", "taken.length >= course.capacity /* capacity reported */");
-  writeFileSync(join(repo, "README.md"), readFileSync(join(repo, "README.md"), "utf8") + "\nCapacity is reported on rejection.\n");
+  writeFileSync(
+    join(repo, "README.md"),
+    `${readFileSync(join(repo, "README.md"), "utf8")}\nCapacity is reported on rejection.\n`,
+  );
   const claim = readBinding(repo, "impl.rul-seat-limit")!;
-  recordBinding(repo, { bindingId: "impl.rul-seat-limit", modelObjectId: "rul-seat-limit", relation: "implements", locator: ENROLL, rationale: "re-inspected: the capacity check and the new message" }, { ...implementer, source: "agent" } as never, claim.digest);
+  recordBinding(
+    repo,
+    {
+      bindingId: "impl.rul-seat-limit",
+      modelObjectId: "rul-seat-limit",
+      relation: "implements",
+      locator: ENROLL,
+      rationale: "re-inspected: the capacity check and the new message",
+    },
+    { ...implementer, source: "agent" } as never,
+    claim.digest,
+  );
 
   const input = report(h, {
     testsRun: [{ command: "npm test -w server", outcome: "failed", summary: "1 failing: message text" }],
@@ -209,7 +260,15 @@ test("implementation report: agent claims, VCV observations and warnings kept ap
   assert.equal(seat.reasserted, true);
   assert.equal(seat.claimedAtRevision, approvedRevision);
   const codes = rep.warnings.map((w) => w.code);
-  for (const c of ["OUT_OF_SCOPE", "TEST_FAILED", "CRITERION_UNADDRESSED", "BINDING_NOT_REASSERTED", "GAP", "CLAIMS_UNVERIFIED"]) assert.ok(codes.includes(c), `${c} in ${codes}`);
+  for (const c of [
+    "OUT_OF_SCOPE",
+    "TEST_FAILED",
+    "CRITERION_UNADDRESSED",
+    "BINDING_NOT_REASSERTED",
+    "GAP",
+    "CLAIMS_UNVERIFIED",
+  ])
+    assert.ok(codes.includes(c), `${c} in ${codes}`);
   assert.match(rep.warnings.find((w) => w.code === "OUT_OF_SCOPE")!.message, /agent's explanation: documented/);
   assert.ok(rep.warnings.some((w) => w.code === "BINDING_NOT_REASSERTED" && w.bindingId === "test.rul-seat-limit"));
   assert.ok(!rep.warnings.some((w) => w.code === "BINDING_NOT_REASSERTED" && w.bindingId === "impl.rul-seat-limit"));
@@ -222,7 +281,12 @@ test("implementation report: agent claims, VCV observations and warnings kept ap
   assert.equal(!again.ok && again.error.code, "REPORT_EXISTS");
   const wrong = recordImplementation(repo, input, implementer, "0".repeat(64));
   assert.equal(!wrong.ok && wrong.error.code, "REPORT_CHANGED");
-  const fixed = recordImplementation(repo, { ...input, testsRun: [{ command: "npm test -w server", outcome: "passed" }] }, implementer, r.data.digest);
+  const fixed = recordImplementation(
+    repo,
+    { ...input, testsRun: [{ command: "npm test -w server", outcome: "passed" }] },
+    implementer,
+    r.data.digest,
+  );
   assert.ok(fixed.ok, JSON.stringify(fixed));
   assert.equal(fixed.data.replaced, true);
   assert.ok(!fixed.data.report.warnings.some((w) => w.code === "TEST_FAILED"));
@@ -231,7 +295,7 @@ test("implementation report: agent claims, VCV observations and warnings kept ap
   const s1 = implementationStatus(repo, id);
   assert.ok(s1.ok, JSON.stringify(s1));
   assert.equal(s1.data.changedSinceReport, false);
-  writeFileSync(join(repo, "package.json"), readFileSync(join(repo, "package.json"), "utf8") + "\n");
+  writeFileSync(join(repo, "package.json"), `${readFileSync(join(repo, "package.json"), "utf8")}\n`);
   const s2 = implementationStatus(repo, id);
   assert.ok(s2.ok);
   assert.equal(s2.data.changedSinceReport, true);
@@ -241,7 +305,11 @@ test("implementation report: agent claims, VCV observations and warnings kept ap
   git(repo, "checkout", "-q", "--", "package.json");
   git(repo, "add", "-A");
   git(repo, "commit", "-q", "-m", "implement chg-capacity");
-  const gate = checkIntegrity(repo, { base: "main", trust: { kind: "git-ref", ref: "main" }, requireAttestation: true });
+  const gate = checkIntegrity(repo, {
+    base: "main",
+    trust: { kind: "git-ref", ref: "main" },
+    requireAttestation: true,
+  });
   assert.equal(gate.ok, true, JSON.stringify(gate.problems));
 });
 
@@ -258,7 +326,15 @@ test("implementation report refusals: bad input, unknown or foreign base commit,
   git(repo, "checkout", "-q", "feature");
   const foreign = recordImplementation(repo, report(h, { baseCommit: side }), implementer);
   assert.equal(!foreign.ok && foreign.error.code, "UNKNOWN_COMMIT");
-  assert.ok(submitProposal(repo, change(repo, "chg-pending", { operations: [{ type: "setDescription", objectId: "mod-web", description: "later" }] }), proposer).ok);
+  assert.ok(
+    submitProposal(
+      repo,
+      change(repo, "chg-pending", {
+        operations: [{ type: "setDescription", objectId: "mod-web", description: "later" }],
+      }),
+      proposer,
+    ).ok,
+  );
   const pending = recordImplementation(repo, report(h, { changeId: "chg-pending" }), implementer);
   assert.equal(!pending.ok && pending.error.code, "NOT_APPLIED");
 
@@ -272,7 +348,15 @@ test("implementation report refusals: bad input, unknown or foreign base commit,
   // A second approved change lands while implementing: the report for the first says the model moved.
   const pv = previewProposal(repo, { changeId: "chg-pending" });
   assert.ok(pv.ok);
-  assert.equal(reviewApprove(repo, { changeId: "chg-pending", expectedDigest: pv.data.proposal.proposalDigest, keyFile, trust: pin() }).outcome.status, "applied");
+  assert.equal(
+    reviewApprove(repo, {
+      changeId: "chg-pending",
+      expectedDigest: pv.data.proposal.proposalDigest,
+      keyFile,
+      trust: pin(),
+    }).outcome.status,
+    "applied",
+  );
   const moved = recordImplementation(repo, report(h), implementer);
   assert.ok(moved.ok, JSON.stringify(moved));
   assert.ok(moved.data.report.warnings.some((w) => w.code === "MODEL_MOVED"));
@@ -302,7 +386,7 @@ test("handoff and report observe the working tree: an edit of a bound or changed
   const original = readFileSync(svc, "utf8");
 
   // A bound source file edited after binding verification read it.
-  const h1 = buildHandoff(repo, id, { afterRead: () => writeFileSync(svc, original + "\nexport const value = 2;\n") });
+  const h1 = buildHandoff(repo, id, { afterRead: () => writeFileSync(svc, `${original}\nexport const value = 2;\n`) });
   assert.equal(!h1.ok && h1.error.code, "STATE_CHANGED", JSON.stringify(h1));
   writeFileSync(svc, original);
   // A new dirty file appearing mid-read changes the observed file set.
@@ -328,11 +412,15 @@ test("handoff and report observe the working tree: an edit of a bound or changed
 
   // Recording: a file becoming newly out of scope mid-read is STATE_CHANGED, and nothing is written.
   const input = report(ok.data);
-  const r1 = recordImplementation(repo, input, implementer, null, { afterRead: () => writeFileSync(join(repo, "late.txt"), "x\n") });
+  const r1 = recordImplementation(repo, input, implementer, null, {
+    afterRead: () => writeFileSync(join(repo, "late.txt"), "x\n"),
+  });
   assert.equal(!r1.ok && r1.error.code, "STATE_CHANGED");
   assert.throws(() => statSync(join(repo, ".vcv/implementations", `${id}.json`)));
   rmSync(join(repo, "late.txt"));
-  const r2 = recordImplementation(repo, input, implementer, null, { afterRead: () => edit(repo, SERVICE, "/* a */", "/* b */") });
+  const r2 = recordImplementation(repo, input, implementer, null, {
+    afterRead: () => edit(repo, SERVICE, "/* a */", "/* b */"),
+  });
   assert.equal(!r2.ok && r2.error.code, "STATE_CHANGED", "a same-path edit of a dirty file mid-read");
   edit(repo, SERVICE, "/* b */", "/* a */");
 
@@ -358,14 +446,23 @@ test("replacing a report never overwrites one written since it was checked", () 
   const first = recordImplementation(repo, report(h, { notes: "first" }), implementer);
   assert.ok(first.ok, JSON.stringify(first));
   const file = join(repo, ".vcv/implementations", `${id}.json`);
-  const concurrent = { ...first.data.report, agentClaims: { ...first.data.report.agentClaims, notes: "concurrent update" } };
+  const concurrent = {
+    ...first.data.report,
+    agentClaims: { ...first.data.report.agentClaims, notes: "concurrent update" },
+  };
   const r = recordImplementation(repo, report(h, { notes: "replacement" }), implementer, first.data.digest, {
-    afterRead: () => writeFileSync(file, JSON.stringify(concurrent, null, 2) + "\n"),
+    afterRead: () => writeFileSync(file, `${JSON.stringify(concurrent, null, 2)}\n`),
   });
   assert.equal(!r.ok && r.error.code, "REPORT_CHANGED", JSON.stringify(r));
-  assert.equal(JSON.parse(readFileSync(file, "utf8")).agentClaims.notes, "concurrent update", "the intervening report is kept");
+  assert.equal(
+    JSON.parse(readFileSync(file, "utf8")).agentClaims.notes,
+    "concurrent update",
+    "the intervening report is kept",
+  );
   // A report changing while it is shown is STATE_CHANGED as well.
-  const s = implementationStatus(repo, id, { afterRead: () => writeFileSync(file, JSON.stringify(first.data.report, null, 2) + "\n") });
+  const s = implementationStatus(repo, id, {
+    afterRead: () => writeFileSync(file, `${JSON.stringify(first.data.report, null, 2)}\n`),
+  });
   assert.equal(!s.ok && s.error.code, "STATE_CHANGED");
 });
 
@@ -378,7 +475,11 @@ test("the handoff byte limit holds for worst-case valid input, and the approved 
   assert.ok(bytes <= 128 * 1024, `${bytes} bytes`);
   assert.equal(r.data.change.rationaleTruncated, true);
   assert.ok(r.data.change.rationale!.length <= 4000);
-  assert.equal(r.data.change.proposalDigest, preview.proposal.proposalDigest, "the digest still covers the full rationale");
+  assert.equal(
+    r.data.change.proposalDigest,
+    preview.proposal.proposalDigest,
+    "the digest still covers the full rationale",
+  );
   assert.ok(r.data.caveats.some((c) => /shortened for display/.test(c)));
   assert.deepEqual(r.data.request, REQUEST);
 });
@@ -423,10 +524,26 @@ test("bound sources behind in-checkout symlinks (directory and file, Git-ignored
   writeFileSync(fileTarget, "export const single = 1;\n");
   symlinkSync("../../../.generated", join(repo, "server/src/enrollment/alias"));
   symlinkSync("../../../.generated/single.ts", join(repo, "server/src/enrollment/single.ts"));
-  appendFileSync(join(repo, ".git/info/exclude"), ".generated/\nserver/src/enrollment/alias\nserver/src/enrollment/single.ts\n");
+  appendFileSync(
+    join(repo, ".git/info/exclude"),
+    ".generated/\nserver/src/enrollment/alias\nserver/src/enrollment/single.ts\n",
+  );
   const host = { ...implementer, source: "agent" } as never;
-  for (const [bindingId, path] of [["gen.alias", "server/src/enrollment/alias/module.ts"], ["gen.single", "server/src/enrollment/single.ts"]] as const) {
-    const b = recordBinding(repo, { bindingId, modelObjectId: "rul-seat-limit", relation: "implements", locator: { path, selector: { kind: "file" } } }, host, null);
+  for (const [bindingId, path] of [
+    ["gen.alias", "server/src/enrollment/alias/module.ts"],
+    ["gen.single", "server/src/enrollment/single.ts"],
+  ] as const) {
+    const b = recordBinding(
+      repo,
+      {
+        bindingId,
+        modelObjectId: "rul-seat-limit",
+        relation: "implements",
+        locator: { path, selector: { kind: "file" } },
+      },
+      host,
+      null,
+    );
     assert.equal(b.resolution.state, "resolved", JSON.stringify(b.resolution));
   }
   const ok = buildHandoff(repo, id);

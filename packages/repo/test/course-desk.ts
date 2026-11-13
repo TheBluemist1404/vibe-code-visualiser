@@ -27,7 +27,12 @@ const GIT_ENV = {
   GIT_CONFIG_NOSYSTEM: "1",
   GIT_CONFIG_GLOBAL: "/dev/null",
 };
-export const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", env: GIT_ENV, stdio: ["ignore", "pipe", "pipe"] }).trim();
+export const git = (cwd: string, ...args: string[]) =>
+  execFileSync("git", ["-C", cwd, ...args], {
+    encoding: "utf8",
+    env: GIT_ENV,
+    stdio: ["ignore", "pipe", "pipe"],
+  }).trim();
 export const read = (p: string) => readFileSync(p, "utf8");
 export const edit = (repo: string, rel: string, from: string | RegExp, to: string) => {
   const before = read(join(repo, rel));
@@ -42,18 +47,38 @@ export function baseline(): string {
   execFileSync("bash", [join(ROOT, "examples/reference-app/materialize.sh"), repo], { encoding: "utf8" });
   initProject(repo, loadModel(read(DRAFT)).model!);
   const add = (over: Partial<RecordInput> & Pick<RecordInput, "modelObjectId" | "locator">) =>
-    recordBinding(repo, { relation: "implements", rationale: "decides and records", confidence: 0.8, ...over }, agent, null);
+    recordBinding(
+      repo,
+      { relation: "implements", rationale: "decides and records", confidence: 0.8, ...over },
+      agent,
+      null,
+    );
   add({ bindingId: "impl.cap-enroll", modelObjectId: "cap-enroll", locator: ENROLL });
-  add({ bindingId: "impl.rul-seat-limit", modelObjectId: "rul-seat-limit", locator: ENROLL, rationale: "the capacity check is in enroll()" });
-  add({ bindingId: "expose.cap-enroll", modelObjectId: "cap-enroll", relation: "exposes", locator: { path: CONTROLLER, selector: { kind: "route", method: "POST", route: "/enrollments" } } });
+  add({
+    bindingId: "impl.rul-seat-limit",
+    modelObjectId: "rul-seat-limit",
+    locator: ENROLL,
+    rationale: "the capacity check is in enroll()",
+  });
+  add({
+    bindingId: "expose.cap-enroll",
+    modelObjectId: "cap-enroll",
+    relation: "exposes",
+    locator: { path: CONTROLLER, selector: { kind: "route", method: "POST", route: "/enrollments" } },
+  });
   add({
     bindingId: "test.rul-seat-limit",
     modelObjectId: "rul-seat-limit",
     relation: "tests",
-    locator: { path: SPEC, selector: { kind: "test", name: "EnrollmentService > rejects an enrollment into a full course and notifies the student" } },
+    locator: {
+      path: SPEC,
+      selector: {
+        kind: "test",
+        name: "EnrollmentService > rejects an enrollment into a full course and notifies the student",
+      },
+    },
   });
   git(repo, "add", "-A");
   git(repo, "commit", "-q", "-m", "vcv: draft model and claims");
   return repo;
 }
-

@@ -5,7 +5,9 @@ import { buildIndex, collectRefs, refId } from "./graph.ts";
 import { SCHEMA_VERSION, isUnresolved } from "./types.ts";
 import type { Diagnostic, Id, Model } from "./types.ts";
 
-export type ParseResult = { ok: true; model: Model; diagnostics: Diagnostic[] } | { ok: false; diagnostics: Diagnostic[] };
+export type ParseResult =
+  | { ok: true; model: Model; diagnostics: Diagnostic[] }
+  | { ok: false; diagnostics: Diagnostic[] };
 
 /** Level 1: shape check. Returns the typed model only if its shape is valid. */
 export function parseModel(input: unknown): ParseResult {
@@ -16,7 +18,10 @@ export function parseModel(input: unknown): ParseResult {
       diagnostics: r.error.issues.map((i) => ({
         code: "SCHEMA",
         severity: "error",
-        path: i.path.map((p) => (typeof p === "number" ? `[${p}]` : `.${String(p)}`)).join("").replace(/^\./, ""),
+        path: i.path
+          .map((p) => (typeof p === "number" ? `[${p}]` : `.${String(p)}`))
+          .join("")
+          .replace(/^\./, ""),
         message: i.message,
       })),
     };
@@ -62,15 +67,18 @@ export function validateModel(model: Model): Diagnostic[] {
   model.data.forEach((d, i) =>
     d.attributes.forEach((a, j) => {
       const p = `data[${i}].attributes[${j}]`;
-      if (a.type === "reference" && a.refDataId === undefined) err("MISSING_REF_DATA", p, `reference attribute "${a.id}" needs refDataId`);
-      if (a.type !== "reference" && a.refDataId !== undefined) warn("UNUSED_REF_DATA", p, `refDataId is ignored unless type is "reference"`);
+      if (a.type === "reference" && a.refDataId === undefined)
+        err("MISSING_REF_DATA", p, `reference attribute "${a.id}" needs refDataId`);
+      if (a.type !== "reference" && a.refDataId !== undefined)
+        warn("UNUSED_REF_DATA", p, `refDataId is ignored unless type is "reference"`);
     }),
   );
 
   // Module dependencies.
   model.modules.forEach((m, i) => {
     m.dependsOn?.forEach((r, j) => {
-      if (refId(r) === m.id) err("SELF_DEPENDENCY", `modules[${i}].dependsOn[${j}]`, `module "${m.id}" depends on itself`);
+      if (refId(r) === m.id)
+        err("SELF_DEPENDENCY", `modules[${i}].dependsOn[${j}]`, `module "${m.id}" depends on itself`);
     });
   });
   for (const cycle of dependencyCycles(model)) {
@@ -83,7 +91,11 @@ export function validateModel(model: Model): Diagnostic[] {
       list?.forEach((r, j) => {
         const e = refId(r);
         if (kindOf(e) === "event" && parentOf(e) !== refId(c.owner)) {
-          err("CONTRACT_FOREIGN_EVENT", `contracts[${i}].${field}[${j}]`, `contract "${c.id}" lists event "${e}" owned by another module`);
+          err(
+            "CONTRACT_FOREIGN_EVENT",
+            `contracts[${i}].${field}[${j}]`,
+            `contract "${c.id}" lists event "${e}" owned by another module`,
+          );
         }
       });
     check(c.accepts, "accepts");
@@ -95,7 +107,8 @@ export function validateModel(model: Model): Diagnostic[] {
     const seen = new Set<Id>();
     c.verifies.forEach((r, j) => {
       const t = refId(r);
-      if (t && seen.has(t)) warn("DUPLICATE_VERIFIES", `criteria[${i}].verifies[${j}]`, `criterion "${c.id}" lists "${t}" more than once`);
+      if (t && seen.has(t))
+        warn("DUPLICATE_VERIFIES", `criteria[${i}].verifies[${j}]`, `criterion "${c.id}" lists "${t}" more than once`);
       if (t) seen.add(t);
     });
   });
@@ -108,7 +121,8 @@ export function validateModel(model: Model): Diagnostic[] {
     const moduleId = refId(b.owner);
     const own = (stateRef: typeof b.initialStateId, path: string) => {
       const s = refId(stateRef);
-      if (kindOf(s) === "state" && parentOf(s) !== b.id) err("STATE_NOT_IN_BEHAVIOR", path, `state "${s}" belongs to another behavior`);
+      if (kindOf(s) === "state" && parentOf(s) !== b.id)
+        err("STATE_NOT_IN_BEHAVIOR", path, `state "${s}" belongs to another behavior`);
     };
     own(b.initialStateId, `${p}.initialStateId`);
     b.transitions.forEach((t, j) => {
@@ -123,18 +137,30 @@ export function validateModel(model: Model): Diagnostic[] {
         const attrId = refId(t.trigger.anchor.attributeId);
         if (kindOf(attrId) === "attribute") {
           if (dataId && parentOf(attrId) !== dataId) {
-            err("ANCHOR_ATTRIBUTE_MISMATCH", `${tp}.trigger.anchor`, `attribute "${attrId}" does not belong to data "${dataId}"`);
+            err(
+              "ANCHOR_ATTRIBUTE_MISMATCH",
+              `${tp}.trigger.anchor`,
+              `attribute "${attrId}" does not belong to data "${dataId}"`,
+            );
           }
           const ty = attrType.get(attrId!);
           if (ty !== "timestamp" && ty !== "date") {
-            err("ANCHOR_NOT_TEMPORAL", `${tp}.trigger.anchor.attributeId`, `timer anchor "${attrId}" has type "${ty}", expected timestamp or date`);
+            err(
+              "ANCHOR_NOT_TEMPORAL",
+              `${tp}.trigger.anchor.attributeId`,
+              `timer anchor "${attrId}" has type "${ty}", expected timestamp or date`,
+            );
           }
         }
       }
       t.guards?.forEach((g, k) => {
         const r = rules.get(refId(g.ruleId) ?? "");
         if (r && r.ruleKind !== "permission") {
-          err("GUARD_NOT_PERMISSION", `${tp}.guards[${k}].ruleId`, `permission guard points to rule "${r.id}" of kind "${r.ruleKind}"`);
+          err(
+            "GUARD_NOT_PERMISSION",
+            `${tp}.guards[${k}].ruleId`,
+            `permission guard points to rule "${r.id}" of kind "${r.ruleKind}"`,
+          );
         }
       });
       t.effects?.forEach((e, k) => checkBoundary(e.eventId, "accepts", `${tp}.effects[${k}].eventId`));
@@ -153,7 +179,10 @@ export function validateModel(model: Model): Diagnostic[] {
       const consumer = model.modules.find((m) => m.id === moduleId);
       const consumed = new Set((consumer?.consumes ?? []).map(refId));
       const ok = model.contracts.some(
-        (c) => refId(c.owner) === eventModule && consumed.has(c.id) && (c[direction] ?? []).some((r) => refId(r) === eventId),
+        (c) =>
+          refId(c.owner) === eventModule &&
+          consumed.has(c.id) &&
+          (c[direction] ?? []).some((r) => refId(r) === eventId),
       );
       if (!ok) {
         err(
@@ -181,7 +210,9 @@ export function checkModel(input: unknown): CheckResult {
 export const hasErrors = (d: Diagnostic[]) => d.some((x) => x.severity === "error");
 
 function dependencyCycles(model: Model): Id[][] {
-  const edges = new Map(model.modules.map((m) => [m.id, (m.dependsOn ?? []).map(refId).filter((x): x is Id => !!x && x !== m.id)]));
+  const edges = new Map(
+    model.modules.map((m) => [m.id, (m.dependsOn ?? []).map(refId).filter((x): x is Id => !!x && x !== m.id)]),
+  );
   const cycles: Id[][] = [];
   const state = new Map<Id, "visiting" | "done">();
   const stack: Id[] = [];

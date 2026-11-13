@@ -96,37 +96,67 @@ function readBounded(abs: string, max: number): Buffer | "too-large" | null {
   }
 }
 
-const sha256 = (text: string, enc: BufferEncoding = "utf8") => createHash("sha256").update(Buffer.from(text, enc)).digest("hex");
+const sha256 = (text: string, enc: BufferEncoding = "utf8") =>
+  createHash("sha256").update(Buffer.from(text, enc)).digest("hex");
 
 /** Resolve a locator inside `root`. Read-only and deterministic for the same bytes. */
 export function resolveLocator(root: string, locator: SourceLocator): Resolution {
   const problem = selectorProblem(locator.selector);
-  if (problem) return { state: "unchecked", detail: `malformed selector: ${problem}`, fileFingerprint: null, matches: [] };
+  if (problem)
+    return { state: "unchecked", detail: `malformed selector: ${problem}`, fileFingerprint: null, matches: [] };
   const where = resolveInside(root, locator.path);
-  if (!where.ok) return { state: "missing", detail: where.message, pathIssue: where.reason, fileFingerprint: null, matches: [] };
+  if (!where.ok)
+    return { state: "missing", detail: where.message, pathIssue: where.reason, fileFingerprint: null, matches: [] };
   const sel = locator.selector;
-  const unreadable = (): Resolution => ({ state: "missing", detail: `${locator.path} cannot be read as a regular file`, fileFingerprint: null, matches: [] });
+  const unreadable = (): Resolution => ({
+    state: "missing",
+    detail: `${locator.path} cannot be read as a regular file`,
+    fileFingerprint: null,
+    matches: [],
+  });
   // Whole files and files the resolver will not parse are fingerprinted by streaming, in bounded memory.
   const streamed = (): string | null => fileFingerprintAt(where.abs);
   if (sel.kind === "file") {
     const fp = streamed();
-    return fp ? { state: "resolved", detail: `${locator.path} exists`, fileFingerprint: fp, matches: [] } : unreadable();
+    return fp
+      ? { state: "resolved", detail: `${locator.path} exists`, fileFingerprint: fp, matches: [] }
+      : unreadable();
   }
-  const unchecked = (detail: string, fp: string | null): Resolution => (fp ? { state: "unchecked", detail, fileFingerprint: fp, matches: [] } : unreadable());
-  if (!TS_FILE.test(locator.path)) return unchecked(`${sel.kind} selectors are only checked in .ts/.tsx/.mts/.cts files`, streamed());
-  if (sel.kind === "test" && !TEST_FILE.test(locator.path)) return unchecked("test selectors are only checked in *.test.* and *.spec.* files", streamed());
+  const unchecked = (detail: string, fp: string | null): Resolution =>
+    fp ? { state: "unchecked", detail, fileFingerprint: fp, matches: [] } : unreadable();
+  if (!TS_FILE.test(locator.path))
+    return unchecked(`${sel.kind} selectors are only checked in .ts/.tsx/.mts/.cts files`, streamed());
+  if (sel.kind === "test" && !TEST_FILE.test(locator.path))
+    return unchecked("test selectors are only checked in *.test.* and *.spec.* files", streamed());
   // The size limit is checked before the file is read into memory, and again while reading.
   const bytes = readBounded(where.abs, MAX_SOURCE_BYTES);
   if (bytes === null) return unreadable();
-  if (bytes === "too-large") return unchecked(`${locator.path} is larger than ${MAX_SOURCE_BYTES} bytes; selectors are not checked in it`, streamed());
+  if (bytes === "too-large")
+    return unchecked(
+      `${locator.path} is larger than ${MAX_SOURCE_BYTES} bytes; selectors are not checked in it`,
+      streamed(),
+    );
   const fileFp = fileFingerprint(bytes);
 
-  const sf = ts.createSourceFile(locator.path, bytes.toString("utf8"), ts.ScriptTarget.Latest, true, scriptKind(locator.path));
-  const found = sel.kind === "symbol" ? findSymbols(sf, sel) : sel.kind === "route" ? findRoutes(sf, sel) : findTests(sf, sel);
+  const sf = ts.createSourceFile(
+    locator.path,
+    bytes.toString("utf8"),
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKind(locator.path),
+  );
+  const found =
+    sel.kind === "symbol" ? findSymbols(sf, sel) : sel.kind === "route" ? findRoutes(sf, sel) : findTests(sf, sel);
   const label = describeSelector(sel);
   if (found.matches.length === 1) {
     const m = found.matches[0]!;
-    return { state: "resolved", detail: `${label} resolves to ${m.declaration} ${m.label} at line ${m.line}`, fileFingerprint: fileFp, selectorFingerprint: m.fingerprint, matches: found.matches };
+    return {
+      state: "resolved",
+      detail: `${label} resolves to ${m.declaration} ${m.label} at line ${m.line}`,
+      fileFingerprint: fileFp,
+      selectorFingerprint: m.fingerprint,
+      matches: found.matches,
+    };
   }
   if (found.matches.length > 1) {
     return {
@@ -136,7 +166,11 @@ export function resolveLocator(root: string, locator: SourceLocator): Resolution
       matches: found.matches,
     };
   }
-  if (found.unsupported.length) return unchecked(`${label} not found, but ${locator.path} has constructs the resolver cannot read: ${found.unsupported.slice(0, 3).join("; ")}`, fileFp);
+  if (found.unsupported.length)
+    return unchecked(
+      `${label} not found, but ${locator.path} has constructs the resolver cannot read: ${found.unsupported.slice(0, 3).join("; ")}`,
+      fileFp,
+    );
   return { state: "missing", detail: `${label} not found in ${locator.path}`, fileFingerprint: fileFp, matches: [] };
 }
 
@@ -179,7 +213,7 @@ function nodesFingerprint(sf: ts.SourceFile, nodes: readonly ts.Node[]): string 
     children.forEach(walk);
   };
   for (const n of nodes) walk(n);
-  return sha256("vcv-selector-v1\0" + tokens.filter((t) => t !== "").join("\n"));
+  return sha256(`vcv-selector-v1\0${tokens.filter((t) => t !== "").join("\n")}`);
 }
 
 const lineOf = (sf: ts.SourceFile, n: ts.Node) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;
@@ -205,16 +239,22 @@ function collectDeclarations(sf: ts.SourceFile): { decls: Decl[]; unsupported: s
       if (!cls) continue;
       decls.push({ name: cls, declaration: "class", node: st, hasBody: true });
       for (const m of st.members) {
-        if (ts.isConstructorDeclaration(m)) decls.push({ name: `${cls}.constructor`, declaration: "method", node: m, hasBody: !!m.body });
+        if (ts.isConstructorDeclaration(m))
+          decls.push({ name: `${cls}.constructor`, declaration: "method", node: m, hasBody: !!m.body });
         const name = memberName((m as { name?: ts.PropertyName }).name);
         if (!name) {
-          if ((m as { name?: ts.PropertyName }).name) unsupported.push(`a computed member name in class ${cls} (line ${lineOf(sf, m)})`);
+          if ((m as { name?: ts.PropertyName }).name)
+            unsupported.push(`a computed member name in class ${cls} (line ${lineOf(sf, m)})`);
           continue;
         }
-        if (ts.isMethodDeclaration(m)) decls.push({ name: `${cls}.${name}`, declaration: "method", node: m, hasBody: !!m.body });
-        else if (ts.isPropertyDeclaration(m)) decls.push({ name: `${cls}.${name}`, declaration: "property", node: m, hasBody: true });
-        else if (ts.isGetAccessorDeclaration(m)) decls.push({ name: `${cls}.${name}`, declaration: "accessor", node: m, hasBody: true, accessor: "get" });
-        else if (ts.isSetAccessorDeclaration(m)) decls.push({ name: `${cls}.${name}`, declaration: "accessor", node: m, hasBody: true, accessor: "set" });
+        if (ts.isMethodDeclaration(m))
+          decls.push({ name: `${cls}.${name}`, declaration: "method", node: m, hasBody: !!m.body });
+        else if (ts.isPropertyDeclaration(m))
+          decls.push({ name: `${cls}.${name}`, declaration: "property", node: m, hasBody: true });
+        else if (ts.isGetAccessorDeclaration(m))
+          decls.push({ name: `${cls}.${name}`, declaration: "accessor", node: m, hasBody: true, accessor: "get" });
+        else if (ts.isSetAccessorDeclaration(m))
+          decls.push({ name: `${cls}.${name}`, declaration: "accessor", node: m, hasBody: true, accessor: "set" });
       }
     } else if (ts.isFunctionDeclaration(st)) {
       const name = st.name?.text ?? (hasDefaultExport(st) ? "default" : undefined);
@@ -224,8 +264,10 @@ function collectDeclarations(sf: ts.SourceFile): { decls: Decl[]; unsupported: s
       for (const m of st.members) {
         const name = memberName((m as { name?: ts.PropertyName }).name);
         if (!name) continue;
-        if (ts.isMethodSignature(m)) decls.push({ name: `${st.name.text}.${name}`, declaration: "method", node: m, hasBody: false });
-        else if (ts.isPropertySignature(m)) decls.push({ name: `${st.name.text}.${name}`, declaration: "property", node: m, hasBody: true });
+        if (ts.isMethodSignature(m))
+          decls.push({ name: `${st.name.text}.${name}`, declaration: "method", node: m, hasBody: false });
+        else if (ts.isPropertySignature(m))
+          decls.push({ name: `${st.name.text}.${name}`, declaration: "property", node: m, hasBody: true });
       }
     } else if (ts.isTypeAliasDeclaration(st)) {
       decls.push({ name: st.name.text, declaration: "type", node: st, hasBody: true });
@@ -248,7 +290,10 @@ function hasDefaultExport(n: ts.Node): boolean {
   return !!mods?.some((m) => m.kind === ts.SyntaxKind.DefaultKeyword);
 }
 
-function findSymbols(sf: ts.SourceFile, sel: Extract<Selector, { kind: "symbol" }>): { matches: Match[]; unsupported: string[] } {
+function findSymbols(
+  sf: ts.SourceFile,
+  sel: Extract<Selector, { kind: "symbol" }>,
+): { matches: Match[]; unsupported: string[] } {
   const { decls, unsupported } = collectDeclarations(sf);
   const named = decls.filter((d) => d.name === sel.name && (!sel.declaration || d.declaration === sel.declaration));
   // One artifact per declaration kind: overload signatures belong to their single
@@ -264,18 +309,42 @@ function findSymbols(sf: ts.SourceFile, sel: Extract<Selector, { kind: "symbol" 
           ? ds.filter((d) => d.hasBody).length <= 1
           : ds.length === 1;
     const parts = single ? [ds] : ds.map((d) => [d]);
-    for (const p of parts) matches.push({ label: sel.name, declaration, line: lineOf(sf, p[0]!.node), fingerprint: nodesFingerprint(sf, p.map((d) => d.node)) });
+    for (const p of parts)
+      matches.push({
+        label: sel.name,
+        declaration,
+        line: lineOf(sf, p[0]!.node),
+        fingerprint: nodesFingerprint(
+          sf,
+          p.map((d) => d.node),
+        ),
+      });
   }
   // Unreadable constructs only matter when they could hide the symbol: a namespace with the
   // symbol's first name segment, a computed member of its class, or any destructuring.
   const head = sel.name.split(".")[0]!;
-  const relevant = unsupported.filter((u) => (u.startsWith("namespace") ? u.startsWith(`namespace or module ${head} `) : u.startsWith("a computed") ? u.includes(` class ${head} `) : true));
+  const relevant = unsupported.filter((u) =>
+    u.startsWith("namespace")
+      ? u.startsWith(`namespace or module ${head} `)
+      : u.startsWith("a computed")
+        ? u.includes(` class ${head} `)
+        : true,
+  );
   return { matches, unsupported: relevant };
 }
 
 // --- NestJS routes --------------------------------------------------------------------
 
-const ROUTE_DECORATORS: Record<string, HttpMethod> = { Get: "GET", Post: "POST", Put: "PUT", Patch: "PATCH", Delete: "DELETE", Head: "HEAD", Options: "OPTIONS", All: "ALL" };
+const ROUTE_DECORATORS: Record<string, HttpMethod> = {
+  Get: "GET",
+  Post: "POST",
+  Put: "PUT",
+  Patch: "PATCH",
+  Delete: "DELETE",
+  Head: "HEAD",
+  Options: "OPTIONS",
+  All: "ALL",
+};
 
 /** Literal path arguments of a Nest decorator: [""] for none, a list for arrays, null if not static. */
 function staticPaths(args: readonly ts.Expression[], allowObject: boolean): string[] | null {
@@ -283,7 +352,9 @@ function staticPaths(args: readonly ts.Expression[], allowObject: boolean): stri
   if (!arg) return [""];
   if (ts.isStringLiteral(arg) || ts.isNoSubstitutionTemplateLiteral(arg)) return [arg.text];
   if (ts.isArrayLiteralExpression(arg)) {
-    const out = arg.elements.map((e) => (ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e) ? e.text : null));
+    const out = arg.elements.map((e) =>
+      ts.isStringLiteral(e) || ts.isNoSubstitutionTemplateLiteral(e) ? e.text : null,
+    );
     return out.every((p) => p !== null) ? (out as string[]) : null;
   }
   if (allowObject && ts.isObjectLiteralExpression(arg)) {
@@ -304,12 +375,18 @@ function nestImports(sf: ts.SourceFile): { names: Map<string, string>; unsupport
   const names = new Map<string, string>();
   const unsupported: string[] = [];
   for (const st of sf.statements) {
-    if (!ts.isImportDeclaration(st) || !ts.isStringLiteral(st.moduleSpecifier) || st.moduleSpecifier.text !== "@nestjs/common") continue;
+    if (
+      !ts.isImportDeclaration(st) ||
+      !ts.isStringLiteral(st.moduleSpecifier) ||
+      st.moduleSpecifier.text !== "@nestjs/common"
+    )
+      continue;
     const b = st.importClause?.namedBindings;
     if (b && ts.isNamespaceImport(b)) unsupported.push(`namespace import of @nestjs/common (line ${lineOf(sf, st)})`);
     if (b && ts.isNamedImports(b)) {
       for (const el of b.elements) {
-        if (el.propertyName) unsupported.push(`aliased import ${el.propertyName.getText(sf)} as ${el.name.text} (line ${lineOf(sf, el)})`);
+        if (el.propertyName)
+          unsupported.push(`aliased import ${el.propertyName.getText(sf)} as ${el.name.text} (line ${lineOf(sf, el)})`);
         else names.set(el.name.text, el.name.text);
       }
     }
@@ -323,7 +400,10 @@ function decoratorCall(d: ts.Decorator): { name: string; args: readonly ts.Expre
   return null;
 }
 
-function findRoutes(sf: ts.SourceFile, sel: Extract<Selector, { kind: "route" }>): { matches: Match[]; unsupported: string[] } {
+function findRoutes(
+  sf: ts.SourceFile,
+  sel: Extract<Selector, { kind: "route" }>,
+): { matches: Match[]; unsupported: string[] } {
   const { names, unsupported } = nestImports(sf);
   const want = normalizeRoute(sel.route);
   const matches: Match[] = [];
@@ -354,7 +434,12 @@ function findRoutes(sf: ts.SourceFile, sel: Extract<Selector, { kind: "route" }>
             const route = normalizeRoute(`${b}/${p}`);
             if (method !== sel.method || route !== want) continue;
             if (sel.handler && sel.handler !== handler && sel.handler !== memberName(m.name)) continue;
-            matches.push({ label: `${method} ${route} → ${handler}`, declaration: "route", line: lineOf(sf, m), fingerprint: nodesFingerprint(sf, [m]) });
+            matches.push({
+              label: `${method} ${route} → ${handler}`,
+              declaration: "route",
+              line: lineOf(sf, m),
+              fingerprint: nodesFingerprint(sf, [m]),
+            });
           }
         }
       }
@@ -391,8 +476,14 @@ function testCall(n: ts.CallExpression): { role: "suite" | "case"; title: string
   return { role, title: null, dynamic: `${callee.text} with a non-literal title` };
 }
 
-function findTests(sf: ts.SourceFile, sel: Extract<Selector, { kind: "test" }>): { matches: Match[]; unsupported: string[] } {
-  const want = sel.name.split(">").map((s) => s.trim()).join(" > ");
+function findTests(
+  sf: ts.SourceFile,
+  sel: Extract<Selector, { kind: "test" }>,
+): { matches: Match[]; unsupported: string[] } {
+  const want = sel.name
+    .split(">")
+    .map((s) => s.trim())
+    .join(" > ");
   const matches: Match[] = [];
   const unsupported: string[] = [];
   const visit = (n: ts.Node, path: string[] | null) => {
@@ -401,7 +492,13 @@ function findTests(sf: ts.SourceFile, sel: Extract<Selector, { kind: "test" }>):
       if (t) {
         const title = t.title === null || path === null ? null : [...path, t.title].join(" > ");
         if (t.title === null) unsupported.push(`${t.dynamic} (line ${lineOf(sf, n)})`);
-        if (title === want) matches.push({ label: title, declaration: t.role === "suite" ? "suite" : "test", line: lineOf(sf, n), fingerprint: nodesFingerprint(sf, [n]) });
+        if (title === want)
+          matches.push({
+            label: title,
+            declaration: t.role === "suite" ? "suite" : "test",
+            line: lineOf(sf, n),
+            fingerprint: nodesFingerprint(sf, [n]),
+          });
         const next = title === null ? null : [...path!, t.title!];
         n.arguments.forEach((a) => visit(a, next));
         return;

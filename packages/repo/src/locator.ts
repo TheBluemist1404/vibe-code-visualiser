@@ -13,7 +13,8 @@ export function pathProblem(path: string): string | undefined {
   if (typeof path !== "string" || path === "") return "is empty";
   if (path.includes("\0")) return "contains a NUL character";
   if (path.includes("\\")) return 'uses "\\"; locator paths are POSIX ("/" separated)';
-  if (path.startsWith("/") || /^[A-Za-z]:/.test(path)) return "is absolute; locator paths are relative to the repository root";
+  if (path.startsWith("/") || /^[A-Za-z]:/.test(path))
+    return "is absolute; locator paths are relative to the repository root";
   const segments = path.split("/");
   if (segments.some((s) => s === "" || s === ".")) return 'is not normalized (empty or "." segment, or a trailing "/")';
   if (segments.includes("..")) return 'leaves the repository ("..")';
@@ -64,7 +65,11 @@ export function resolveInside(root: string, rel: string): PathResolution {
       const other = entries.find((e) => e.toLowerCase() === name.toLowerCase());
       const at = segments.slice(0, i + 1).join("/");
       return other
-        ? { ok: false, reason: "case-mismatch", message: `${at} does not exist, but ${[...segments.slice(0, i), other].join("/")} does (paths are case-sensitive)` }
+        ? {
+            ok: false,
+            reason: "case-mismatch",
+            message: `${at} does not exist, but ${[...segments.slice(0, i), other].join("/")} does (paths are case-sensitive)`,
+          }
         : { ok: false, reason: "missing", message: `${at} does not exist` };
     }
     let next = join(dir, name);
@@ -78,7 +83,12 @@ export function resolveInside(root: string, rel: string): PathResolution {
           ? { ok: false, reason: "missing", message: `${at} is a dangling symlink` }
           : { ok: false, reason: "missing", message: `${at} is a symlink that cannot be resolved`, unreadable: true };
       }
-      if (!inside(target)) return { ok: false, reason: "unsafe", message: `${segments.slice(0, i + 1).join("/")} is a symlink that leaves the checkout` };
+      if (!inside(target))
+        return {
+          ok: false,
+          reason: "unsafe",
+          message: `${segments.slice(0, i + 1).join("/")} is a symlink that leaves the checkout`,
+        };
       next = target;
     }
     dir = next;
@@ -90,7 +100,7 @@ export function resolveInside(root: string, rel: string): PathResolution {
 /** Normalize a route for comparison: leading "/", single slashes, no trailing "/". */
 export function normalizeRoute(route: string): string {
   const parts = route.split("/").filter(Boolean);
-  return "/" + parts.join("/");
+  return `/${parts.join("/")}`;
 }
 
 /** Why a selector is malformed, or undefined. Shape only; whether it resolves is the resolver's job. */
@@ -99,9 +109,12 @@ export function selectorProblem(s: Selector): string | undefined {
     case "file":
       return undefined;
     case "symbol":
-      return /^[A-Za-z_$][\w$]*(\.[A-Za-z_$#][\w$]*)*$/.test(s.name) ? undefined : `symbol name "${s.name}" is not a dotted identifier path`;
+      return /^[A-Za-z_$][\w$]*(\.[A-Za-z_$#][\w$]*)*$/.test(s.name)
+        ? undefined
+        : `symbol name "${s.name}" is not a dotted identifier path`;
     case "route":
-      if (!(HTTP_METHODS as readonly string[]).includes(s.method)) return `route method "${s.method}" is not one of ${HTTP_METHODS.join(", ")}`;
+      if (!(HTTP_METHODS as readonly string[]).includes(s.method))
+        return `route method "${s.method}" is not one of ${HTTP_METHODS.join(", ")}`;
       if (typeof s.route !== "string" || !s.route.startsWith("/")) return `route "${s.route}" must start with "/"`;
       return undefined;
     case "test":

@@ -85,7 +85,10 @@ test("legacy sequential stores keep working and continue with branch-safe IDs", 
   legacy.project.modelRevision = "rev-2";
   legacy.project.name = "LMS (legacy rev-2)";
   writeFileSync(join(dir, "revisions", "rev-2.yaml"), dumpModel(legacy));
-  writeFileSync(join(dir, "HEAD"), JSON.stringify({ format: 1, revision: "rev-2", history: ["rev-1", "rev-2"] }, null, 2) + "\n");
+  writeFileSync(
+    join(dir, "HEAD"),
+    `${JSON.stringify({ format: 1, revision: "rev-2", history: ["rev-1", "rev-2"] }, null, 2)}\n`,
+  );
 
   const e = new ModelEngine(new FileStore(dir));
   assert.equal(e.current().project.modelRevision, "rev-2");
@@ -115,15 +118,25 @@ test("a merge resolved to one side's HEAD leaves foreign revisions: DIVERGED, an
   cpSync(join(b, "revisions", `${revB}.yaml`), join(a, "revisions", `${revB}.yaml`));
   const before = readdirSync(join(a, "revisions")).sort();
 
-  assert.throws(() => new FileStore(a), (err: unknown) => storeErr("DIVERGED")(err) && (err as Error).message.includes(revB));
-  assert.deepEqual(readdirSync(join(a, "revisions")).sort(), before, "recovery did not orphan the other branch's revision");
+  assert.throws(
+    () => new FileStore(a),
+    (err: unknown) => storeErr("DIVERGED")(err) && (err as Error).message.includes(revB),
+  );
+  assert.deepEqual(
+    readdirSync(join(a, "revisions")).sort(),
+    before,
+    "recovery did not orphan the other branch's revision",
+  );
   assert.ok(!existsSync(join(a, "orphaned", `revision.${revB}.yaml`)));
 
   const inspected = inspectStore(a);
   assert.equal(inspected.state, "diverged");
   if (inspected.state === "diverged") {
     assert.equal(inspected.revision, revA);
-    assert.deepEqual(inspected.foreign.map((f) => f.id), [revB]);
+    assert.deepEqual(
+      inspected.foreign.map((f) => f.id),
+      [revB],
+    );
   }
   // A read-only reader refuses it as well, as a fresh RepositoryProject.open() would.
   assert.ok(revA);
@@ -167,7 +180,10 @@ function mergedAtAncestor({ keepChangeRecords }: { keepChangeRecords: boolean })
   const { root, a, b, revA, revB } = divergedPair();
   const merged = join(root, "merged");
   cpSync(join(root, "base"), merged, { recursive: true }); // HEAD = rev-1, the common ancestor
-  for (const [side, rev] of [[a, revA], [b, revB]] as const) {
+  for (const [side, rev] of [
+    [a, revA],
+    [b, revB],
+  ] as const) {
     cpSync(join(side, "revisions", `${rev}.yaml`), join(merged, "revisions", `${rev}.yaml`));
     if (keepChangeRecords) cpSync(join(side, "changes"), join(merged, "changes"), { recursive: true });
   }
@@ -230,7 +246,10 @@ test("P2: a revision file whose modelRevision disagrees with its name is CORRUPT
   const legacy = baseModel();
   legacy.project.modelRevision = "rev-2";
   writeFileSync(join(dir, "revisions", "rev-2.yaml"), dumpModel(legacy));
-  writeFileSync(join(dir, "HEAD"), JSON.stringify({ format: 1, revision: "rev-2", history: ["rev-1", "rev-2"] }) + "\n");
+  writeFileSync(
+    join(dir, "HEAD"),
+    `${JSON.stringify({ format: 1, revision: "rev-2", history: ["rev-1", "rev-2"] })}\n`,
+  );
   assert.equal(inspectStore(dir).state, "ok", "legacy IDs carry no digest, so their content cannot be checked");
   legacy.project.modelRevision = "rev-7";
   writeFileSync(join(dir, "revisions", "rev-2.yaml"), dumpModel(legacy));
@@ -255,7 +274,13 @@ test("P1: an open writer follows HEAD on disk; a change based on the old line is
   assert.equal(stale.diagnostics[0]!.code, "STALE_REVISION");
   assert.equal(readFileSync(join(root, "HEAD"), "utf8"), headAfterCheckout, "the checked-out line's HEAD is intact");
 
-  const ok = e.propose({ ...renamePending("ch-on-new-line", revB), operations: [{ type: "renameObject", objectId: "mod-notifications", name: "Notify" }] }, owner);
+  const ok = e.propose(
+    {
+      ...renamePending("ch-on-new-line", revB),
+      operations: [{ type: "renameObject", objectId: "mod-notifications", name: "Notify" }],
+    },
+    owner,
+  );
   assert.equal(ok.status, "applied", JSON.stringify(ok.diagnostics));
   assert.deepEqual(store.revisions().slice(0, 2), ["rev-1", revB], "the new revision extends the checked-out line");
 });
@@ -273,7 +298,16 @@ test("P1: commit refuses with HEAD_CHANGED if HEAD moves between validation and 
   cpSync(join(b, "HEAD"), join(root, "HEAD")); // the checkout happens right now
   const before = readdirSync(join(root, "revisions")).sort();
   const head = readFileSync(join(root, "HEAD"), "utf8");
-  const record = { changeId: "ch-race", projectId: "prj-lms", proposerId: "user:hoang", status: "applied" as const, baseRevision: "rev-1", resultingRevision: id, validationResults: [], change: renamePending("ch-race") };
+  const record = {
+    changeId: "ch-race",
+    projectId: "prj-lms",
+    proposerId: "user:hoang",
+    status: "applied" as const,
+    baseRevision: "rev-1",
+    resultingRevision: id,
+    validationResults: [],
+    change: renamePending("ch-race"),
+  };
   assert.throws(() => store.commit(model, record), storeErr("HEAD_CHANGED"));
   assert.deepEqual(readdirSync(join(root, "revisions")).sort(), before);
   assert.equal(readFileSync(join(root, "HEAD"), "utf8"), head);
@@ -349,7 +383,16 @@ test("commit refuses with STORE_CHANGED if a same-ID revision file is swapped af
   other.project.name = "Another branch's rev-1";
   writeFileSync(join(dir, "revisions", "rev-1.yaml"), dumpModel(other)); // HEAD line unchanged
   const head = readFileSync(join(dir, "HEAD"), "utf8");
-  const record = { changeId: "ch-swap", projectId: "prj-lms", proposerId: "user:hoang", status: "applied" as const, baseRevision: "rev-1", resultingRevision: id, validationResults: [], change: renamePending("ch-swap") };
+  const record = {
+    changeId: "ch-swap",
+    projectId: "prj-lms",
+    proposerId: "user:hoang",
+    status: "applied" as const,
+    baseRevision: "rev-1",
+    resultingRevision: id,
+    validationResults: [],
+    change: renamePending("ch-swap"),
+  };
   assert.throws(() => store.commit(model, record), storeErr("STORE_CHANGED"));
   assert.equal(readFileSync(join(dir, "HEAD"), "utf8"), head);
   assert.ok(!existsSync(join(dir, "revisions", `${id}.yaml`)));
@@ -378,15 +421,33 @@ class RacingStore implements ModelStore {
     h?.();
     return value;
   }
-  snapshot(): StoreSnapshot { return this.after("snapshot", this.inner.snapshot()); }
-  current() { return this.inner.current(); }
-  revision(rev: string) { return this.inner.revision(rev); }
-  revisions() { return this.inner.revisions(); }
-  commit(m: Parameters<FileStore["commit"]>[0], r: ChangeRecord, g?: string | ChangeGuard) { this.inner.commit(m, r, g); }
-  getChange(id: string) { return this.after("getChange", this.inner.getChange(id)); }
-  putChange(r: ChangeRecord, g?: ChangeGuard) { this.inner.putChange(r, g); }
-  appendAudit(e: Parameters<FileStore["appendAudit"]>[0]) { this.inner.appendAudit(e); }
-  audit() { return this.inner.audit(); }
+  snapshot(): StoreSnapshot {
+    return this.after("snapshot", this.inner.snapshot());
+  }
+  current() {
+    return this.inner.current();
+  }
+  revision(rev: string) {
+    return this.inner.revision(rev);
+  }
+  revisions() {
+    return this.inner.revisions();
+  }
+  commit(m: Parameters<FileStore["commit"]>[0], r: ChangeRecord, g?: string | ChangeGuard) {
+    this.inner.commit(m, r, g);
+  }
+  getChange(id: string) {
+    return this.after("getChange", this.inner.getChange(id));
+  }
+  putChange(r: ChangeRecord, g?: ChangeGuard) {
+    this.inner.putChange(r, g);
+  }
+  appendAudit(e: Parameters<FileStore["appendAudit"]>[0]) {
+    this.inner.appendAudit(e);
+  }
+  audit() {
+    return this.inner.audit();
+  }
 }
 
 /** Replace `dir`'s store files with `other`'s, as a `git checkout` of another branch would. */
@@ -407,7 +468,11 @@ test("round 5: a checkout between dry-run and commit is refused; nothing is writ
   assert.equal(r.status, "rejected");
   assert.ok(["HEAD_CHANGED", "STORE_CHANGED"].includes(r.diagnostics[0]!.code), r.diagnostics[0]!.code);
   assert.equal(readFileSync(join(dir, "HEAD"), "utf8"), readFileSync(join(b, "HEAD"), "utf8"), "B's HEAD intact");
-  assert.deepEqual(readdirSync(join(dir, "revisions")).sort(), readdirSync(join(b, "revisions")).sort(), "no revision written");
+  assert.deepEqual(
+    readdirSync(join(dir, "revisions")).sort(),
+    readdirSync(join(b, "revisions")).sort(),
+    "no revision written",
+  );
   assert.ok(!existsSync(join(dir, "changes", "ch-timeout-01.json")), "no record claims the change");
   // A retry re-reads, and is now (correctly) stale against B's line.
   assert.equal(e.propose(timeoutChange(), owner).diagnostics[0]!.code, "STALE_REVISION");
@@ -423,12 +488,25 @@ test("round 5: the store refuses a model validated on another line even after it
   model.project.name = "LMS next";
   const id = branchSafeRevisionId(model, "rev-1", 2);
   model.project.modelRevision = id;
-  const record = { changeId: "ch-late", projectId: "prj-lms", proposerId: "user:hoang", status: "applied" as const, baseRevision: "rev-1", resultingRevision: id, validationResults: [], change: renamePending("ch-late") };
+  const record = {
+    changeId: "ch-late",
+    projectId: "prj-lms",
+    proposerId: "user:hoang",
+    status: "applied" as const,
+    baseRevision: "rev-1",
+    resultingRevision: id,
+    validationResults: [],
+    change: renamePending("ch-late"),
+  };
   checkoutLine(dir, b);
   assert.deepEqual(store.revisions(), ["rev-1", revB], "the store auto-synced to B (the reviewer's path)");
   const head = readFileSync(join(dir, "HEAD"), "utf8");
   assert.throws(() => store.commit(model, record, snap.token), storeErr("HEAD_CHANGED"), "token from rev-1");
-  assert.throws(() => store.commit(model, record), storeErr("HEAD_CHANGED"), "even without a token: baseRevision is not HEAD");
+  assert.throws(
+    () => store.commit(model, record),
+    storeErr("HEAD_CHANGED"),
+    "even without a token: baseRevision is not HEAD",
+  );
   assert.equal(readFileSync(join(dir, "HEAD"), "utf8"), head);
   assert.ok(!existsSync(join(dir, "revisions", `${id}.yaml`)));
 });
@@ -442,7 +520,16 @@ test("round 5: a same-ID legacy base swapped after the snapshot is refused; a wr
   model.project.name = "LMS next";
   const id = branchSafeRevisionId(model, "rev-1", 2);
   model.project.modelRevision = id;
-  const record = { changeId: "ch-legacy", projectId: "prj-lms", proposerId: "user:hoang", status: "applied" as const, baseRevision: "rev-1", resultingRevision: id, validationResults: [], change: renamePending("ch-legacy") };
+  const record = {
+    changeId: "ch-legacy",
+    projectId: "prj-lms",
+    proposerId: "user:hoang",
+    status: "applied" as const,
+    baseRevision: "rev-1",
+    resultingRevision: id,
+    validationResults: [],
+    change: renamePending("ch-legacy"),
+  };
   const other = baseModel();
   other.project.name = "Another branch's rev-1";
   writeFileSync(join(dir, "revisions", "rev-1.yaml"), dumpModel(other));
@@ -452,7 +539,10 @@ test("round 5: a same-ID legacy base swapped after the snapshot is refused; a wr
   const fresh = store.snapshot();
   const wrong = structuredClone(model);
   wrong.project.modelRevision = branchSafeRevisionId(model, "rev-0", 2); // digest of another parent
-  assert.throws(() => store.commit(wrong, { ...record, resultingRevision: wrong.project.modelRevision }, fresh.token), storeErr("BAD_COMMIT"));
+  assert.throws(
+    () => store.commit(wrong, { ...record, resultingRevision: wrong.project.modelRevision }, fresh.token),
+    storeErr("BAD_COMMIT"),
+  );
   assert.deepEqual(store.revisions(), ["rev-1"]);
 });
 
@@ -476,13 +566,20 @@ for (const kind of ["invalid (rejected)", "valid but needs approval (pending)"] 
     const change =
       kind === "invalid (rejected)"
         ? { ...renamePending("ch-x"), operations: [{ type: "removeObject" as const, objectId: "st-rejected" }] }
-        : { ...renamePending("ch-x"), operations: [{ type: "renameObject" as const, objectId: "mod-notifications", name: "Notify" }] };
+        : {
+            ...renamePending("ch-x"),
+            operations: [{ type: "renameObject" as const, objectId: "mod-notifications", name: "Notify" }],
+          };
     const r = e.propose(change, kind === "invalid (rejected)" ? owner : mcpAgent);
 
     assert.equal(r.status, "rejected");
     assert.equal(r.diagnostics[0]!.code, "STORE_CHANGED");
     assert.equal(r.record, undefined, "nothing persisted");
-    assert.equal(readFileSync(join(a, "changes", "ch-x.json"), "utf8"), bRecord, "B's pending proposal is byte-identical");
+    assert.equal(
+      readFileSync(join(a, "changes", "ch-x.json"), "utf8"),
+      bRecord,
+      "B's pending proposal is byte-identical",
+    );
     assert.equal(readFileSync(join(a, "HEAD"), "utf8"), bHead);
     assert.equal(e.audit().at(-1)!.codes[0], "STORE_CHANGED", "the attempt is audited locally");
   });
@@ -494,10 +591,24 @@ test("round 6: a rejected approval does not overwrite a record that changed on d
   const e0 = new ModelEngine(new FileStore(dir));
   assert.equal(e0.propose(renamePending("ch-y"), mcpAgent).status, "pending");
   // Make it fail revalidation: the model moves on first.
-  assert.equal(e0.propose({ ...renamePending("ch-z"), operations: [{ type: "renameObject", objectId: "mod-notifications", name: "Notify" }] }, owner).status, "applied");
+  assert.equal(
+    e0.propose(
+      {
+        ...renamePending("ch-z"),
+        operations: [{ type: "renameObject", objectId: "mod-notifications", name: "Notify" }],
+      },
+      owner,
+    ).status,
+    "applied",
+  );
   // Right after the approver's snapshot, the record is replaced (another checkout's ch-y).
-  const replaced = readFileSync(join(dir, "changes", "ch-y.json"), "utf8").replace('"agent:mcp-session-1"', '"agent:other-branch"');
-  const e = new ModelEngine(new RacingStore(new FileStore(dir), () => writeFileSync(join(dir, "changes", "ch-y.json"), replaced)));
+  const replaced = readFileSync(join(dir, "changes", "ch-y.json"), "utf8").replace(
+    '"agent:mcp-session-1"',
+    '"agent:other-branch"',
+  );
+  const e = new ModelEngine(
+    new RacingStore(new FileStore(dir), () => writeFileSync(join(dir, "changes", "ch-y.json"), replaced)),
+  );
   const r = e.approve("ch-y", reviewer);
   assert.equal(r.status, "rejected");
   assert.equal(r.diagnostics[0]!.code, "STORE_CHANGED");
@@ -514,7 +625,11 @@ function pendingOn(root: string, name: string, base: string, changeId: string): 
 const filesOf = (dir: string) => ({
   head: readFileSync(join(dir, "HEAD"), "utf8"),
   revisions: readdirSync(join(dir, "revisions")).sort(),
-  changes: Object.fromEntries(readdirSync(join(dir, "changes")).sort().map((f) => [f, readFileSync(join(dir, "changes", f), "utf8")])),
+  changes: Object.fromEntries(
+    readdirSync(join(dir, "changes"))
+      .sort()
+      .map((f) => [f, readFileSync(join(dir, "changes", f), "utf8")]),
+  ),
 });
 
 test("round 7: an auto-applied proposal never overwrites another branch's pending record with the same ID", () => {
@@ -556,7 +671,16 @@ test("round 7: approving a pending record replaced by another branch's same-ID r
   const b = join(root, "b");
   cpSync(base, b, { recursive: true });
   const other: HostContext = { principalId: "agent:other-branch", permissions: ["model:propose"] };
-  assert.equal(new ModelEngine(new FileStore(b)).propose({ ...renamePending("ch-y"), operations: [{ type: "renameObject", objectId: "mod-notifications", name: "Notify" }] }, other).status, "pending");
+  assert.equal(
+    new ModelEngine(new FileStore(b)).propose(
+      {
+        ...renamePending("ch-y"),
+        operations: [{ type: "renameObject", objectId: "mod-notifications", name: "Notify" }],
+      },
+      other,
+    ).status,
+    "pending",
+  );
   const before = filesOf(b);
   const e = new ModelEngine(new RacingStore(new FileStore(a), () => checkoutLine(a, b), "getChange"));
   const r = e.approve("ch-y", reviewer);
@@ -586,7 +710,15 @@ test("round 7: the store checks the record precondition of a commit even with a 
     const done = { ...pending, status: "applied" as const, resultingRevision: id };
     // A "new proposal" commit over an existing record, and an approval of a record that is not there.
     assert.throws(() => store.commit(model, done, { token: snap.token, previous: null }), storeErr("STORE_CHANGED"));
-    assert.throws(() => store.commit(model, { ...done, changeId: "ch-none" }, { token: snap.token, previous: { ...pending, changeId: "ch-none" } }), storeErr("STORE_CHANGED"));
+    assert.throws(
+      () =>
+        store.commit(
+          model,
+          { ...done, changeId: "ch-none" },
+          { token: snap.token, previous: { ...pending, changeId: "ch-none" } },
+        ),
+      storeErr("STORE_CHANGED"),
+    );
     assert.deepEqual(store.revisions(), ["rev-1"]);
     assert.equal(store.getChange("ch-p")!.status, "pending");
     store.commit(model, done, { token: snap.token, previous: pending }); // the exact record: accepted

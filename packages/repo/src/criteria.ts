@@ -30,7 +30,14 @@ import { failFinal, finish, moduleOf, observed, readClaims } from "./proposals.t
 import type { ProposalHooks, ProposalResult } from "./proposals.ts";
 import { worktreeState } from "./worktree.ts";
 import { caseKey } from "./junit.ts";
-import { candidateIdentityOf, identityDigest, isTrustedCapture, recordIdentityProblem, recordProblem, testRunRecordSchema } from "./testruns.ts";
+import {
+  candidateIdentityOf,
+  identityDigest,
+  isTrustedCapture,
+  recordIdentityProblem,
+  recordProblem,
+  testRunRecordSchema,
+} from "./testruns.ts";
 import type { CandidateIdentity, TestRunRecord } from "./testruns.ts";
 
 export const CRITERIA_LIMITS = {
@@ -55,7 +62,10 @@ export const criteriaRequest = z
     /** M4.3: test-run records (captureTestRun) to evaluate the mappings against. */
     runs: z.array(testRunRecordSchema).min(1).max(CRITERIA_LIMITS.runs).optional(),
     /** M4.3: optional code coverage, supporting context only (never criterion coverage). */
-    coverage: z.object({ linesPct: z.number().min(0).max(100), source: z.string().min(1).max(200) }).strict().optional(),
+    coverage: z
+      .object({ linesPct: z.number().min(0).max(100), source: z.string().min(1).max(200) })
+      .strict()
+      .optional(),
   })
   .strict();
 export type CriteriaRequest = z.input<typeof criteriaRequest>;
@@ -229,7 +239,10 @@ export type CriteriaReport = {
   results: Record<"required" | "optional", Record<CriterionResult, number>>;
   coverage: { linesPct: number; source: string; note: string } | null;
   /** Report-level observations (e.g. a green suite while a required criterion has no passing result). */
-  notes: { code: "SUITE_GREEN_REQUIRED_NOT_PASSED" | "COVERAGE_IS_NOT_CRITERION_COVERAGE" | "NO_FRESH_RUN"; message: string }[];
+  notes: {
+    code: "SUITE_GREEN_REQUIRED_NOT_PASSED" | "COVERAGE_IS_NOT_CRITERION_COVERAGE" | "NO_FRESH_RUN";
+    message: string;
+  }[];
   meaning: string;
   implementationChecked: false;
 };
@@ -241,14 +254,27 @@ const cut = (t: string, max: number = CRITERIA_LIMITS.textChars) => (t.length > 
 const sha = (t: string) => createHash("sha256").update(t).digest("hex");
 
 function identityOf(path: string, name: string): TestIdentity {
-  return name.length > CRITERIA_LIMITS.testNameChars ? { path, name: cut(name, CRITERIA_LIMITS.testNameChars), nameDigest: sha(name) } : { path, name };
+  return name.length > CRITERIA_LIMITS.testNameChars
+    ? { path, name: cut(name, CRITERIA_LIMITS.testNameChars), nameDigest: sha(name) }
+    : { path, name };
 }
 
 /** The criteria of the current model with their test-case mappings, verified now. Read-only, one observation. */
-export function criteriaEvidence(path: string, input: unknown = {}, hooks: ProposalHooks = {}): ProposalResult<CriteriaReport> {
+export function criteriaEvidence(
+  path: string,
+  input: unknown = {},
+  hooks: ProposalHooks = {},
+): ProposalResult<CriteriaReport> {
   const parsed = criteriaRequest.safeParse(input ?? {});
   if (!parsed.success) {
-    return { ok: false, error: { code: "INVALID_REQUEST", message: "request does not match the criteria input schema", details: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })) } };
+    return {
+      ok: false,
+      error: {
+        code: "INVALID_REQUEST",
+        message: "request does not match the criteria input schema",
+        details: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+      },
+    };
   }
   return observed(path, hooks, (obs) => {
     const root = obs.status.root;
@@ -257,7 +283,15 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
     const wanted = parsed.data.ids ? new Set(parsed.data.ids) : null;
     if (wanted) {
       const unknown = [...wanted].filter((id) => !all.some((c) => c.id === id)).sort();
-      if (unknown.length) return failFinal({ code: "INVALID_REQUEST", message: `no criterion ${unknown.map((u) => `"${u}"`).join(", ")} at ${model.project.modelRevision}` }, obs, hooks);
+      if (unknown.length)
+        return failFinal(
+          {
+            code: "INVALID_REQUEST",
+            message: `no criterion ${unknown.map((u) => `"${u}"`).join(", ")} at ${model.project.modelRevision}`,
+          },
+          obs,
+          hooks,
+        );
     }
     const runs = (parsed.data.runs ?? []) as TestRunRecord[];
     for (const [i, r] of runs.entries()) {
@@ -274,10 +308,18 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
       const staleBecause = [
         identityProblem ? `the candidate's source cannot be identified exactly: ${identityProblem}` : null,
         recordIdentityProblem(r.candidate),
-        r.candidate.commit !== candidate.commit ? `it ran at commit ${String(r.candidate.commit).slice(0, 12)}, the candidate is ${String(candidate.commit).slice(0, 12)}` : null,
-        r.candidate.uncommitted.digest !== candidate.uncommitted.digest ? "uncommitted files differ from when it ran" : null,
-        r.candidate.bound.digest !== candidate.bound.digest ? "bound files (implementation, route or test files a claim points at, tracked or not) differ from when it ran" : null,
-        r.candidate.modelRevision !== candidate.modelRevision ? `it ran at model revision ${r.candidate.modelRevision}, the candidate is at ${candidate.modelRevision}` : null,
+        r.candidate.commit !== candidate.commit
+          ? `it ran at commit ${String(r.candidate.commit).slice(0, 12)}, the candidate is ${String(candidate.commit).slice(0, 12)}`
+          : null,
+        r.candidate.uncommitted.digest !== candidate.uncommitted.digest
+          ? "uncommitted files differ from when it ran"
+          : null,
+        r.candidate.bound.digest !== candidate.bound.digest
+          ? "bound files (implementation, route or test files a claim points at, tracked or not) differ from when it ran"
+          : null,
+        r.candidate.modelRevision !== candidate.modelRevision
+          ? `it ran at model revision ${r.candidate.modelRevision}, the candidate is at ${candidate.modelRevision}`
+          : null,
         r.candidate.claims !== candidate.claims ? "the binding claims changed since it ran" : null,
       ].filter((x): x is string => !!x);
       return {
@@ -296,7 +338,10 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
         green: r.summary.failed === 0 && r.summary.errors === 0,
       };
     });
-    const byRun = runs.map((r) => ({ cases: new Map(r.cases.map((x) => [x.key, x] as const)), dup: new Set(r.duplicates) }));
+    const byRun = runs.map((r) => ({
+      cases: new Map(r.cases.map((x) => [x.key, x] as const)),
+      dup: new Set(r.duplicates),
+    }));
     const resultOf = (path: string, name: string): MappingResult | null => {
       if (!runs.length) return null;
       const k = caseKey(path, name);
@@ -311,21 +356,35 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
         hits.push({ i, status: hit.status, ...(hit.message ? { message: hit.message } : {}) });
       });
       const observedBy = (is: number[]) => [...new Set(is.map((i) => runSummaries[i]!.observedBy))].sort();
-      if (ambiguous) return { status: "ambiguous", runs: hits.map((h) => h.i), observedBy: observedBy(hits.map((h) => h.i)) };
+      if (ambiguous)
+        return { status: "ambiguous", runs: hits.map((h) => h.i), observedBy: observedBy(hits.map((h) => h.i)) };
       if (hits.length) {
-        const worst = (["error", "failed", "skipped", "passed"] as const).find((s) => hits.some((h) => h.status === s))!;
+        const worst = (["error", "failed", "skipped", "passed"] as const).find((s) =>
+          hits.some((h) => h.status === s),
+        )!;
         const at = hits.filter((h) => h.status === worst);
-        return { status: worst, runs: at.map((h) => h.i), observedBy: observedBy(at.map((h) => h.i)), ...(at[0]!.message ? { message: at[0]!.message } : {}) };
+        return {
+          status: worst,
+          runs: at.map((h) => h.i),
+          observedBy: observedBy(at.map((h) => h.i)),
+          ...(at[0]!.message ? { message: at[0]!.message } : {}),
+        };
       }
       // Not in any run of this candidate: not run if some run is fresh, otherwise only stale evidence (or none).
-      return { status: runSummaries.some((r) => r.fresh) ? "not-run" : "stale", runs: staleHits, observedBy: observedBy(staleHits) };
+      return {
+        status: runSummaries.some((r) => r.fresh) ? "not-run" : "stale",
+        runs: staleHits,
+        observedBy: observedBy(staleHits),
+      };
     };
     const claims = readClaims(root);
     const available = !claims.key.startsWith("unreadable:");
     const criterionIds = new Set(all.map((c) => c.id));
     const about = claims.entries.filter((e) => !!e.claim && criterionIds.has(e.claim.modelObjectId));
     // An unreadable claim file may be about any criterion (or none); its bytes are what would say.
-    const invalid = claims.entries.filter((e) => !e.claim).sort((a, b) => (a.bindingId < b.bindingId ? -1 : a.bindingId > b.bindingId ? 1 : 0));
+    const invalid = claims.entries
+      .filter((e) => !e.claim)
+      .sort((a, b) => (a.bindingId < b.bindingId ? -1 : a.bindingId > b.bindingId ? 1 : 0));
     const complete = available && invalid.length === 0;
     // The bytes of every mapped test file, before verification reads them and again before answering.
     const files = [...new Set(about.map((e) => e.claim?.locator.path).filter((p): p is string => !!p))].sort();
@@ -334,7 +393,10 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
     const verified = new Map(about.map((e) => [e.bindingId, verifyBinding(root, e, obs.status, memo)] as const));
 
     // Many-to-many: test identity → criteria.
-    const key = (e: ClaimEntry) => (e.claim && e.claim.relation === "tests" && e.claim.locator.selector.kind === "test" ? `${e.claim.locator.path}\0${e.claim.locator.selector.name}` : null);
+    const key = (e: ClaimEntry) =>
+      e.claim && e.claim.relation === "tests" && e.claim.locator.selector.kind === "test"
+        ? `${e.claim.locator.path}\0${e.claim.locator.selector.name}`
+        : null;
     const byTest = new Map<string, Set<Id>>();
     for (const e of about) {
       const k = key(e);
@@ -344,14 +406,31 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
     const evidence = all
       .filter((c) => !wanted || wanted.has(c.id))
       .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-      .map((c) => criterionOf(c, about, verified, byTest, key, available ? invalid.length : null, claims.key, moduleOf(model, c.id), runs.length ? resultOf : null));
+      .map((c) =>
+        criterionOf(
+          c,
+          about,
+          verified,
+          byTest,
+          key,
+          available ? invalid.length : null,
+          claims.key,
+          moduleOf(model, c.id),
+          runs.length ? resultOf : null,
+        ),
+      );
     const shown = evidence.slice(0, CRITERIA_LIMITS.criteria);
     const tests = [...byTest.entries()]
       .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
       .map(([k, ids]) => {
         const [p, n] = k.split("\0") as [string, string];
         const sorted = [...ids].sort();
-        return { test: identityOf(p, n), criteria: sorted.slice(0, CRITERIA_LIMITS.relatedCriteria), criteriaTotal: sorted.length, criteriaTruncated: sorted.length > CRITERIA_LIMITS.relatedCriteria };
+        return {
+          test: identityOf(p, n),
+          criteria: sorted.slice(0, CRITERIA_LIMITS.relatedCriteria),
+          criteriaTotal: sorted.length,
+          criteriaTruncated: sorted.length > CRITERIA_LIMITS.relatedCriteria,
+        };
       });
     const notResolved = (e: CriterionEvidence) => e.mapping !== "resolved" || e.assessment !== "complete";
     const data: CriteriaReport = {
@@ -377,7 +456,11 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
       mappingsAvailable: available,
       ...(available ? {} : { mappingsProblem: cut(claims.key.slice("unreadable:".length)) }),
       invalidClaims: {
-        items: invalid.slice(0, CRITERIA_LIMITS.invalidClaims).map((e) => ({ bindingId: cut(e.bindingId, 300), file: cut(e.file, 300), problem: cut(e.problem ?? "unreadable") })),
+        items: invalid.slice(0, CRITERIA_LIMITS.invalidClaims).map((e) => ({
+          bindingId: cut(e.bindingId, 300),
+          file: cut(e.file, 300),
+          problem: cut(e.problem ?? "unreadable"),
+        })),
         total: invalid.length,
         truncated: invalid.length > CRITERIA_LIMITS.invalidClaims,
       },
@@ -386,7 +469,11 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
       candidate: { ...candidate, identityDigest: candidateDigest, problem: identityProblem },
       results: tally(evidence),
       coverage: parsed.data.coverage
-        ? { ...parsed.data.coverage, source: cut(parsed.data.coverage.source, 200), note: "line coverage says which lines ran, not which approved criteria a passing test checks; it never counts as criterion evidence" }
+        ? {
+            ...parsed.data.coverage,
+            source: cut(parsed.data.coverage.source, 200),
+            note: "line coverage says which lines ran, not which approved criteria a passing test checks; it never counts as criterion evidence",
+          }
         : null,
       notes: notesOf(evidence, runSummaries, parsed.data.coverage ?? null),
       meaning: MEANING,
@@ -396,12 +483,30 @@ export function criteriaEvidence(path: string, input: unknown = {}, hooks: Propo
       key: canonicalJson([claims.key, tree.digest, candidateDigest]),
       again: () => {
         const c = readClaims(root);
-        const f = [...new Set(c.entries.filter((e) => e.claim && criterionIds.has(e.claim.modelObjectId)).map((e) => e.claim!.locator.path))].sort();
-        return canonicalJson([c.key, worktreeState(root, f.length ? f : files).digest, identityDigest(candidateIdentityOf(obs).candidate)]);
+        const f = [
+          ...new Set(
+            c.entries
+              .filter((e) => e.claim && criterionIds.has(e.claim.modelObjectId))
+              .map((e) => e.claim!.locator.path),
+          ),
+        ].sort();
+        return canonicalJson([
+          c.key,
+          worktreeState(root, f.length ? f : files).digest,
+          identityDigest(candidateIdentityOf(obs).candidate),
+        ]);
       },
     };
     const bounded = fitBudget(redact(data, root));
-    if (!bounded) return failFinal({ code: "REPORT_TOO_LARGE", message: `the criteria report exceeds ${CRITERIA_LIMITS.bytes} bytes even with every list cut to one item; ask for fewer criteria with ids` }, obs, hooks);
+    if (!bounded)
+      return failFinal(
+        {
+          code: "REPORT_TOO_LARGE",
+          message: `the criteria report exceeds ${CRITERIA_LIMITS.bytes} bytes even with every list cut to one item; ask for fewer criteria with ids`,
+        },
+        obs,
+        hooks,
+      );
     return finish(obs, hooks, bounded, guard);
   });
 }
@@ -416,12 +521,36 @@ function fitBudget(r: CriteriaReport): CriteriaReport | null {
   const lists: { get: () => number; set: (n: number) => void }[] = [
     { get: () => r.criteria.length, set: (n) => ((r.criteria = r.criteria.slice(0, n)), (r.truncated = true)) },
     { get: () => r.tests.length, set: (n) => ((r.tests = r.tests.slice(0, n)), (r.testsTruncated = true)) },
-    { get: () => r.invalidClaims.items.length, set: (n) => ((r.invalidClaims.items = r.invalidClaims.items.slice(0, n)), (r.invalidClaims.truncated = true)) },
-    { get: () => most(r.tests.map((t) => t.criteria.length)), set: (n) => r.tests.forEach((t) => t.criteria.length > n && ((t.criteria = t.criteria.slice(0, n)), (t.criteriaTruncated = true))) },
-    { get: () => most(r.criteria.map((c) => c.mappings.length)), set: (n) => r.criteria.forEach((c) => c.mappings.length > n && ((c.mappings = c.mappings.slice(0, n)), (c.mappingsTruncated = true))) },
-    { get: () => most(r.criteria.map((c) => c.problems.length)), set: (n) => r.criteria.forEach((c) => c.problems.length > n && ((c.problems = c.problems.slice(0, n)), (c.problemsTruncated = true))) },
+    {
+      get: () => r.invalidClaims.items.length,
+      set: (n) => ((r.invalidClaims.items = r.invalidClaims.items.slice(0, n)), (r.invalidClaims.truncated = true)),
+    },
+    {
+      get: () => most(r.tests.map((t) => t.criteria.length)),
+      set: (n) =>
+        r.tests.forEach(
+          (t) => t.criteria.length > n && ((t.criteria = t.criteria.slice(0, n)), (t.criteriaTruncated = true)),
+        ),
+    },
+    {
+      get: () => most(r.criteria.map((c) => c.mappings.length)),
+      set: (n) =>
+        r.criteria.forEach(
+          (c) => c.mappings.length > n && ((c.mappings = c.mappings.slice(0, n)), (c.mappingsTruncated = true)),
+        ),
+    },
+    {
+      get: () => most(r.criteria.map((c) => c.problems.length)),
+      set: (n) =>
+        r.criteria.forEach(
+          (c) => c.problems.length > n && ((c.problems = c.problems.slice(0, n)), (c.problemsTruncated = true)),
+        ),
+    },
     // alsoMapsTo has its own total; cutting it is visible as alsoMapsTo.length < alsoMapsToTotal.
-    { get: () => most(r.criteria.flatMap((c) => c.mappings.map((m) => m.alsoMapsTo.length))), set: (n) => r.criteria.forEach((c) => c.mappings.forEach((m) => (m.alsoMapsTo = m.alsoMapsTo.slice(0, n)))) },
+    {
+      get: () => most(r.criteria.flatMap((c) => c.mappings.map((m) => m.alsoMapsTo.length))),
+      set: (n) => r.criteria.forEach((c) => c.mappings.forEach((m) => (m.alsoMapsTo = m.alsoMapsTo.slice(0, n)))),
+    },
   ];
   let bytes = size(r);
   let shrunk = false;
@@ -442,22 +571,51 @@ function fitBudget(r: CriteriaReport): CriteriaReport | null {
 type JUnitStatus = "passed" | "failed" | "error" | "skipped";
 
 function tally(evidence: readonly CriterionEvidence[]): CriteriaReport["results"] {
-  const zero = (): Record<CriterionResult, number> => ({ passed: 0, failed: 0, stale: 0, missing: 0, unknown: 0, unverified: 0 });
+  const zero = (): Record<CriterionResult, number> => ({
+    passed: 0,
+    failed: 0,
+    stale: 0,
+    missing: 0,
+    unknown: 0,
+    unverified: 0,
+  });
   const out = { required: zero(), optional: zero() };
   for (const e of evidence) out[e.verification][e.result]++;
   return out;
 }
 
-function notesOf(evidence: readonly CriterionEvidence[], runs: readonly RunSummary[], coverage: { linesPct: number } | null): CriteriaReport["notes"] {
+function notesOf(
+  evidence: readonly CriterionEvidence[],
+  runs: readonly RunSummary[],
+  coverage: { linesPct: number } | null,
+): CriteriaReport["notes"] {
   const notes: CriteriaReport["notes"] = [];
-  const requiredNotPassed = evidence.filter((e) => e.verification === "required" && e.result !== "passed").map((e) => e.id);
-  const list = (ids: string[]) => `${ids.slice(0, 10).join(", ")}${ids.length > 10 ? ` and ${ids.length - 10} more` : ""}`;
-  if (runs.length && !runs.some((r) => r.fresh)) notes.push({ code: "NO_FRESH_RUN", message: "no supplied run describes this candidate (different commit, uncommitted bytes, model revision or claims); every result is stale" });
+  const requiredNotPassed = evidence
+    .filter((e) => e.verification === "required" && e.result !== "passed")
+    .map((e) => e.id);
+  const list = (ids: string[]) =>
+    `${ids.slice(0, 10).join(", ")}${ids.length > 10 ? ` and ${ids.length - 10} more` : ""}`;
+  if (runs.length && !runs.some((r) => r.fresh))
+    notes.push({
+      code: "NO_FRESH_RUN",
+      message:
+        "no supplied run describes this candidate (different commit, uncommitted bytes, model revision or claims); every result is stale",
+    });
   if (runs.some((r) => r.fresh && r.green) && requiredNotPassed.length) {
-    notes.push({ code: "SUITE_GREEN_REQUIRED_NOT_PASSED", message: cut(`the suite is green (no failures or errors), but required criteria have no passing result for every mapped test case: ${list(requiredNotPassed)}. A green suite does not stand in for a missing, skipped or failed mapped case`) });
+    notes.push({
+      code: "SUITE_GREEN_REQUIRED_NOT_PASSED",
+      message: cut(
+        `the suite is green (no failures or errors), but required criteria have no passing result for every mapped test case: ${list(requiredNotPassed)}. A green suite does not stand in for a missing, skipped or failed mapped case`,
+      ),
+    });
   }
   if (coverage && requiredNotPassed.length) {
-    notes.push({ code: "COVERAGE_IS_NOT_CRITERION_COVERAGE", message: cut(`line coverage is ${coverage.linesPct}%, yet required criteria are not verified: ${list(requiredNotPassed)}. Coverage says which lines ran, not which approved behaviour a passing test checks`) });
+    notes.push({
+      code: "COVERAGE_IS_NOT_CRITERION_COVERAGE",
+      message: cut(
+        `line coverage is ${coverage.linesPct}%, yet required criteria are not verified: ${list(requiredNotPassed)}. Coverage says which lines ran, not which approved behaviour a passing test checks`,
+      ),
+    });
   }
   return notes;
 }
@@ -474,7 +632,14 @@ function criterionOf(
   moduleId: Id | null,
   resultOf: ((path: string, name: string) => MappingResult | null) | null,
 ): CriterionEvidence {
-  const base = { id: c.id, name: cut(c.name, 200), statement: cut(c.statement), verification: c.verification, verifies: c.verifies.map(refId).filter((x): x is Id => !!x), moduleId };
+  const base = {
+    id: c.id,
+    name: cut(c.name, 200),
+    statement: cut(c.statement),
+    verification: c.verification,
+    verifies: c.verifies.map(refId).filter((x): x is Id => !!x),
+    moduleId,
+  };
   if (invalidCount === null) {
     return {
       ...base,
@@ -483,14 +648,23 @@ function criterionOf(
       mappings: [],
       mappingsTotal: 0,
       mappingsTruncated: false,
-      problems: [{ code: "MAPPING_INVALID", message: cut(`the binding claims could not be read (${claimsKey.slice("unreadable:".length)}); whether this criterion is mapped is unknown`) }],
+      problems: [
+        {
+          code: "MAPPING_INVALID",
+          message: cut(
+            `the binding claims could not be read (${claimsKey.slice("unreadable:".length)}); whether this criterion is mapped is unknown`,
+          ),
+        },
+      ],
       problemsTotal: 1,
       problemsTruncated: false,
       result: resultOf ? "unknown" : "unverified",
       resultObservedBy: null,
     };
   }
-  const mine = about.filter((e) => e.claim?.modelObjectId === c.id).sort((a, b) => (a.bindingId < b.bindingId ? -1 : 1));
+  const mine = about
+    .filter((e) => e.claim?.modelObjectId === c.id)
+    .sort((a, b) => (a.bindingId < b.bindingId ? -1 : 1));
   const problems: CriterionEvidence["problems"] = [];
   const mappings: CriterionMapping[] = [];
   const seen = new Map<string, string>();
@@ -502,24 +676,74 @@ function criterionOf(
     const cl = e.claim!;
     const k = key(e);
     const isTest = k !== null;
-    if (!isTest) problems.push({ code: "NOT_A_TEST_MAPPING", bindingId: e.bindingId, message: `claim ${e.bindingId} is a ${cl.relation} claim on a ${cl.locator.selector.kind} selector; a criterion is mapped only to individual test cases (tests + #test:)` });
+    if (!isTest)
+      problems.push({
+        code: "NOT_A_TEST_MAPPING",
+        bindingId: e.bindingId,
+        message: `claim ${e.bindingId} is a ${cl.relation} claim on a ${cl.locator.selector.kind} selector; a criterion is mapped only to individual test cases (tests + #test:)`,
+      });
     else {
       testMappings++;
       const dup = seen.get(k);
-      if (dup) problems.push({ code: "DUPLICATE_MAPPING", bindingId: e.bindingId, message: `claims ${dup} and ${e.bindingId} map the same test case to ${c.id}` });
+      if (dup)
+        problems.push({
+          code: "DUPLICATE_MAPPING",
+          bindingId: e.bindingId,
+          message: `claims ${dup} and ${e.bindingId} map the same test case to ${c.id}`,
+        });
       else seen.set(k, e.bindingId);
     }
     const name = cl.locator.selector.kind === "test" ? cl.locator.selector.name : null;
     const at = name ? `${cl.locator.path} > ${cut(name, CRITERIA_LIMITS.testNameChars)}` : cl.locator.path;
     if (isTest) {
       if (v.state === "resolved") resolved++;
-      else if (v.state === "missing") problems.push({ code: "TEST_MISSING", bindingId: e.bindingId, message: cut(`mapped test ${at} does not resolve (renamed, moved or removed?): ${v.locator?.detail ?? ""}; reassert the mapping to the test that now checks ${c.id}`) });
-      else if (v.state === "ambiguous") problems.push({ code: "TEST_AMBIGUOUS", bindingId: e.bindingId, message: cut(`mapped test title ${at} matches more than one test case; make the titles unique`) });
+      else if (v.state === "missing")
+        problems.push({
+          code: "TEST_MISSING",
+          bindingId: e.bindingId,
+          message: cut(
+            `mapped test ${at} does not resolve (renamed, moved or removed?): ${v.locator?.detail ?? ""}; reassert the mapping to the test that now checks ${c.id}`,
+          ),
+        });
+      else if (v.state === "ambiguous")
+        problems.push({
+          code: "TEST_AMBIGUOUS",
+          bindingId: e.bindingId,
+          message: cut(`mapped test title ${at} matches more than one test case; make the titles unique`),
+        });
       else if (v.state === "stale") {
-        if (v.model && (v.model.state === "changed" || v.model.state === "removed")) problems.push({ code: "CRITERION_CHANGED", bindingId: e.bindingId, message: cut(`${c.id} changed since the mapping was claimed (${v.model.cause}); check that ${at} still checks it, then reassert`) });
-        if (v.source?.state === "changed") problems.push({ code: "TEST_CHANGED", bindingId: e.bindingId, message: cut(`the code of mapped test ${at} changed since the mapping was claimed; check it still checks ${c.id}, then reassert`) });
-      } else if (v.state === "invalid") problems.push({ code: "MAPPING_INVALID", bindingId: e.bindingId, message: cut(`mapping ${e.bindingId} is invalid: ${[v.locator?.detail, v.source?.cause, v.model?.cause].filter(Boolean).join("; ") || "the claim does not verify"}`) });
-      else problems.push({ code: "MAPPING_NOT_CHECKED", bindingId: e.bindingId, message: cut(`mapping ${e.bindingId} is ${v.state}: ${[v.source?.cause, v.model?.cause, v.locator?.detail].filter(Boolean).join("; ")}`) });
+        if (v.model && (v.model.state === "changed" || v.model.state === "removed"))
+          problems.push({
+            code: "CRITERION_CHANGED",
+            bindingId: e.bindingId,
+            message: cut(
+              `${c.id} changed since the mapping was claimed (${v.model.cause}); check that ${at} still checks it, then reassert`,
+            ),
+          });
+        if (v.source?.state === "changed")
+          problems.push({
+            code: "TEST_CHANGED",
+            bindingId: e.bindingId,
+            message: cut(
+              `the code of mapped test ${at} changed since the mapping was claimed; check it still checks ${c.id}, then reassert`,
+            ),
+          });
+      } else if (v.state === "invalid")
+        problems.push({
+          code: "MAPPING_INVALID",
+          bindingId: e.bindingId,
+          message: cut(
+            `mapping ${e.bindingId} is invalid: ${[v.locator?.detail, v.source?.cause, v.model?.cause].filter(Boolean).join("; ") || "the claim does not verify"}`,
+          ),
+        });
+      else
+        problems.push({
+          code: "MAPPING_NOT_CHECKED",
+          bindingId: e.bindingId,
+          message: cut(
+            `mapping ${e.bindingId} is ${v.state}: ${[v.source?.cause, v.model?.cause, v.locator?.detail].filter(Boolean).join("; ")}`,
+          ),
+        });
     }
     let result: MappingResult | null = null;
     if (isTest && resultOf && name !== null) {
@@ -528,12 +752,46 @@ function criterionOf(
         results.push({ r: result, v });
         const msg = result.message ? `: ${result.message}` : "";
         const runsAt = result.runs.length ? ` (run ${result.runs.join(", ")})` : "";
-        if (result.status === "failed") problems.push({ code: "TEST_FAILED", bindingId: e.bindingId, message: cut(`mapped test ${at} failed${runsAt}${msg}`) });
-        else if (result.status === "error") problems.push({ code: "TEST_ERRORED", bindingId: e.bindingId, message: cut(`mapped test ${at} ended with an error${runsAt}${msg}`) });
-        else if (result.status === "skipped") problems.push({ code: "TEST_SKIPPED", bindingId: e.bindingId, message: cut(`mapped test ${at} was skipped${runsAt}; a skipped test checks nothing`) });
-        else if (result.status === "not-run") problems.push({ code: "TEST_NOT_RUN", bindingId: e.bindingId, message: cut(`mapped test ${at} is in no run of this candidate (filtered out, renamed, or outside the invocation)${result.runs.length ? `; only runs of another candidate (${result.runs.join(", ")}) report it` : ""}`) });
-        else if (result.status === "stale") problems.push({ code: "RESULT_STALE", bindingId: e.bindingId, message: cut(`the only results for mapped test ${at} come from runs of another candidate${runsAt}; run the tests again on this one`) });
-        else if (result.status === "ambiguous") problems.push({ code: "RESULT_AMBIGUOUS", bindingId: e.bindingId, message: cut(`a run reports mapped test ${at} more than once${runsAt}; its result is ambiguous`) });
+        if (result.status === "failed")
+          problems.push({
+            code: "TEST_FAILED",
+            bindingId: e.bindingId,
+            message: cut(`mapped test ${at} failed${runsAt}${msg}`),
+          });
+        else if (result.status === "error")
+          problems.push({
+            code: "TEST_ERRORED",
+            bindingId: e.bindingId,
+            message: cut(`mapped test ${at} ended with an error${runsAt}${msg}`),
+          });
+        else if (result.status === "skipped")
+          problems.push({
+            code: "TEST_SKIPPED",
+            bindingId: e.bindingId,
+            message: cut(`mapped test ${at} was skipped${runsAt}; a skipped test checks nothing`),
+          });
+        else if (result.status === "not-run")
+          problems.push({
+            code: "TEST_NOT_RUN",
+            bindingId: e.bindingId,
+            message: cut(
+              `mapped test ${at} is in no run of this candidate (filtered out, renamed, or outside the invocation)${result.runs.length ? `; only runs of another candidate (${result.runs.join(", ")}) report it` : ""}`,
+            ),
+          });
+        else if (result.status === "stale")
+          problems.push({
+            code: "RESULT_STALE",
+            bindingId: e.bindingId,
+            message: cut(
+              `the only results for mapped test ${at} come from runs of another candidate${runsAt}; run the tests again on this one`,
+            ),
+          });
+        else if (result.status === "ambiguous")
+          problems.push({
+            code: "RESULT_AMBIGUOUS",
+            bindingId: e.bindingId,
+            message: cut(`a run reports mapped test ${at} more than once${runsAt}; its result is ambiguous`),
+          });
       }
     }
     mappings.push({
@@ -554,8 +812,13 @@ function criterionOf(
   }
   const incomplete = invalidCount > 0;
   // Unreadable claim files are not attributed by name: any of them may be a mapping of this criterion.
-  if (incomplete) problems.unshift({ code: "MAPPING_INVALID", message: `${invalidCount} claim file(s) in .vcv/bindings/ cannot be read, and any of them may map ${c.id}; this assessment is incomplete (see invalidClaims)` });
-  if (testMappings === 0 && !incomplete) problems.unshift({ code: "NO_MAPPING", message: `no test case is mapped to ${c.verification} criterion ${c.id}` });
+  if (incomplete)
+    problems.unshift({
+      code: "MAPPING_INVALID",
+      message: `${invalidCount} claim file(s) in .vcv/bindings/ cannot be read, and any of them may map ${c.id}; this assessment is incomplete (see invalidClaims)`,
+    });
+  if (testMappings === 0 && !incomplete)
+    problems.unshift({ code: "NO_MAPPING", message: `no test case is mapped to ${c.verification} criterion ${c.id}` });
   const has = (...ss: MappingResult["status"][]) => results.some((x) => ss.includes(x.r.status));
   const verdict: CriterionResult = !resultOf
     ? "unverified"
@@ -567,7 +830,8 @@ function criterionOf(
           ? "failed"
           : has("stale") || results.some((x) => ["stale", "indeterminate", "unchecked", "invalid"].includes(x.v.state))
             ? "stale"
-            : has("skipped", "not-run", "ambiguous") || results.some((x) => x.v.state === "missing" || x.v.state === "ambiguous")
+            : has("skipped", "not-run", "ambiguous") ||
+                results.some((x) => x.v.state === "missing" || x.v.state === "ambiguous")
               ? "missing"
               : incomplete
                 ? "unknown"
@@ -575,10 +839,23 @@ function criterionOf(
   const passedBy = verdict === "passed" ? [...new Set(results.flatMap((x) => x.r.observedBy))] : [];
   // A case passed in a host run counts as host-observed; agent-only passes are labelled.
   const agentOnly = verdict === "passed" && results.some((x) => !x.r.observedBy.includes("host"));
-  if (agentOnly) problems.push({ code: "RESULT_CLAIMED", message: `every mapped test case passed, but some results come only from claimed runs (imported records or agent captures, whatever they declare); host evidence needs the host to capture the run itself` });
+  if (agentOnly)
+    problems.push({
+      code: "RESULT_CLAIMED",
+      message: `every mapped test case passed, but some results come only from claimed runs (imported records or agent captures, whatever they declare); host evidence needs the host to capture the run itself`,
+    });
   return {
     ...base,
-    mapping: testMappings === 0 ? (incomplete ? "unknown" : "none") : resolved === testMappings ? "resolved" : resolved > 0 ? "partial" : "unresolved",
+    mapping:
+      testMappings === 0
+        ? incomplete
+          ? "unknown"
+          : "none"
+        : resolved === testMappings
+          ? "resolved"
+          : resolved > 0
+            ? "partial"
+            : "unresolved",
     assessment: incomplete ? "incomplete" : "complete",
     mappings: mappings.slice(0, CRITERIA_LIMITS.mappingsPerCriterion),
     mappingsTotal: mappings.length,
@@ -587,9 +864,11 @@ function criterionOf(
     problemsTotal: problems.length,
     problemsTruncated: problems.length > CRITERIA_LIMITS.problemsPerCriterion,
     result: verdict,
-    resultObservedBy: verdict === "passed" ? (agentOnly ? "claimed" : passedBy.includes("host") ? "host" : "claimed") : null,
+    resultObservedBy:
+      verdict === "passed" ? (agentOnly ? "claimed" : passedBy.includes("host") ? "host" : "claimed") : null,
   };
 }
 
 /** A criterion is an IR object; `buildIndex` lists it with kind "criterion". */
-export const isCriterion = (model: Parameters<typeof buildIndex>[0], id: Id) => buildIndex(model).byId.get(id)?.kind === "criterion";
+export const isCriterion = (model: Parameters<typeof buildIndex>[0], id: Id) =>
+  buildIndex(model).byId.get(id)?.kind === "criterion";

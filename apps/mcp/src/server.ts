@@ -15,9 +15,21 @@ import { z } from "zod";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
-import { LIMITS, contextRequest, impactRequest, overviewRequest, searchRequest } from "../../../packages/query/src/index.ts";
+import {
+  LIMITS,
+  contextRequest,
+  impactRequest,
+  overviewRequest,
+  searchRequest,
+} from "../../../packages/query/src/index.ts";
 import type { QueryApi, QueryResult } from "../../../packages/query/src/index.ts";
-import { EVIDENCE_LIMITS, bindingEvidenceRequest, evidenceOverviewRequest, objectEvidenceRequest, refreshEvidenceRequest } from "../../../packages/repo/src/evidence.ts";
+import {
+  EVIDENCE_LIMITS,
+  bindingEvidenceRequest,
+  evidenceOverviewRequest,
+  objectEvidenceRequest,
+  refreshEvidenceRequest,
+} from "../../../packages/repo/src/evidence.ts";
 import type { EvidenceApi, EvidenceResult } from "../../../packages/repo/src/evidence.ts";
 import { PROPOSAL_LIMITS, listProposalsRequest, previewProposalRequest } from "../../../packages/repo/src/proposals.ts";
 import type { ProposalReadApi, ProposalResult } from "../../../packages/repo/src/proposals.ts";
@@ -41,7 +53,8 @@ Pass the modelRevision you started from as expectedRevision on later calls; a RE
 
 const IR_ONLY =
   "Reads the VCV model (declared intent, draft or approved: see context.snapshotStatus and diagnostics) only: the result has context.implementationChecked=false, and the repository's code must be inspected separately before claiming anything about real behavior.";
-const REVISION = "Pass expectedRevision (the modelRevision from an earlier result) to detect a model change between calls.";
+const REVISION =
+  "Pass expectedRevision (the modelRevision from an earlier result) to detect a model change between calls.";
 
 /** Shown in addition when the server runs on a repository checkout (--repo). */
 export const EVIDENCE_INSTRUCTIONS = `
@@ -49,7 +62,10 @@ export const EVIDENCE_INSTRUCTIONS = `
 Source evidence (repository mode): binding claims say that some code implements, exposes, persists or tests a model object. They are made by an agent or a person; VCV only checks that the pointer resolves and whether the code or the model object changed since the claim. Each item keeps four things apart: claim (the claimant's interpretation, provenance and confidence), locator (does it resolve now), freshness (source/model/git, each with a cause) and approval (always approved: false). States: resolved, stale (code or model changed: look again), missing (renamed/moved/deleted), ambiguous, unchecked (outside the supported TypeScript subset), indeterminate (some evidence unknown, not a pass) and invalid (unreadable claim file). "resolved" is not "correct": inspect the code yourself. Every call recomputes against the working tree; vcv_refresh_evidence rechecks all claims and returns an observationToken to compare later. Nothing is inferred, written or proposed. Extra error codes: UNKNOWN_BINDING, PROJECT_NOT_READY, UNSAFE_PATH, STATE_CHANGED (retry).`;
 
 export type Apis = { query: QueryApi; evidence?: EvidenceApi; proposals?: ProposalReadApi };
-type ToolDef = { tool: Tool; call: (apis: Apis, args: unknown) => QueryResult<unknown> | EvidenceResult<unknown> | ProposalResult<unknown> };
+type ToolDef = {
+  tool: Tool;
+  call: (apis: Apis, args: unknown) => QueryResult<unknown> | EvidenceResult<unknown> | ProposalResult<unknown>;
+};
 
 /** JSON Schema for a tool's input, generated from the query package's request contract. */
 function inputSchema(schema: z.ZodType): Tool["inputSchema"] {
@@ -64,8 +80,7 @@ const TOOLS: ToolDef[] = [
     tool: {
       name: "vcv_get_project_overview",
       title: "VCV project overview",
-      description:
-        `Start here. Returns the project, one page of modules (purpose, dependsOn, consumed contracts, exposed contracts, owned-object counts), the object inventory, validation counts and the current modelRevision. Module lists are paged (moduleLimit ≤ ${LIMITS.overview.maxModules}, default ${LIMITS.overview.defaultModules}; follow nextCursor) and each module's ID lists are capped at ${LIMITS.overview.listItems} with full sizes in counts. ${REVISION} ${IR_ONLY}`,
+      description: `Start here. Returns the project, one page of modules (purpose, dependsOn, consumed contracts, exposed contracts, owned-object counts), the object inventory, validation counts and the current modelRevision. Module lists are paged (moduleLimit ≤ ${LIMITS.overview.maxModules}, default ${LIMITS.overview.defaultModules}; follow nextCursor) and each module's ID lists are capped at ${LIMITS.overview.listItems} with full sizes in counts. ${REVISION} ${IR_ONLY}`,
       inputSchema: inputSchema(overviewRequest),
       annotations: { ...annotations, title: "VCV project overview" },
     },
@@ -75,8 +90,7 @@ const TOOLS: ToolDef[] = [
     tool: {
       name: "vcv_search_objects",
       title: "Search VCV model objects",
-      description:
-        `Find model objects (modules, events, contracts, capabilities, rules, acceptance criteria, data, behaviors, states, transitions, attributes, actors) by words in their ID, name, purpose, description or statement. Ranking is a deterministic keyword heuristic (not semantic search); terms are OR'd. Results are bounded (limit ≤ ${LIMITS.search.max}, default ${LIMITS.search.default}); total and truncated tell you if more exist, and nextCursor pages through them for the same text and kinds. Use the returned IDs with vcv_get_context. ${REVISION} ${IR_ONLY}`,
+      description: `Find model objects (modules, events, contracts, capabilities, rules, acceptance criteria, data, behaviors, states, transitions, attributes, actors) by words in their ID, name, purpose, description or statement. Ranking is a deterministic keyword heuristic (not semantic search); terms are OR'd. Results are bounded (limit ≤ ${LIMITS.search.max}, default ${LIMITS.search.default}); total and truncated tell you if more exist, and nextCursor pages through them for the same text and kinds. Use the returned IDs with vcv_get_context. ${REVISION} ${IR_ONLY}`,
       inputSchema: inputSchema(searchRequest),
       annotations: { ...annotations, title: "Search VCV model objects" },
     },
@@ -86,8 +100,7 @@ const TOOLS: ToolDef[] = [
     tool: {
       name: "vcv_get_context",
       title: "VCV object context",
-      description:
-        `Inspect one model object by ID: its canonical record (nested arrays capped at maxNestedItems, cuts listed in truncatedFields), its neighbours within depth (1-${LIMITS.context.maxDepth}) in the chosen direction, and every declared edge between them with its relation, category (ownership, dependency, contract, behavior, data, permission, traceability) and the IR field that declares it. Bounded by maxNodes and maxEdges; truncated=true means something was cut. Filter with relations to follow e.g. only consumes/contractPublishes. Unknown IDs return UNKNOWN_ID. ${REVISION} ${IR_ONLY}`,
+      description: `Inspect one model object by ID: its canonical record (nested arrays capped at maxNestedItems, cuts listed in truncatedFields), its neighbours within depth (1-${LIMITS.context.maxDepth}) in the chosen direction, and every declared edge between them with its relation, category (ownership, dependency, contract, behavior, data, permission, traceability) and the IR field that declares it. Bounded by maxNodes and maxEdges; truncated=true means something was cut. Filter with relations to follow e.g. only consumes/contractPublishes. Unknown IDs return UNKNOWN_ID. ${REVISION} ${IR_ONLY}`,
       inputSchema: inputSchema(contextRequest),
       annotations: { ...annotations, title: "VCV object context" },
     },
@@ -97,8 +110,7 @@ const TOOLS: ToolDef[] = [
     tool: {
       name: "vcv_analyze_impact",
       title: "VCV structural impact",
-      description:
-        `List objects that may be affected if the given objects (1-${LIMITS.impact.maxSeeds} IDs) change, following declared model references in reverse up to maxDepth (≤ ${LIMITS.impact.maxDepth}). Each candidate has a distance, via (dependent: references a changed object; container: owns or contains it), one shortest dependency path and a plain-language reason. These are structural candidates from the model only (impactClass "structural-candidate"), not a test or code impact analysis: confirm each one in the repository. Bounded by maxResults. ${REVISION} ${IR_ONLY}`,
+      description: `List objects that may be affected if the given objects (1-${LIMITS.impact.maxSeeds} IDs) change, following declared model references in reverse up to maxDepth (≤ ${LIMITS.impact.maxDepth}). Each candidate has a distance, via (dependent: references a changed object; container: owns or contains it), one shortest dependency path and a plain-language reason. These are structural candidates from the model only (impactClass "structural-candidate"), not a test or code impact analysis: confirm each one in the repository. Bounded by maxResults. ${REVISION} ${IR_ONLY}`,
       inputSchema: inputSchema(impactRequest),
       annotations: { ...annotations, title: "VCV structural impact" },
     },
@@ -107,7 +119,7 @@ const TOOLS: ToolDef[] = [
 ];
 
 const EVIDENCE =
-  "Source evidence for binding claims (see the server instructions). Read-only and recomputed now against the working tree; meaning is never verified (context.meaning=\"unverified\") and no claim is approved. context.snapshotStatus is the model's own draft/approved status, unrelated to whether a pointer resolves.";
+  'Source evidence for binding claims (see the server instructions). Read-only and recomputed now against the working tree; meaning is never verified (context.meaning="unverified") and no claim is approved. context.snapshotStatus is the model\'s own draft/approved status, unrelated to whether a pointer resolves.';
 const PAGED = `Paged: limit ≤ ${EVIDENCE_LIMITS.max} (default ${EVIDENCE_LIMITS.default}); follow nextCursor, which is bound to the request and to the current claim files.`;
 
 const EVIDENCE_TOOLS: ToolDef[] = [
@@ -159,7 +171,8 @@ export const PROPOSAL_INSTRUCTIONS = `
 
 Model proposals (repository mode, read-only here): a proposal is a typed model change waiting for a separate reviewer. vcv_preview_proposal shows what one changes before anyone approves it (pass changeId for a submitted one, or change for a dry run of your own draft): operations, the object-level before/after delta, structural impact across modules and contracts (crossModule), binding claims on the touched objects, the engine's diagnostics now (each with a hint) and the assumptions nobody has verified. Lifecycles: pending (waiting; .vcv/HEAD unchanged), stale (its base revision is no longer current: submit a new one), rejected, applied, invalid. The model's draft/approved status, a change's approval and implementation are separate things; VCV never infers implementation (an implementing agent's report, recorded with \`vcv implementation record\`, is a separate unverified claim). Submitting is not offered over MCP: use the host's \`vcv proposal submit\` (proposal-only). Nothing here approves, applies or writes. Each call reads the checkout once and rechecks it before answering; STATE_CHANGED means it moved (a checkout or an edit) and nothing was mixed: retry. A change's approval field (none, applied-by-host, approved-by-separate-reviewer) is what the record says, not an authenticated identity. Extra error codes: UNKNOWN_CHANGE, INVALID_RECORD, STATE_CHANGED.`;
 
-const PROPOSAL = "Read-only; writes nothing, approves nothing. Structural impact is not semantic proof, and code is never inspected (context.implementationChecked=false).";
+const PROPOSAL =
+  "Read-only; writes nothing, approves nothing. Structural impact is not semantic proof, and code is never inspected (context.implementationChecked=false).";
 
 const PROPOSAL_TOOLS: ToolDef[] = [
   {
@@ -206,7 +219,10 @@ export function createVcvMcpServer(api: QueryApi | Apis, opts: ServerOptions = {
     { name: SERVER_NAME, version: SERVER_VERSION, title: "Vibe Code Visualiser (read-only model queries)" },
     {
       capabilities: { tools: {} },
-      instructions: SERVER_INSTRUCTIONS + (apis.evidence ? EVIDENCE_INSTRUCTIONS : "") + (apis.proposals ? PROPOSAL_INSTRUCTIONS : ""),
+      instructions:
+        SERVER_INSTRUCTIONS +
+        (apis.evidence ? EVIDENCE_INSTRUCTIONS : "") +
+        (apis.proposals ? PROPOSAL_INSTRUCTIONS : ""),
     },
   );
 
@@ -216,7 +232,13 @@ export function createVcvMcpServer(api: QueryApi | Apis, opts: ServerOptions = {
     const def = tools.find((t) => t.tool.name === req.params.name);
     if (!def) {
       // Reported as a tool error, not a protocol error, so the agent can read it and recover.
-      return toolResult({ ok: false, error: { code: "INVALID_REQUEST", message: `unknown tool "${req.params.name}"; available: ${names.join(", ")}` } });
+      return toolResult({
+        ok: false,
+        error: {
+          code: "INVALID_REQUEST",
+          message: `unknown tool "${req.params.name}"; available: ${names.join(", ")}`,
+        },
+      });
     }
     try {
       return toolResult(def.call(apis, req.params.arguments ?? {}));
@@ -225,14 +247,21 @@ export function createVcvMcpServer(api: QueryApi | Apis, opts: ServerOptions = {
       // (e.g. HEAD or a revision file is corrupt). Report it and keep serving.
       const message = err instanceof Error ? err.message : String(err);
       log(`${req.params.name} failed: ${message}`);
-      return toolResult({ ok: false, error: { code: "STORE_ERROR", message: `the model store could not be read: ${message}` } });
+      return toolResult({
+        ok: false,
+        error: { code: "STORE_ERROR", message: `the model store could not be read: ${message}` },
+      });
     }
   });
 
   return server;
 }
 
-type AdapterResult = QueryResult<unknown> | EvidenceResult<unknown> | ProposalResult<unknown> | { ok: false; error: { code: "INVALID_REQUEST" | "STORE_ERROR"; message: string } };
+type AdapterResult =
+  | QueryResult<unknown>
+  | EvidenceResult<unknown>
+  | ProposalResult<unknown>
+  | { ok: false; error: { code: "INVALID_REQUEST" | "STORE_ERROR"; message: string } };
 
 /** The QueryResult itself is the structured content; the text block carries the same JSON. */
 function toolResult(result: AdapterResult): CallToolResult {

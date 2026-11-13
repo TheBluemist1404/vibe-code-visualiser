@@ -11,8 +11,14 @@ const newDir = () => join(mkdtempSync(join(tmpdir(), "vcv-reader-")), "store");
 
 function fingerprint(dir: string): string {
   const walk = (d: string): string[] =>
-    readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? [join(d, e.name) + "/", ...walk(join(d, e.name))] : [join(d, e.name)])).sort();
-  return walk(dir).map((f) => (f.endsWith("/") ? f : `${f}:${statSync(f).mtimeMs}:${createHash("sha256").update(readFileSync(f)).digest("hex")}`)).join("\n");
+    readdirSync(d, { withFileTypes: true })
+      .flatMap((e) => (e.isDirectory() ? [`${join(d, e.name)}/`, ...walk(join(d, e.name))] : [join(d, e.name)]))
+      .sort();
+  return walk(dir)
+    .map((f) =>
+      f.endsWith("/") ? f : `${f}:${statSync(f).mtimeMs}:${createHash("sha256").update(readFileSync(f)).digest("hex")}`,
+    )
+    .join("\n");
 }
 
 test("FileStoreReader reads the committed head and follows commits made by another store", () => {
@@ -49,22 +55,40 @@ test("FileStoreReader never writes, not even the recovery FileStore would do", (
 
 test("FileStoreReader fails clearly on missing or corrupt stores", () => {
   const empty = mkdtempSync(join(tmpdir(), "vcv-reader-empty-"));
-  assert.throws(() => new FileStoreReader(empty), (e: unknown) => e instanceof StoreError && e.code === "NOT_INITIALIZED");
+  assert.throws(
+    () => new FileStoreReader(empty),
+    (e: unknown) => e instanceof StoreError && e.code === "NOT_INITIALIZED",
+  );
   assert.deepEqual(readdirSync(empty), []);
 
   const corrupt = newDir();
   mkdirSync(corrupt, { recursive: true });
   writeFileSync(join(corrupt, "HEAD"), "not json");
-  assert.throws(() => new FileStoreReader(corrupt), (e: unknown) => e instanceof StoreError && e.code === "CORRUPT");
+  assert.throws(
+    () => new FileStoreReader(corrupt),
+    (e: unknown) => e instanceof StoreError && e.code === "CORRUPT",
+  );
 
   const traversal = newDir();
   mkdirSync(traversal, { recursive: true });
-  writeFileSync(join(traversal, "HEAD"), JSON.stringify({ format: 1, revision: "../../etc/x", history: ["../../etc/x"] }));
-  assert.throws(() => new FileStoreReader(traversal), (e: unknown) => e instanceof StoreError && e.code === "CORRUPT" && /invalid revision ID/.test(e.message));
+  writeFileSync(
+    join(traversal, "HEAD"),
+    JSON.stringify({ format: 1, revision: "../../etc/x", history: ["../../etc/x"] }),
+  );
+  assert.throws(
+    () => new FileStoreReader(traversal),
+    (e: unknown) => e instanceof StoreError && e.code === "CORRUPT" && /invalid revision ID/.test(e.message),
+  );
 
   const missingRev = newDir();
   FileStore.init(missingRev, baseModel());
   const reader = new FileStoreReader(missingRev);
-  writeFileSync(join(missingRev, "HEAD"), JSON.stringify({ format: 1, revision: "rev-9", history: ["rev-1", "rev-9"] }));
-  assert.throws(() => reader.current(), (e: unknown) => e instanceof StoreError && e.code === "CORRUPT" && /rev-9 is missing/.test(e.message));
+  writeFileSync(
+    join(missingRev, "HEAD"),
+    JSON.stringify({ format: 1, revision: "rev-9", history: ["rev-1", "rev-9"] }),
+  );
+  assert.throws(
+    () => reader.current(),
+    (e: unknown) => e instanceof StoreError && e.code === "CORRUPT" && /rev-9 is missing/.test(e.message),
+  );
 });

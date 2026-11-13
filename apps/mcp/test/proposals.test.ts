@@ -15,7 +15,10 @@ import { ROOT, baseline } from "../../../packages/repo/test/course-desk.ts";
 const MAIN = join(ROOT, "apps/mcp/src/main.ts");
 const CLI = join(ROOT, "apps/cli/src/main.ts");
 const vcv = (env: Record<string, string>, ...args: string[]) =>
-  spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", CLI, ...args], { encoding: "utf8", env: { ...process.env, ...env } });
+  spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", CLI, ...args], {
+    encoding: "utf8",
+    env: { ...process.env, ...env },
+  });
 
 const change = {
   changeId: "chg-cancel-enrollment",
@@ -23,8 +26,21 @@ const change = {
   expectedRevision: "rev-1",
   rationale: "A student can cancel a confirmed enrollment and is notified.",
   operations: [
-    { type: "createCapability", capability: { id: "cap-cancel-enrollment", kind: "capability", owner: "mod-enrollment", name: "Cancel an enrollment", initiatorActorId: "act-student" } },
-    { type: "setDescription", objectId: "dat-notification", description: "kind is enrollment-confirmed|enrollment-rejected|enrollment-cancelled." },
+    {
+      type: "createCapability",
+      capability: {
+        id: "cap-cancel-enrollment",
+        kind: "capability",
+        owner: "mod-enrollment",
+        name: "Cancel an enrollment",
+        initiatorActorId: "act-student",
+      },
+    },
+    {
+      type: "setDescription",
+      objectId: "dat-notification",
+      description: "kind is enrollment-confirmed|enrollment-rejected|enrollment-cancelled.",
+    },
   ],
 };
 
@@ -74,9 +90,17 @@ test("MCP repository mode serves vcv_list_proposals and vcv_preview_proposal rea
   const repo = baseline();
   const file = join(repo, "..", "change.json");
   writeFileSync(file, JSON.stringify(change));
-  assert.equal(vcv({ VCV_HOST_PRINCIPAL: "agent:coder", VCV_HOST_PERMISSIONS: "model:propose" }, "proposal", "submit", repo, file).status, 0);
+  assert.equal(
+    vcv({ VCV_HOST_PRINCIPAL: "agent:coder", VCV_HOST_PERMISSIONS: "model:propose" }, "proposal", "submit", repo, file)
+      .status,
+    0,
+  );
 
-  const transport = new StdioClientTransport({ command: process.execPath, args: ["--experimental-strip-types", MAIN, "--repo", repo], stderr: "pipe" });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: ["--experimental-strip-types", MAIN, "--repo", repo],
+    stderr: "pipe",
+  });
   const client = new Client({ name: "vcv-proposal-parity", version: "0" });
   await client.connect(transport);
   try {
@@ -88,7 +112,11 @@ test("MCP repository mode serves vcv_list_proposals and vcv_preview_proposal rea
     const tool = (n: string) => tools.find((t) => t.name === n)!;
     assert.deepEqual(tool("vcv_list_proposals").inputSchema, strip(listProposalsRequest));
     assert.deepEqual(tool("vcv_preview_proposal").inputSchema, strip(previewProposalRequest));
-    assert.equal(tools.some((t) => /submit|approve|apply/.test(t.name)), false, "no write tool over MCP");
+    assert.equal(
+      tools.some((t) => /submit|approve|apply/.test(t.name)),
+      false,
+      "no write tool over MCP",
+    );
     assert.match(client.getInstructions() ?? "", /Submitting is not offered over MCP/);
     const call = async (name: string, args: unknown) => {
       const r = (await client.callTool({ name, arguments: args as Record<string, unknown> })) as CallToolResult;
@@ -96,12 +124,25 @@ test("MCP repository mode serves vcv_list_proposals and vcv_preview_proposal rea
       return r.structuredContent;
     };
     const cliJson = (...args: string[]) => JSON.parse(vcv({}, "proposal", ...args, "--json").stdout);
-    assert.deepEqual(await call("vcv_preview_proposal", { changeId: "chg-cancel-enrollment" }), cliJson("preview", repo, "chg-cancel-enrollment"));
-    assert.deepEqual(await call("vcv_preview_proposal", { change: { ...change, changeId: "chg-dry" } }), (writeFileSync(file, JSON.stringify({ ...change, changeId: "chg-dry" })), cliJson("preview", repo, "--file", file)));
+    assert.deepEqual(
+      await call("vcv_preview_proposal", { changeId: "chg-cancel-enrollment" }),
+      cliJson("preview", repo, "chg-cancel-enrollment"),
+    );
+    assert.deepEqual(
+      await call("vcv_preview_proposal", { change: { ...change, changeId: "chg-dry" } }),
+      (writeFileSync(file, JSON.stringify({ ...change, changeId: "chg-dry" })),
+      cliJson("preview", repo, "--file", file)),
+    );
     assert.deepEqual(await call("vcv_list_proposals", {}), cliJson("list", repo));
-    const unknown = (await call("vcv_preview_proposal", { changeId: "chg-nope" })) as { ok: boolean; error: { code: string } };
+    const unknown = (await call("vcv_preview_proposal", { changeId: "chg-nope" })) as {
+      ok: boolean;
+      error: { code: string };
+    };
     assert.equal(unknown.error.code, "UNKNOWN_CHANGE");
-    const malformed = (await call("vcv_preview_proposal", { change: { changeId: "x" } })) as { ok: boolean; error: { code: string } };
+    const malformed = (await call("vcv_preview_proposal", { change: { changeId: "x" } })) as {
+      ok: boolean;
+      error: { code: string };
+    };
     assert.equal(malformed.error.code, "INVALID_REQUEST");
     assert.equal(JSON.parse(readFileSync(join(repo, ".vcv/HEAD"), "utf8")).revision, "rev-1");
   } finally {

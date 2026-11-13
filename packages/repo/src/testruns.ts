@@ -89,8 +89,17 @@ export function candidateIdentityOf(obs: Observation): { candidate: CandidateIde
   const candidate: CandidateIdentity = {
     commit,
     branch: obs.status.git?.branch ?? null,
-    uncommitted: { paths: dirty.length, digest: tree.digest, complete: tree.complete && tree.unreadable === 0 && listed !== null },
-    bound: { paths: boundPaths.length, digest: bound.digest, complete: bound.complete && bound.unreadable === 0 && unreadableClaims === 0 && !claims.key.startsWith("unreadable:") },
+    uncommitted: {
+      paths: dirty.length,
+      digest: tree.digest,
+      complete: tree.complete && tree.unreadable === 0 && listed !== null,
+    },
+    bound: {
+      paths: boundPaths.length,
+      digest: bound.digest,
+      complete:
+        bound.complete && bound.unreadable === 0 && unreadableClaims === 0 && !claims.key.startsWith("unreadable:"),
+    },
     modelRevision: obs.model.project.modelRevision,
     claims: sha(claims.key),
   };
@@ -136,40 +145,89 @@ export function isTrustedCapture(record: unknown): boolean {
 export const identityDigest = (c: CandidateIdentity) => sha(canonicalJson(c));
 
 /** The candidate's identity now: read it before running the tests, and pass its digest to capture. */
-export function testIdentity(path: string, hooks: ProposalHooks = {}): ProposalResult<{ candidate: CandidateIdentity; identityDigest: string }> {
+export function testIdentity(
+  path: string,
+  hooks: ProposalHooks = {},
+): ProposalResult<{ candidate: CandidateIdentity; identityDigest: string }> {
   return observed(path, hooks, (obs) => {
     const { candidate, problem } = candidateIdentityOf(obs);
     if (problem) return failFinal({ code: "SOURCE_IDENTITY_UNAVAILABLE", message: problem }, obs, hooks);
-    return finish(obs, hooks, { candidate, identityDigest: identityDigest(candidate) }, { key: identityDigest(candidate), again: () => identityDigest(candidateIdentityOf(obs).candidate) });
+    return finish(
+      obs,
+      hooks,
+      { candidate, identityDigest: identityDigest(candidate) },
+      { key: identityDigest(candidate), again: () => identityDigest(candidateIdentityOf(obs).candidate) },
+    );
   });
 }
 
 export const captureRequest = z
   .object({
     root: z.string().max(1000).default(""),
-    runner: z.object({ name: z.string().min(1).max(TEST_RUN_LIMITS.runnerChars), version: z.string().min(1).max(TEST_RUN_LIMITS.runnerChars).optional() }).strict(),
+    runner: z
+      .object({
+        name: z.string().min(1).max(TEST_RUN_LIMITS.runnerChars),
+        version: z.string().min(1).max(TEST_RUN_LIMITS.runnerChars).optional(),
+      })
+      .strict(),
     invocation: z.string().min(1).max(TEST_RUN_LIMITS.invocationChars),
     /** testIdentity's digest read before the run; capture is refused if the candidate moved since. */
-    before: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+    before: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
   })
   .strict();
 export type CaptureRequest = z.input<typeof captureRequest>;
 
 /** Read a runner's report and bind it to the candidate as a test-run record. Writes nothing. */
-export function captureTestRun(path: string, report: Uint8Array, input: unknown, host: TestRunHost, hooks: ProposalHooks = {}): ProposalResult<TestRunRecord> {
+export function captureTestRun(
+  path: string,
+  report: Uint8Array,
+  input: unknown,
+  host: TestRunHost,
+  hooks: ProposalHooks = {},
+): ProposalResult<TestRunRecord> {
   const parsed = captureRequest.safeParse(input ?? {});
   if (!parsed.success) {
-    return { ok: false, error: { code: "INVALID_REQUEST", message: "request does not match the test-run capture schema", details: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })) } };
+    return {
+      ok: false,
+      error: {
+        code: "INVALID_REQUEST",
+        message: "request does not match the test-run capture schema",
+        details: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
+      },
+    };
   }
   const req = parsed.data;
   return observed(path, hooks, (obs) => {
     const read = parseJUnit(report, req.root);
-    if (!read.ok) return failFinal({ code: read.code === "UNSAFE_PATH" ? "UNSAFE_PATH" : read.code, message: read.message }, obs, hooks);
+    if (!read.ok)
+      return failFinal(
+        { code: read.code === "UNSAFE_PATH" ? "UNSAFE_PATH" : read.code, message: read.message },
+        obs,
+        hooks,
+      );
     const { candidate, problem } = candidateIdentityOf(obs);
-    if (problem) return failFinal({ code: "SOURCE_IDENTITY_UNAVAILABLE", message: `${problem}. Commit, or capture in a Git checkout with fewer uncommitted files` }, obs, hooks);
+    if (problem)
+      return failFinal(
+        {
+          code: "SOURCE_IDENTITY_UNAVAILABLE",
+          message: `${problem}. Commit, or capture in a Git checkout with fewer uncommitted files`,
+        },
+        obs,
+        hooks,
+      );
     const digest = identityDigest(candidate);
     if (req.before && req.before !== digest) {
-      return failFinal({ code: "TEST_RUN_RACED", message: `the candidate changed between testIdentity (${req.before.slice(0, 12)}) and capture (${digest.slice(0, 12)}); the report may describe neither. Run the tests again` }, obs, hooks);
+      return failFinal(
+        {
+          code: "TEST_RUN_RACED",
+          message: `the candidate changed between testIdentity (${req.before.slice(0, 12)}) and capture (${digest.slice(0, 12)}); the report may describe neither. Run the tests again`,
+        },
+        obs,
+        hooks,
+      );
     }
     const body: Omit<TestRunRecord, "digest"> = {
       format: "vcv-test-run-1",
@@ -189,9 +247,19 @@ export function captureTestRun(path: string, report: Uint8Array, input: unknown,
     // The record must fit what VCV reads back (as the CLI writes it).
     const bytes = Buffer.byteLength(`${JSON.stringify(record, null, 2)}\n`);
     if (bytes > TEST_RUN_LIMITS.recordBytes) {
-      return failFinal({ code: "REPORT_TOO_LARGE", message: `the test-run record would be ${bytes} bytes, more than the ${TEST_RUN_LIMITS.recordBytes} VCV reads back; split the run (e.g. one report per package)` }, obs, hooks);
+      return failFinal(
+        {
+          code: "REPORT_TOO_LARGE",
+          message: `the test-run record would be ${bytes} bytes, more than the ${TEST_RUN_LIMITS.recordBytes} VCV reads back; split the run (e.g. one report per package)`,
+        },
+        obs,
+        hooks,
+      );
     }
-    const out = finish(obs, hooks, record, { key: digest, again: () => identityDigest(candidateIdentityOf(obs).candidate) });
+    const out = finish(obs, hooks, record, {
+      key: digest,
+      again: () => identityDigest(candidateIdentityOf(obs).candidate),
+    });
     if (out.ok && record.observedBy === "host") captured.set(out.data, record.digest);
     return out;
   });
@@ -199,10 +267,17 @@ export function captureTestRun(path: string, report: Uint8Array, input: unknown,
 
 const identitySchema = z
   .object({
-    commit: z.string().regex(/^[0-9a-f]{40,64}$/).nullable(),
+    commit: z
+      .string()
+      .regex(/^[0-9a-f]{40,64}$/)
+      .nullable(),
     branch: z.string().max(1000).nullable(),
-    uncommitted: z.object({ paths: z.number().int().min(0), digest: z.string().regex(/^[0-9a-f]{64}$/), complete: z.boolean() }).strict(),
-    bound: z.object({ paths: z.number().int().min(0), digest: z.string().regex(/^[0-9a-f]{64}$/), complete: z.boolean() }).strict(),
+    uncommitted: z
+      .object({ paths: z.number().int().min(0), digest: z.string().regex(/^[0-9a-f]{64}$/), complete: z.boolean() })
+      .strict(),
+    bound: z
+      .object({ paths: z.number().int().min(0), digest: z.string().regex(/^[0-9a-f]{64}$/), complete: z.boolean() })
+      .strict(),
     modelRevision: z.string().min(1).max(256),
     claims: z.string().regex(/^[0-9a-f]{64}$/),
   })
@@ -212,7 +287,10 @@ const caseSchema = z
     key: z.string().regex(/^[0-9a-f]{64}$/),
     path: z.string().min(1).max(1000),
     name: z.string().min(1).max(JUNIT_LIMITS.nameChars),
-    nameDigest: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+    nameDigest: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
     status: z.enum(["passed", "failed", "error", "skipped"]),
     message: z.string().max(JUNIT_LIMITS.messageChars).optional(),
   })
@@ -222,13 +300,32 @@ export const testRunRecordSchema = z
     format: z.literal("vcv-test-run-1"),
     observedBy: z.enum(["host", "agent"]),
     principalId: z.string().min(1).max(256),
-    runner: z.object({ name: z.string().min(1).max(TEST_RUN_LIMITS.runnerChars), version: z.string().min(1).max(TEST_RUN_LIMITS.runnerChars).optional() }).strict(),
+    runner: z
+      .object({
+        name: z.string().min(1).max(TEST_RUN_LIMITS.runnerChars),
+        version: z.string().min(1).max(TEST_RUN_LIMITS.runnerChars).optional(),
+      })
+      .strict(),
     invocation: z.string().min(1).max(TEST_RUN_LIMITS.invocationChars),
     root: z.string().max(1000),
-    report: z.object({ format: z.literal("junit"), sha256: z.string().regex(/^[0-9a-f]{64}$/), bytes: z.number().int().min(0) }).strict(),
+    report: z
+      .object({
+        format: z.literal("junit"),
+        sha256: z.string().regex(/^[0-9a-f]{64}$/),
+        bytes: z.number().int().min(0),
+      })
+      .strict(),
     candidate: identitySchema,
     identityDigest: z.string().regex(/^[0-9a-f]{64}$/),
-    summary: z.object({ tests: z.number().int().min(0), passed: z.number().int().min(0), failed: z.number().int().min(0), errors: z.number().int().min(0), skipped: z.number().int().min(0) }).strict(),
+    summary: z
+      .object({
+        tests: z.number().int().min(0),
+        passed: z.number().int().min(0),
+        failed: z.number().int().min(0),
+        errors: z.number().int().min(0),
+        skipped: z.number().int().min(0),
+      })
+      .strict(),
     cases: z.array(caseSchema).max(JUNIT_LIMITS.cases),
     duplicates: z.array(z.string().regex(/^[0-9a-f]{64}$/)).max(JUNIT_LIMITS.cases),
     digest: z.string().regex(/^[0-9a-f]{64}$/),
@@ -241,10 +338,19 @@ export const testRunRecordSchema = z
  */
 export function recordProblem(r: TestRunRecord): string | null {
   const { digest, ...body } = r;
-  if (sha(canonicalJson(body)) !== digest) return "the record's digest does not match its content (edited after capture?)";
-  if (identityDigest(r.candidate) !== r.identityDigest) return "the record's identity digest does not match its candidate";
+  if (sha(canonicalJson(body)) !== digest)
+    return "the record's digest does not match its content (edited after capture?)";
+  if (identityDigest(r.candidate) !== r.identityDigest)
+    return "the record's identity digest does not match its candidate";
   const n = (s: string) => r.cases.filter((c) => c.status === s).length;
   const s = r.summary;
-  if (s.tests !== r.cases.length || s.failed !== n("failed") || s.errors !== n("error") || s.skipped !== n("skipped") || s.passed !== n("passed")) return "the record's summary does not match its cases";
+  if (
+    s.tests !== r.cases.length ||
+    s.failed !== n("failed") ||
+    s.errors !== n("error") ||
+    s.skipped !== n("skipped") ||
+    s.passed !== n("passed")
+  )
+    return "the record's summary does not match its cases";
   return null;
 }

@@ -13,7 +13,16 @@
 // O_NOFOLLOW|O_NONBLOCK and streamed in chunks; past the per-file or total byte budget, or the file
 // count, a file is identified by its size and modification time instead of its bytes, and the state
 // says so (`complete: false`). This is observation integrity, not a claim about what the code does.
-import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readSync, readlinkSync, realpathSync } from "node:fs";
+import {
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  readlinkSync,
+  realpathSync,
+} from "node:fs";
 import { createHash } from "node:crypto";
 import { join, relative, sep } from "node:path";
 import { canonicalJson } from "@vcv/core";
@@ -55,7 +64,12 @@ export function worktreeStateDetail(root: string, paths: Iterable<string>): Work
     if (id.unavailable) unreadable++;
     return [p, id.id];
   });
-  return { digest: createHash("sha256").update(canonicalJson(pairs)).digest("hex"), files: sorted.length, complete, unreadable };
+  return {
+    digest: createHash("sha256").update(canonicalJson(pairs)).digest("hex"),
+    files: sorted.length,
+    complete,
+    unreadable,
+  };
 }
 
 /** A path's identity, and whether that identity stands for unobserved content (`unavailable`). */
@@ -118,7 +132,9 @@ function throughLink(root: string, rel: string, link: string, budget: number): I
   if (!where.ok) {
     // A link to a missing, case-mismatched or non-file target inside the checkout is a known fact.
     // One that escapes the checkout (or cannot be resolved) is content VCV does not read: unavailable.
-    const known = !where.unreadable && (where.reason === "missing" || where.reason === "case-mismatch" || where.reason === "not-a-file");
+    const known =
+      !where.unreadable &&
+      (where.reason === "missing" || where.reason === "case-mismatch" || where.reason === "not-a-file");
     return known ? { id: `link:${text}:${where.reason}` } : { id: `link:${text}:${where.reason}`, unavailable: true };
   }
   const target = relative(realRoot(root), where.abs).split(sep).join("/");
@@ -129,9 +145,12 @@ function throughLink(root: string, rel: string, link: string, budget: number): I
     return { id: `link:${text}:${target}:unreadable`, unavailable: true };
   }
   const stat = `stat:${st.size}:${st.mtimeNs}:${st.ino}`;
-  if (st.size > BigInt(Math.min(budget, WORKTREE_LIMITS.fileBytes))) return { id: `link:${text}:${target}:${stat}`, partial: true };
+  if (st.size > BigInt(Math.min(budget, WORKTREE_LIMITS.fileBytes)))
+    return { id: `link:${text}:${target}:${stat}`, partial: true };
   const h = hashFile(where.abs);
-  return h ? { id: `link:${text}:${target}:${h.id}`, bytes: h.bytes } : { id: `link:${text}:${target}:unreadable`, unavailable: true };
+  return h
+    ? { id: `link:${text}:${target}:${h.id}`, bytes: h.bytes }
+    : { id: `link:${text}:${target}:unreadable`, unavailable: true };
 }
 
 const realRoot = (root: string) => {

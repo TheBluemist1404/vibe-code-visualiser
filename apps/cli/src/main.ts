@@ -3,7 +3,16 @@
 //
 // The CLI acts as the trusted host for a local single user: identity and permissions come
 // from flags here, standing in for what a real session or OAuth token would supply.
-import { closeSync, constants as fsConstants, fstatSync, openSync, readFileSync, readSync, realpathSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
+  openSync,
+  readFileSync,
+  readSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { resolve as resolvePath, sep as pathSep } from "node:path";
 import { parseArgs } from "node:util";
 import { loadModel, parseYaml, ownershipTree } from "../../../packages/ir/src/index.ts";
@@ -47,7 +56,18 @@ import {
   verifyBinding,
   verifyBindings,
 } from "../../../packages/repo/src/index.ts";
-import type { GateReport, Reconciliation, BindingHost, HintedDiagnostic, IntegrityReport, TrustSource, ProjectStatus, ProposalPreview, ProposalResult, Verification } from "../../../packages/repo/src/index.ts";
+import type {
+  GateReport,
+  Reconciliation,
+  BindingHost,
+  HintedDiagnostic,
+  IntegrityReport,
+  TrustSource,
+  ProjectStatus,
+  ProposalPreview,
+  ProposalResult,
+  Verification,
+} from "../../../packages/repo/src/index.ts";
 import type { BindingRelation, ClaimSource } from "../../../packages/core/src/index.ts";
 import type { HostContext, ImplementationRequest, Outcome, Permission } from "../../../packages/core/src/index.ts";
 
@@ -238,19 +258,26 @@ function hostContext(): HostContext {
   const fixedAs = process.env.VCV_HOST_PRINCIPAL;
   const fixedPerm = process.env.VCV_HOST_PERMISSIONS;
   if ((fixedAs !== undefined && values.as !== undefined) || (fixedPerm !== undefined && values.perm !== undefined)) {
-    throw new InputError("identity and permissions are fixed by this host (VCV_HOST_PRINCIPAL / VCV_HOST_PERMISSIONS); --as and --perm are not accepted");
+    throw new InputError(
+      "identity and permissions are fixed by this host (VCV_HOST_PRINCIPAL / VCV_HOST_PERMISSIONS); --as and --perm are not accepted",
+    );
   }
   const perm = fixedPerm ?? values.perm ?? "propose,apply,approve,binding:record,binding:dispute,tests:observe";
   return {
     principalId: fixedAs ?? values.as ?? "local-user",
-    permissions: perm.split(",").map((p) => p.trim()).filter(Boolean).map((p) => (p.includes(":") ? p : `model:${p}`) as Permission),
+    permissions: perm
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean)
+      .map((p) => (p.includes(":") ? p : `model:${p}`) as Permission),
   };
 }
 let ctx: HostContext;
 
 function bindingHost(): BindingHost {
   const source = values.source;
-  if (source !== "agent" && source !== "human" && source !== "tool") throw new InputError("--source agent|human|tool is required: say who makes this claim");
+  if (source !== "agent" && source !== "human" && source !== "tool")
+    throw new InputError("--source agent|human|tool is required: say who makes this claim");
   return { ...ctx, source: source as ClaimSource };
 }
 function need(v: string | undefined, flag: string): string {
@@ -271,11 +298,16 @@ function printVerification(v: Verification) {
     return;
   }
   console.log(`${v.bindingId}: ${v.state}  ${c.modelObjectId} ${c.relation} ${formatLocator(c.locator)}`);
-  console.log(`  claimed by ${c.provenance.source} ${c.provenance.principalId} at ${c.modelRevision}${c.provenance.confidence !== undefined ? `, confidence ${c.provenance.confidence}` : ""}; meaning not verified by VCV`);
+  console.log(
+    `  claimed by ${c.provenance.source} ${c.provenance.principalId} at ${c.modelRevision}${c.provenance.confidence !== undefined ? `, confidence ${c.provenance.confidence}` : ""}; meaning not verified by VCV`,
+  );
   console.log(`  locator: ${v.locator!.state}: ${v.locator!.detail}`);
   console.log(`  source:  ${v.source!.state}: ${v.source!.cause}`);
   console.log(`  model:   ${v.model!.state}: ${v.model!.cause}`);
-  if (v.git.commitMoved) console.log(`  git:     commit moved since the claim (not evidence of drift by itself); file is ${v.git.workingTree}`);
+  if (v.git.commitMoved)
+    console.log(
+      `  git:     commit moved since the claim (not evidence of drift by itself); file is ${v.git.workingTree}`,
+    );
   if (v.disputed) console.log(`  disputed by ${v.disputed.by}: ${v.disputed.reason}`);
 }
 
@@ -287,17 +319,22 @@ function readInput(path: string | undefined): string {
     return readFileSync(path, "utf8");
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
-    throw new InputError(`cannot read ${path}${code === "ENOENT" ? ": no such file" : code === "EISDIR" ? ": is a directory" : code ? ` (${code})` : ""}`);
+    throw new InputError(
+      `cannot read ${path}${code === "ENOENT" ? ": no such file" : code === "EISDIR" ? ": is a directory" : code ? ` (${code})` : ""}`,
+    );
   }
 }
 
 function printDiagnostics(ds: Diagnostic[]) {
-  for (const d of ds) console.log(`  ${d.severity === "error" ? "✗" : "!"} ${d.code} at ${d.path || "(root)"}: ${d.message}`);
+  for (const d of ds)
+    console.log(`  ${d.severity === "error" ? "✗" : "!"} ${d.code} at ${d.path || "(root)"}: ${d.message}`);
 }
 function printOutcome(o: Outcome) {
   const r = o.record;
   const rev = o.status === "applied" && r?.resultingRevision ? ` → ${r.resultingRevision}` : "";
-  const who = r ? ` (proposed by ${r.proposerId}${r.approverId ? `, approved by ${r.approverId}` : ""}; record is ${r.status})` : " (not recorded)";
+  const who = r
+    ? ` (proposed by ${r.proposerId}${r.approverId ? `, approved by ${r.approverId}` : ""}; record is ${r.status})`
+    : " (not recorded)";
   console.log(`${o.changeId ?? "(no change id)"}: ${o.status}${rev}${who}`);
   printDiagnostics(o.diagnostics);
   return o.status === "applied" || o.status === "pending" ? 0 : 1;
@@ -309,12 +346,18 @@ function printTree(n: TreeNode, depth = 0) {
 
 function printProject(s: ProjectStatus) {
   console.log(`project: ${s.state} (${s.storeDir})`);
-  if (s.model) console.log(`model:   ${s.model.projectId} at ${s.model.revision} [${s.model.status}], ${s.model.history.length} revision(s)`);
+  if (s.model)
+    console.log(
+      `model:   ${s.model.projectId} at ${s.model.revision} [${s.model.status}], ${s.model.history.length} revision(s)`,
+    );
   if (s.git) {
     const where = s.git.branch ?? `detached at ${s.git.commit?.slice(0, 12) ?? "(no commits)"}`;
-    console.log(`git:     ${where}${s.git.commit ? ` ${s.git.commit.slice(0, 12)}` : ""}${s.git.dirty ? ", working tree dirty" : ", clean"}${s.git.operation ? `, ${s.git.operation} in progress` : ""}`);
+    console.log(
+      `git:     ${where}${s.git.commit ? ` ${s.git.commit.slice(0, 12)}` : ""}${s.git.dirty ? ", working tree dirty" : ", clean"}${s.git.operation ? `, ${s.git.operation} in progress` : ""}`,
+    );
   }
-  for (const d of s.diagnostics) console.log(`  ${d.severity === "error" ? "✗" : d.severity === "warning" ? "!" : "·"} ${d.code}: ${d.message}`);
+  for (const d of s.diagnostics)
+    console.log(`  ${d.severity === "error" ? "✗" : d.severity === "warning" ? "!" : "·"} ${d.code}: ${d.message}`);
 }
 
 function main(): number {
@@ -347,7 +390,9 @@ function main(): number {
       // Developer path: identity is asserted by flags/env, so it writes no attestation and the
       // integrity check reports the result as unattested (docs/approvals.md).
       const code = printOutcome(new ModelEngine(new FileStore(a!)).approve(b!, ctx));
-      console.log("  note: developer approval (identity asserted by --as/--perm or VCV_HOST_*); no attestation. Use `vcv review approve` for a trusted reviewer approval.");
+      console.log(
+        "  note: developer approval (identity asserted by --as/--perm or VCV_HOST_*); no attestation. Use `vcv review approve` for a trusted reviewer approval.",
+      );
       return code;
     }
     case "query": {
@@ -356,11 +401,26 @@ function main(): number {
       const dirs: Record<string, "incoming" | "outgoing" | "both"> = { in: "incoming", out: "outgoing", both: "both" };
       const opt = <T extends object>(o: T) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
       const result =
-        b === "overview" ? q.getProjectOverview()
-        : b === "search" ? q.searchObjects(opt({ text: rest.join(" "), kinds: values.kind as never, limit: num(values.limit) }) as never)
-        : b === "context" ? q.getContext(opt({ id: rest[0]!, depth: num(values.depth), direction: values.direction ? dirs[values.direction] : undefined, maxNodes: num(values.limit) }) as never)
-        : b === "impact" ? q.analyzeImpact(opt({ ids: rest, maxDepth: num(values.depth), maxResults: num(values.limit) }) as never)
-        : undefined;
+        b === "overview"
+          ? q.getProjectOverview()
+          : b === "search"
+            ? q.searchObjects(
+                opt({ text: rest.join(" "), kinds: values.kind as never, limit: num(values.limit) }) as never,
+              )
+            : b === "context"
+              ? q.getContext(
+                  opt({
+                    id: rest[0]!,
+                    depth: num(values.depth),
+                    direction: values.direction ? dirs[values.direction] : undefined,
+                    maxNodes: num(values.limit),
+                  }) as never,
+                )
+              : b === "impact"
+                ? q.analyzeImpact(
+                    opt({ ids: rest, maxDepth: num(values.depth), maxResults: num(values.limit) }) as never,
+                  )
+                : undefined;
       if (!result) {
         console.log(USAGE);
         return 1;
@@ -446,7 +506,11 @@ function bindingCommand(): number {
       const bindingId = need(id, "<bindingId>");
       const expected = need(values.expect, "--expect");
       const old = readBinding(path, bindingId);
-      if (!old?.claim) throw new BindingError(old ? "INVALID_CLAIM" : "NOT_FOUND", old ? `binding ${bindingId} is unreadable: ${old.problem}` : `binding ${bindingId} does not exist`);
+      if (!old?.claim)
+        throw new BindingError(
+          old ? "INVALID_CLAIM" : "NOT_FOUND",
+          old ? `binding ${bindingId} is unreadable: ${old.problem}` : `binding ${bindingId} does not exist`,
+        );
       const conf = values.confidence === undefined ? undefined : Number(values.confidence);
       const r = recordBinding(
         path,
@@ -472,7 +536,13 @@ function bindingCommand(): number {
       console.log(`${id}: removed`);
       return 0;
     case "dispute": {
-      const e = disputeBinding(path, need(id, "<bindingId>"), need(values.reason, "--reason"), { ...ctx, source: "human" }, need(values.expect, "--expect"));
+      const e = disputeBinding(
+        path,
+        need(id, "<bindingId>"),
+        need(values.reason, "--reason"),
+        { ...ctx, source: "human" },
+        need(values.expect, "--expect"),
+      );
       console.log(`${id}: disputed by ${ctx.principalId}`);
       console.log(`  digest: ${e.digest}`);
       return 0;
@@ -480,7 +550,11 @@ function bindingCommand(): number {
     case "list": {
       const entries = listBindings(path);
       if (values.json) console.log(JSON.stringify(entries, null, 2));
-      else for (const e of entries) console.log(`${e.bindingId}  ${e.digest}  ${e.claim ? `${e.claim.modelObjectId} ${e.claim.relation} ${formatLocator(e.claim.locator)}` : `invalid: ${e.problem}`}`);
+      else
+        for (const e of entries)
+          console.log(
+            `${e.bindingId}  ${e.digest}  ${e.claim ? `${e.claim.modelObjectId} ${e.claim.relation} ${formatLocator(e.claim.locator)}` : `invalid: ${e.problem}`}`,
+          );
       return 0;
     }
     case "verify": {
@@ -503,7 +577,8 @@ function bindingCommand(): number {
 /** A proposal file: YAML or JSON, bounded before parsing. */
 function readProposalFile(path: string | undefined): unknown {
   const text = readInput(path);
-  if (Buffer.byteLength(text) > 4 * PROPOSAL_LIMITS.maxBytes) throw new InputError(`${path} is larger than ${4 * PROPOSAL_LIMITS.maxBytes} bytes; split the change`);
+  if (Buffer.byteLength(text) > 4 * PROPOSAL_LIMITS.maxBytes)
+    throw new InputError(`${path} is larger than ${4 * PROPOSAL_LIMITS.maxBytes} bytes; split the change`);
   try {
     return parseYaml(text);
   } catch (e) {
@@ -530,7 +605,11 @@ function handoffCommand(): number {
 }
 
 function reconcileCommand(): number {
-  const r = reconcile(need(a, "<path>"), { base: need(values.base, "--base"), ...(trustSource(null) ? { trust: trustSource(null) } : {}), requireAttestation: values["require-attestation"] });
+  const r = reconcile(need(a, "<path>"), {
+    base: need(values.base, "--base"),
+    ...(trustSource(null) ? { trust: trustSource(null) } : {}),
+    requireAttestation: values["require-attestation"],
+  });
   if (values.json || !r.ok) {
     console.log(JSON.stringify(r.ok ? r.data : r, null, 2));
     return r.ok ? 0 : 1;
@@ -574,14 +653,18 @@ function readJson(file: string, what: string): unknown {
 /** Total line coverage from an Istanbul `json-summary` (coverage-summary.json). Supporting context only. */
 function readCoverage(file: string): { linesPct: number; source: string } {
   const pct = (readJson(file, "coverage summary") as { total?: { lines?: { pct?: unknown } } })?.total?.lines?.pct;
-  if (typeof pct !== "number" || !(pct >= 0 && pct <= 100)) throw new InputError(`${file} has no total.lines.pct (an Istanbul json-summary is expected)`);
+  if (typeof pct !== "number" || !(pct >= 0 && pct <= 100))
+    throw new InputError(`${file} has no total.lines.pct (an Istanbul json-summary is expected)`);
   return { linesPct: pct, source: "istanbul json-summary" };
 }
 
 function captureInput() {
   return {
     root: values.root ?? "",
-    runner: { name: need(values.runner, "--runner"), ...(values["runner-version"] ? { version: values["runner-version"] } : {}) },
+    runner: {
+      name: need(values.runner, "--runner"),
+      ...(values["runner-version"] ? { version: values["runner-version"] } : {}),
+    },
     invocation: need(values.invocation, "--invocation"),
     ...(values.before ? { before: values.before } : {}),
   };
@@ -595,7 +678,9 @@ function testsCommand(): number {
     else {
       const c = r.data.candidate;
       console.log(r.data.identityDigest);
-      console.log(`  commit ${c.commit ?? "(none)"}${c.branch ? ` (${c.branch})` : ""}; ${c.uncommitted.paths} uncommitted path(s); model ${c.modelRevision}`);
+      console.log(
+        `  commit ${c.commit ?? "(none)"}${c.branch ? ` (${c.branch})` : ""}; ${c.uncommitted.paths} uncommitted path(s); model ${c.modelRevision}`,
+      );
     }
     return r.ok ? 0 : 1;
   }
@@ -612,9 +697,15 @@ function testsCommand(): number {
     if (values.json || !values.out) process.stdout.write(text);
     else {
       const s = r.data.summary;
-      console.log(`${values.out}: run captured by ${r.data.principalId}, declared ${r.data.observedBy}-observed (digest ${r.data.digest})`);
-      console.log("  as a file this record is a claim: read back with --run it is never host-observed; use criteria --junit in the trusted job");
-      console.log(`  ${s.tests} case(s): ${s.passed} passed, ${s.failed} failed, ${s.errors} error(s), ${s.skipped} skipped; candidate ${r.data.identityDigest.slice(0, 12)} at ${r.data.candidate.commit?.slice(0, 12) ?? "(no commit)"}`);
+      console.log(
+        `${values.out}: run captured by ${r.data.principalId}, declared ${r.data.observedBy}-observed (digest ${r.data.digest})`,
+      );
+      console.log(
+        "  as a file this record is a claim: read back with --run it is never host-observed; use criteria --junit in the trusted job",
+      );
+      console.log(
+        `  ${s.tests} case(s): ${s.passed} passed, ${s.failed} failed, ${s.errors} error(s), ${s.skipped} skipped; candidate ${r.data.identityDigest.slice(0, 12)} at ${r.data.candidate.commit?.slice(0, 12) ?? "(no commit)"}`,
+      );
     }
     return 0;
   }
@@ -635,38 +726,62 @@ function criteriaCommand(): number {
     }
     runs.unshift(cap.data);
   }
-  const r = criteriaEvidence(path, { ...(ids.length ? { ids } : {}), ...(runs.length ? { runs } : {}), ...(values.coverage ? { coverage: readCoverage(values.coverage) } : {}) });
+  const r = criteriaEvidence(path, {
+    ...(ids.length ? { ids } : {}),
+    ...(runs.length ? { runs } : {}),
+    ...(values.coverage ? { coverage: readCoverage(values.coverage) } : {}),
+  });
   if (values.json || !r.ok) {
     console.log(JSON.stringify(r.ok ? r.data : r, null, 2));
     return r.ok ? 0 : 1;
   }
   const d = r.data;
   const c = d.counts;
-  console.log(`acceptance criteria at ${d.modelRevision}: ${c.criteria} (${c.required} required, ${c.optional} optional); ${c.mappings} test mapping(s)`);
+  console.log(
+    `acceptance criteria at ${d.modelRevision}: ${c.criteria} (${c.required} required, ${c.optional} optional); ${c.mappings} test mapping(s)`,
+  );
   if (!d.mappingsAvailable) console.log(`  ! mappings NOT ASSESSED: ${d.mappingsProblem}`);
-  else console.log(`  required: ${c.requiredUnmapped} unmapped, ${c.requiredNotResolved} not fully resolved${c.requiredIncomplete ? ` (${c.requiredIncomplete} with an incomplete assessment)` : ""}; optional: ${c.optionalUnmapped} unmapped`);
+  else
+    console.log(
+      `  required: ${c.requiredUnmapped} unmapped, ${c.requiredNotResolved} not fully resolved${c.requiredIncomplete ? ` (${c.requiredIncomplete} with an incomplete assessment)` : ""}; optional: ${c.optionalUnmapped} unmapped`,
+    );
   for (const run of d.runs) {
     const s = run.summary;
-    console.log(`  run ${run.index}: ${run.observedBy === "host" ? "host-observed (captured here)" : `CLAIMED (${run.admittedAs}, declares ${run.declaredObservedBy})`} ${run.runner.name} by ${run.principalId}, ${s.tests} case(s) (${s.passed} passed, ${s.failed} failed, ${s.errors} error(s), ${s.skipped} skipped); suite ${run.green ? "green" : "red"}; ${run.fresh ? "describes this candidate" : `STALE: ${run.staleBecause.join("; ")}`}`);
+    console.log(
+      `  run ${run.index}: ${run.observedBy === "host" ? "host-observed (captured here)" : `CLAIMED (${run.admittedAs}, declares ${run.declaredObservedBy})`} ${run.runner.name} by ${run.principalId}, ${s.tests} case(s) (${s.passed} passed, ${s.failed} failed, ${s.errors} error(s), ${s.skipped} skipped); suite ${run.green ? "green" : "red"}; ${run.fresh ? "describes this candidate" : `STALE: ${run.staleBecause.join("; ")}`}`,
+    );
   }
   if (d.runs.length) {
     const q = d.results.required;
-    console.log(`  required criteria: ${q.passed} passed, ${q.failed} failed, ${q.stale} stale, ${q.missing} missing, ${q.unknown} unknown`);
+    console.log(
+      `  required criteria: ${q.passed} passed, ${q.failed} failed, ${q.stale} stale, ${q.missing} missing, ${q.unknown} unknown`,
+    );
   }
   if (d.coverage) console.log(`  coverage: ${d.coverage.linesPct}% lines (${d.coverage.source}); ${d.coverage.note}`);
   for (const n of d.notes) console.log(`  ! ${n.code}: ${n.message}`);
   if (d.invalidClaims.total) {
-    console.log(`  ! ${d.invalidClaims.total} claim file(s) cannot be read; any of them may map a criterion, so the assessment is INCOMPLETE:`);
+    console.log(
+      `  ! ${d.invalidClaims.total} claim file(s) cannot be read; any of them may map a criterion, so the assessment is INCOMPLETE:`,
+    );
     for (const x of d.invalidClaims.items) console.log(`    ${x.file}: ${x.problem}`);
   }
   for (const e of d.criteria) {
-    console.log(`  ${e.id} [${e.verification}] ${e.result !== "unverified" ? `${e.result.toUpperCase()}${e.resultObservedBy ? (e.resultObservedBy === "host" ? " (host-observed)" : " (claimed, not host-observed)") : ""}; mapping ` : ""}${e.mapping}: ${e.statement}`);
+    console.log(
+      `  ${e.id} [${e.verification}] ${e.result !== "unverified" ? `${e.result.toUpperCase()}${e.resultObservedBy ? (e.resultObservedBy === "host" ? " (host-observed)" : " (claimed, not host-observed)") : ""}; mapping ` : ""}${e.mapping}: ${e.statement}`,
+    );
     console.log(`    verifies ${e.verifies.join(", ")}`);
-    for (const m of e.mappings) console.log(`    ${m.state.padEnd(13)} ${m.result ? `${m.result.status.padEnd(8)} ` : ""}${m.test ? `${m.test.path} > ${m.test.name}` : `(${m.relation} claim)`}  [${m.bindingId}]${m.alsoMapsTo.length ? `  also ${m.alsoMapsTo.join(", ")}` : ""}`);
+    for (const m of e.mappings)
+      console.log(
+        `    ${m.state.padEnd(13)} ${m.result ? `${m.result.status.padEnd(8)} ` : ""}${m.test ? `${m.test.path} > ${m.test.name}` : `(${m.relation} claim)`}  [${m.bindingId}]${m.alsoMapsTo.length ? `  also ${m.alsoMapsTo.join(", ")}` : ""}`,
+      );
     for (const p of e.problems) console.log(`    ! ${p.code}: ${p.message}`);
-    if (e.mappingsTruncated || e.problemsTruncated) console.log(`    ! cut: ${e.mappings.length}/${e.mappingsTotal} mappings, ${e.problems.length}/${e.problemsTotal} problems`);
+    if (e.mappingsTruncated || e.problemsTruncated)
+      console.log(
+        `    ! cut: ${e.mappings.length}/${e.mappingsTotal} mappings, ${e.problems.length}/${e.problemsTotal} problems`,
+      );
   }
-  if (d.truncated || d.testsTruncated || d.invalidClaims.truncated || d.budget.shrunk) console.log(`  ! lists were cut (report ${d.budget.bytes}/${d.budget.limit} bytes); use --json for totals`);
+  if (d.truncated || d.testsTruncated || d.invalidClaims.truncated || d.budget.shrunk)
+    console.log(`  ! lists were cut (report ${d.budget.bytes}/${d.budget.limit} bytes); use --json for totals`);
   console.log(`  ${d.meaning}`);
   return 0;
 }
@@ -691,22 +806,41 @@ function gateCommand(): number {
       }
     };
     if (root && (real(values.policy) + pathSep).startsWith(real(root) + pathSep)) {
-      throw new InputError("--policy is inside the candidate checkout; pass a host-owned file, or read it from the base with --policy-at-base");
+      throw new InputError(
+        "--policy is inside the candidate checkout; pass a host-owned file, or read it from the base with --policy-at-base",
+      );
     }
     policy = readJson(values.policy, "gate policy");
   }
   // --before: the identity the host read BEFORE the tests ran. Without it the report is a claim.
-  const junit = values.junit ? [{ report: readBounded(values.junit, JUNIT_LIMITS.bytes), root: values.root ?? "", runner: captureInput().runner, invocation: captureInput().invocation, ...(values.before ? { before: values.before } : {}) }] : [];
-  if (values.before && !values.junit) throw new InputError("--before goes with --junit: it is the identity the host read before running the tests that wrote that report");
-  const r = preMergeGate(path, {
-    base,
-    ...(junit.length ? { junit } : {}),
-    ...(values.run?.length ? { runs: values.run.map((f) => readJson(f, "test-run record")) } : {}),
-    ...(values.coverage ? { coverage: readCoverage(values.coverage) } : {}),
-    ...(values.observations ? { observations: readJson(values.observations, "observations file") } : {}),
-    ...(policy !== undefined ? { policy } : {}),
-    ...(values["policy-at-base"] ? { policyAtBase: values["policy-at-base"] } : {}),
-  }, ctx);
+  const junit = values.junit
+    ? [
+        {
+          report: readBounded(values.junit, JUNIT_LIMITS.bytes),
+          root: values.root ?? "",
+          runner: captureInput().runner,
+          invocation: captureInput().invocation,
+          ...(values.before ? { before: values.before } : {}),
+        },
+      ]
+    : [];
+  if (values.before && !values.junit)
+    throw new InputError(
+      "--before goes with --junit: it is the identity the host read before running the tests that wrote that report",
+    );
+  const r = preMergeGate(
+    path,
+    {
+      base,
+      ...(junit.length ? { junit } : {}),
+      ...(values.run?.length ? { runs: values.run.map((f) => readJson(f, "test-run record")) } : {}),
+      ...(values.coverage ? { coverage: readCoverage(values.coverage) } : {}),
+      ...(values.observations ? { observations: readJson(values.observations, "observations file") } : {}),
+      ...(policy !== undefined ? { policy } : {}),
+      ...(values["policy-at-base"] ? { policyAtBase: values["policy-at-base"] } : {}),
+    },
+    ctx,
+  );
   if (!r.ok) {
     if (values.json) console.log(JSON.stringify(r, null, 2));
     else printResultError(r);
@@ -720,44 +854,82 @@ function gateCommand(): number {
 function printGate(d: GateReport) {
   const short = (c: string) => c.slice(0, 12);
   console.log(`vcv gate: ${d.decision.toUpperCase()}: ${d.headline}`);
-  console.log(`  candidate ${short(d.candidate.commit)}${d.candidate.branch ? ` (${d.candidate.branch})` : ""} against base ${short(d.base.commit)}; ${d.change.kind} change (${d.change.changedFiles} file(s), ${d.change.introducedRevisions} new model revision(s), lineage ${d.change.lineage})`);
-  console.log(`  policy: ${d.policy.source} (${short(d.policy.digest)})${d.policy.changedByCandidate ? "; the candidate changes it (applies after merge)" : ""}`);
+  console.log(
+    `  candidate ${short(d.candidate.commit)}${d.candidate.branch ? ` (${d.candidate.branch})` : ""} against base ${short(d.base.commit)}; ${d.change.kind} change (${d.change.changedFiles} file(s), ${d.change.introducedRevisions} new model revision(s), lineage ${d.change.lineage})`,
+  );
+  console.log(
+    `  policy: ${d.policy.source} (${short(d.policy.digest)})${d.policy.changedByCandidate ? "; the candidate changes it (applies after merge)" : ""}`,
+  );
   for (const run of d.runs) {
     const s = run.summary;
-    console.log(`  run ${run.index}: ${run.observedBy === "host" ? "host-observed (captured here)" : "CLAIMED (imported)"} ${run.runner.name}: ${s.tests} case(s), ${s.passed} passed, ${s.failed} failed, ${s.errors} error(s), ${s.skipped} skipped; suite ${run.green ? "green" : "red"}${run.fresh ? "" : `; STALE: ${run.staleBecause.join("; ")}`}`);
+    console.log(
+      `  run ${run.index}: ${run.observedBy === "host" ? "host-observed (captured here)" : "CLAIMED (imported)"} ${run.runner.name}: ${s.tests} case(s), ${s.passed} passed, ${s.failed} failed, ${s.errors} error(s), ${s.skipped} skipped; suite ${run.green ? "green" : "red"}${run.fresh ? "" : `; STALE: ${run.staleBecause.join("; ")}`}`,
+    );
   }
-  for (const c of d.criteria.items) console.log(`  ${c.result === "passed" && c.observedBy === "host" ? "✓" : "✗"} ${c.id} [${c.verification}] ${c.result}${c.observedBy ? ` (${c.observedBy})` : ""}  verifies ${c.verifies.join(", ")}`);
+  for (const c of d.criteria.items)
+    console.log(
+      `  ${c.result === "passed" && c.observedBy === "host" ? "✓" : "✗"} ${c.id} [${c.verification}] ${c.result}${c.observedBy ? ` (${c.observedBy})` : ""}  verifies ${c.verifies.join(", ")}`,
+    );
   for (const r of d.reasons) {
-    console.log(`  ${r.severity === "block" ? "BLOCK" : "warn "} ${r.code} [${r.rule}; ${r.basis}]${r.criterionId ? ` ${r.criterionId}` : ""}: ${r.message}`);
+    console.log(
+      `  ${r.severity === "block" ? "BLOCK" : "warn "} ${r.code} [${r.rule}; ${r.basis}]${r.criterionId ? ` ${r.criterionId}` : ""}: ${r.message}`,
+    );
   }
-  if (d.reasonsTruncated || d.criteria.truncated || d.observationsTruncated) console.log(`  ! lists were cut (${d.reasonsTotal} reasons in total); use --json`);
+  if (d.reasonsTruncated || d.criteria.truncated || d.observationsTruncated)
+    console.log(`  ! lists were cut (${d.reasonsTotal} reasons in total); use --json`);
   for (const n of d.notes) console.log(`  note: ${n}`);
-  for (const o of d.observations) console.log(`  agent claim ${o.id} (${o.kind}, references ${o.references}): ${o.statement.slice(0, 200)}`);
+  for (const o of d.observations)
+    console.log(`  agent claim ${o.id} (${o.kind}, references ${o.references}): ${o.statement.slice(0, 200)}`);
   console.log("  not established here:");
   for (const l of d.limits) console.log(`    - ${l}`);
 }
 
 function printReconciliation(d: Reconciliation) {
   const short = (c: string) => c.slice(0, 12);
-  console.log(`reconciliation of ${d.candidate.projectId}: candidate ${short(d.candidate.commit)}${d.candidate.branch ? ` (${d.candidate.branch})` : ""}${d.candidate.dirty ? " + uncommitted edits" : ""} against base ${d.base.ref === d.base.commit ? short(d.base.commit) : `${d.base.ref} = ${short(d.base.commit)} (ref resolved locally; not pinned)`}`);
-  if (!d.base.containedInCandidate) console.log(`  ! the candidate does not contain the base; changes are measured from the merge base ${short(d.base.mergeBase)}`);
-  console.log(`  model: ${d.model.lineage}, ${d.base.modelRevision ?? "(no model)"} → ${d.candidate.modelRevision}; integrity ${d.model.integrity.ok ? "ok" : "FAILED"}; ${d.model.delta.total} object change(s)${d.model.impact ? `, ${d.model.impact.candidates.length} impact candidate(s), cross-module ${d.model.impact.crossModule}` : ""}`);
-  for (const r of d.model.introduced) console.log(`    ${r.revision}: ${r.derivation}${r.changeId ? ` by ${r.changeId}` : ""}; approval ${r.approval}`);
-  for (const c of d.model.delta.changes) console.log(`    ${c.change} ${c.kind} ${c.id}${c.fields.length ? ` (${c.fields.map((f) => f.field).join(", ")})` : ""}`);
-  console.log(`  source: ${d.source.total} changed file(s), ${d.source.unmapped ?? "unknown (claims unreadable)"} file(s) outside .vcv/ unmapped`);
-  for (const f of d.source.files) console.log(`    ${f.committed ? "C" : " "}${f.uncommitted ? "W" : " "} ${f.area.padEnd(12)} ${f.path}${f.bindings.length ? `  ← ${f.bindings.join(", ")}` : ""}`);
+  console.log(
+    `reconciliation of ${d.candidate.projectId}: candidate ${short(d.candidate.commit)}${d.candidate.branch ? ` (${d.candidate.branch})` : ""}${d.candidate.dirty ? " + uncommitted edits" : ""} against base ${d.base.ref === d.base.commit ? short(d.base.commit) : `${d.base.ref} = ${short(d.base.commit)} (ref resolved locally; not pinned)`}`,
+  );
+  if (!d.base.containedInCandidate)
+    console.log(
+      `  ! the candidate does not contain the base; changes are measured from the merge base ${short(d.base.mergeBase)}`,
+    );
+  console.log(
+    `  model: ${d.model.lineage}, ${d.base.modelRevision ?? "(no model)"} → ${d.candidate.modelRevision}; integrity ${d.model.integrity.ok ? "ok" : "FAILED"}; ${d.model.delta.total} object change(s)${d.model.impact ? `, ${d.model.impact.candidates.length} impact candidate(s), cross-module ${d.model.impact.crossModule}` : ""}`,
+  );
+  for (const r of d.model.introduced)
+    console.log(`    ${r.revision}: ${r.derivation}${r.changeId ? ` by ${r.changeId}` : ""}; approval ${r.approval}`);
+  for (const c of d.model.delta.changes)
+    console.log(
+      `    ${c.change} ${c.kind} ${c.id}${c.fields.length ? ` (${c.fields.map((f) => f.field).join(", ")})` : ""}`,
+    );
+  console.log(
+    `  source: ${d.source.total} changed file(s), ${d.source.unmapped ?? "unknown (claims unreadable)"} file(s) outside .vcv/ unmapped`,
+  );
+  for (const f of d.source.files)
+    console.log(
+      `    ${f.committed ? "C" : " "}${f.uncommitted ? "W" : " "} ${f.area.padEnd(12)} ${f.path}${f.bindings.length ? `  ← ${f.bindings.join(", ")}` : ""}`,
+    );
   if (d.sourceImpact) {
     const si = d.sourceImpact;
-    console.log(`  source impact (declared-model context, not evidence of drift): seeds ${si.seeds.map((x) => x.objectId).join(", ")}; modules ${si.modules.map((m) => m.id).join(", ")}; ${si.total} impact candidate(s); cross-module ${si.crossModule}`);
+    console.log(
+      `  source impact (declared-model context, not evidence of drift): seeds ${si.seeds.map((x) => x.objectId).join(", ")}; modules ${si.modules.map((m) => m.id).join(", ")}; ${si.total} impact candidate(s); cross-module ${si.crossModule}`,
+    );
     if (si.contracts.length) console.log(`    contracts: ${si.contracts.map((c) => `${c.id} (${c.via})`).join(", ")}`);
     if (si.rules.length) console.log(`    rules: ${si.rules.map((r) => `${r.id} (${r.via})`).join(", ")}`);
   }
   if (!d.bindings.available) console.log(`  bindings: NOT ASSESSED (${d.bindings.problem})`);
   else console.log(`  bindings: ${d.bindings.total} shown, ${d.bindings.unaffected} unaffected and resolved`);
-  for (const b of d.bindings.items) console.log(`    ${b.bindingId}: ${b.state ?? "removed"}; claim ${b.atBase}; object ${b.object}${b.boundFileChanged ? "; bound file changed" : ""}`);
+  for (const b of d.bindings.items)
+    console.log(
+      `    ${b.bindingId}: ${b.state ?? "removed"}; claim ${b.atBase}; object ${b.object}${b.boundFileChanged ? "; bound file changed" : ""}`,
+    );
   console.log(`  findings (${d.findingsTotal}):`);
-  for (const f of d.findings) console.log(`    [${f.category}/${f.basis}${f.related ? "" : ", unrelated"}] ${f.code}: ${f.message}`);
-  if (d.budget.shrunk || d.findingsTruncated) console.log(`  ! lists were cut to fit the report budget (${d.budget.bytes}/${d.budget.limit} bytes); use --json for totals`);
+  for (const f of d.findings)
+    console.log(`    [${f.category}/${f.basis}${f.related ? "" : ", unrelated"}] ${f.code}: ${f.message}`);
+  if (d.budget.shrunk || d.findingsTruncated)
+    console.log(
+      `  ! lists were cut to fit the report budget (${d.budget.bytes}/${d.budget.limit} bytes); use --json for totals`,
+    );
   console.log(`  semantic: ${d.semantic.note}`);
   console.log("  not established here:");
   for (const l of d.limits) console.log(`    - ${l}`);
@@ -776,8 +948,12 @@ function implementationCommand(): number {
     else {
       const o = r.data.report.vcvObserved;
       console.log(`${r.data.file}: ${r.data.replaced ? "replaced" : "recorded"} (digest ${r.data.digest})`);
-      console.log(`  change ${r.data.report.changeId} approved as ${r.data.report.approvedRevision}; claimed by ${r.data.report.agentClaims.claimedBy}; not reconciled`);
-      console.log(`  ${o.filesModified.length} source file(s) changed since ${o.baseCommit.slice(0, 12)}, ${o.outOfScope.length} outside the approved scope; ${o.bindings.filter((x) => x.reasserted).length}/${o.bindings.length} affected binding(s) reasserted`);
+      console.log(
+        `  change ${r.data.report.changeId} approved as ${r.data.report.approvedRevision}; claimed by ${r.data.report.agentClaims.claimedBy}; not reconciled`,
+      );
+      console.log(
+        `  ${o.filesModified.length} source file(s) changed since ${o.baseCommit.slice(0, 12)}, ${o.outOfScope.length} outside the approved scope; ${o.bindings.filter((x) => x.reasserted).length}/${o.bindings.length} affected binding(s) reasserted`,
+      );
       printWarnings(r.data.report.warnings);
     }
     return r.ok ? 0 : 1;
@@ -787,8 +963,12 @@ function implementationCommand(): number {
     if (values.json) console.log(JSON.stringify(r, null, 2));
     else if (!r.ok) printResultError(r);
     else {
-      console.log(`${r.data.file} (digest ${r.data.digest}): change ${r.data.report.changeId} at ${r.data.report.approvedRevision}; not reconciled`);
-      console.log(`  observed now: ${r.data.now.filesModified.length} source file(s) changed, ${r.data.now.outOfScope.length} out of scope${r.data.changedSinceReport ? "; DIFFERENT from the recorded report" : "; same as recorded"}`);
+      console.log(
+        `${r.data.file} (digest ${r.data.digest}): change ${r.data.report.changeId} at ${r.data.report.approvedRevision}; not reconciled`,
+      );
+      console.log(
+        `  observed now: ${r.data.now.filesModified.length} source file(s) changed, ${r.data.now.outOfScope.length} out of scope${r.data.changedSinceReport ? "; DIFFERENT from the recorded report" : "; same as recorded"}`,
+      );
       printWarnings(r.data.warningsNow);
     }
     return r.ok ? 0 : 1;
@@ -807,11 +987,17 @@ function printImplementationRequest(r: ImplementationRequest) {
 
 function printPreview(p: ProposalPreview, revision: string) {
   const q = p.proposal;
-  console.log(`proposal ${q.changeId} (${q.origin === "record" ? `${q.lifecycle}, proposed by ${q.proposerId}` : "not submitted: dry run"})`);
+  console.log(
+    `proposal ${q.changeId} (${q.origin === "record" ? `${q.lifecycle}, proposed by ${q.proposerId}` : "not submitted: dry run"})`,
+  );
   console.log(`  digest:   ${q.proposalDigest}`);
-  console.log(`  base:     ${q.baseRevision}; this checkout is at ${revision}${p.validation.appliesToCurrent ? " (applies)" : " (does not apply now)"}`);
+  console.log(
+    `  base:     ${q.baseRevision}; this checkout is at ${revision}${p.validation.appliesToCurrent ? " (applies)" : " (does not apply now)"}`,
+  );
   if (q.rationale) console.log(`  why:      ${q.rationale}`);
-  console.log(`  states:   change ${p.states.change}; approval ${p.states.approval}; snapshot ${p.states.snapshotStatus}; implementation ${p.states.implementation}`);
+  console.log(
+    `  states:   change ${p.states.change}; approval ${p.states.approval}; snapshot ${p.states.snapshotStatus}; implementation ${p.states.implementation}`,
+  );
   console.log("operations:");
   for (const o of q.operations) console.log(`  ${o.index + 1}. ${o.summary}`);
   if (q.implementation) printImplementationRequest(q.implementation);
@@ -820,21 +1006,30 @@ function printPreview(p: ProposalPreview, revision: string) {
     printHinted([...p.validation.errors, ...p.validation.warnings]);
   }
   if (p.delta) {
-    console.log(`model delta (against ${p.delta.against} ${p.delta.revision}; ${p.delta.total} object(s)${p.delta.truncated ? ", truncated" : ""}):`);
+    console.log(
+      `model delta (against ${p.delta.against} ${p.delta.revision}; ${p.delta.total} object(s)${p.delta.truncated ? ", truncated" : ""}):`,
+    );
     for (const c of p.delta.changes) {
-      console.log(`  ${c.change === "added" ? "+" : c.change === "removed" ? "-" : "~"} ${c.kind} ${c.id}${c.moduleId ? ` [${c.moduleId}]` : ""}`);
-      if (c.change === "modified") for (const f of c.fields) console.log(`      ${f.field}: ${f.before ?? "(none)"}\n        → ${f.after ?? "(none)"}`);
+      console.log(
+        `  ${c.change === "added" ? "+" : c.change === "removed" ? "-" : "~"} ${c.kind} ${c.id}${c.moduleId ? ` [${c.moduleId}]` : ""}`,
+      );
+      if (c.change === "modified")
+        for (const f of c.fields)
+          console.log(`      ${f.field}: ${f.before ?? "(none)"}\n        → ${f.after ?? "(none)"}`);
     }
   }
   if (p.impact) {
-    console.log(`impact (structural candidates only)${p.impact.crossModule === "yes" ? ": CROSS-MODULE" : p.impact.crossModule === "not-determined" ? ": cross-module not determined" : ""}:`);
+    console.log(
+      `impact (structural candidates only)${p.impact.crossModule === "yes" ? ": CROSS-MODULE" : p.impact.crossModule === "not-determined" ? ": cross-module not determined" : ""}:`,
+    );
     console.log(`  modules:   ${p.impact.modules.map((m) => `${m.id} (${m.via})`).join(", ") || "(none)"}`);
     console.log(`  contracts: ${p.impact.contracts.map((c) => `${c.id} (${c.via})`).join(", ") || "(none)"}`);
     for (const c of p.impact.candidates) console.log(`  · ${c.kind} ${c.id}: ${c.reason}`);
     if (p.impact.truncated) console.log(`  … ${p.impact.total} candidates in all (cut by budget)`);
   }
   console.log(`binding claims to revisit (${p.bindings.total}):`);
-  for (const b of p.bindings.items) console.log(`  ${b.bindingId}: ${b.modelObjectId} ${b.relation} ${b.locator} (${b.why})`);
+  for (const b of p.bindings.items)
+    console.log(`  ${b.bindingId}: ${b.modelObjectId} ${b.relation} ${b.locator} (${b.why})`);
   console.log("not verified by anyone yet:");
   for (const a of p.assumptions) console.log(`  - ${a}`);
 }
@@ -848,7 +1043,9 @@ function proposalCommand(): number {
       else if (!r.ok) printResultError(r);
       else {
         const d = r.data;
-        console.log(`${d.changeId ?? "(no change id)"}: ${d.status}${d.recorded ? " (recorded)" : " (not recorded)"}; .vcv/HEAD stays at ${d.modelRevision.after}`);
+        console.log(
+          `${d.changeId ?? "(no change id)"}: ${d.status}${d.recorded ? " (recorded)" : " (not recorded)"}; .vcv/HEAD stays at ${d.modelRevision.after}`,
+        );
         if (d.proposalDigest) console.log(`  digest: ${d.proposalDigest}`);
         printHinted(d.diagnostics);
         console.log(`  ${d.next}`);
@@ -856,8 +1053,12 @@ function proposalCommand(): number {
       return r.ok && r.data.ok ? 0 : 1;
     }
     case "preview": {
-      if ((rest[0] === undefined) === (values.file === undefined)) throw new InputError("pass a change ID or --file <change.yaml>, not both");
-      const req = { ...(values.file !== undefined ? { change: readProposalFile(values.file) } : { changeId: rest[0] }), ...(values.limit !== undefined ? { limit: num(values.limit) } : {}) };
+      if ((rest[0] === undefined) === (values.file === undefined))
+        throw new InputError("pass a change ID or --file <change.yaml>, not both");
+      const req = {
+        ...(values.file !== undefined ? { change: readProposalFile(values.file) } : { changeId: rest[0] }),
+        ...(values.limit !== undefined ? { limit: num(values.limit) } : {}),
+      };
       const r = previewProposal(path, req);
       if (values.json) console.log(JSON.stringify(r, null, 2));
       else if (!r.ok) printResultError(r);
@@ -865,13 +1066,21 @@ function proposalCommand(): number {
       return r.ok ? 0 : 1;
     }
     case "list": {
-      const lifecycles = values.states?.split(",").map((x) => x.trim()).filter(Boolean);
-      const r = listProposals(path, { ...(lifecycles ? { lifecycles } : {}), ...(values.limit !== undefined ? { limit: num(values.limit) } : {}) });
+      const lifecycles = values.states
+        ?.split(",")
+        .map((x) => x.trim())
+        .filter(Boolean);
+      const r = listProposals(path, {
+        ...(lifecycles ? { lifecycles } : {}),
+        ...(values.limit !== undefined ? { limit: num(values.limit) } : {}),
+      });
       if (values.json) console.log(JSON.stringify(r, null, 2));
       else if (!r.ok) printResultError(r);
       else {
         for (const p of r.data.proposals) {
-          console.log(`${p.changeId}  ${p.lifecycle}${p.stale ? ` (${p.stale.reason})` : ""}  by ${p.proposerId ?? "?"}  base ${p.baseRevision ?? "?"}${p.resultingRevision ? ` → ${p.resultingRevision}` : ""}  ${p.operations} op(s)${p.problem ? `  ${p.problem}` : ""}`);
+          console.log(
+            `${p.changeId}  ${p.lifecycle}${p.stale ? ` (${p.stale.reason})` : ""}  by ${p.proposerId ?? "?"}  base ${p.baseRevision ?? "?"}${p.resultingRevision ? ` → ${p.resultingRevision}` : ""}  ${p.operations} op(s)${p.problem ? `  ${p.problem}` : ""}`,
+          );
         }
         if (r.data.truncated) console.log(`… ${r.data.matched} in all`);
       }
@@ -885,14 +1094,25 @@ function proposalCommand(): number {
 
 /** Review commands take no identity from flags or the environment: the key and trust list decide. */
 function refuseAssertedIdentity(what: string) {
-  if (values.as !== undefined || values.perm !== undefined || process.env.VCV_HOST_PRINCIPAL !== undefined || process.env.VCV_HOST_PERMISSIONS !== undefined) {
-    throw new InputError(`${what} takes no --as/--perm and refuses to run under VCV_HOST_PRINCIPAL/VCV_HOST_PERMISSIONS (an agent host); the reviewer's identity comes from --key and the trust list`);
+  if (
+    values.as !== undefined ||
+    values.perm !== undefined ||
+    process.env.VCV_HOST_PRINCIPAL !== undefined ||
+    process.env.VCV_HOST_PERMISSIONS !== undefined
+  ) {
+    throw new InputError(
+      `${what} takes no --as/--perm and refuses to run under VCV_HOST_PRINCIPAL/VCV_HOST_PERMISSIONS (an agent host); the reviewer's identity comes from --key and the trust list`,
+    );
   }
 }
 
 function trustSource(defaultRef: string | null): TrustSource | undefined {
   const pinned = values["trust-commit"];
-  const given = [values.trust !== undefined, values["trust-ref"] !== undefined || pinned !== undefined, values["trust-working-tree"]].filter(Boolean).length;
+  const given = [
+    values.trust !== undefined,
+    values["trust-ref"] !== undefined || pinned !== undefined,
+    values["trust-working-tree"],
+  ].filter(Boolean).length;
   if (given > 1) throw new InputError("pass one of --trust <file>, --trust-ref <ref> or --trust-working-tree");
   if (values.trust !== undefined) return { kind: "file", path: values.trust };
   if (pinned !== undefined) return { kind: "git-ref", ref: values["trust-ref"] ?? pinned, pinnedCommit: pinned };
@@ -922,26 +1142,45 @@ function reviewCommand(): number {
   refuseAssertedIdentity(`vcv review ${a}`);
   const path = need(b, "<path>");
   const trust = trustSource(null);
-  if (!trust) throw new InputError("a trust anchor is required: --trust-commit <full commit ID of the protected base, from the hosting service> [--trust-ref origin/main], or --trust <reviewer-owned file outside the checkout> (--trust-working-tree is an unsafe development mode)");
+  if (!trust)
+    throw new InputError(
+      "a trust anchor is required: --trust-commit <full commit ID of the protected base, from the hosting service> [--trust-ref origin/main], or --trust <reviewer-owned file outside the checkout> (--trust-working-tree is an unsafe development mode)",
+    );
   const unsafe = trust.kind === "working-tree";
-  if (unsafe) console.log("! UNSAFE development mode: the trust list comes from the checkout under review; this is not a trusted approval and a strict integrity check rejects it");
-  const input = { changeId: need(rest[0], "<changeId>"), expectedDigest: need(values.digest, "--digest"), keyFile: need(values.key, "--key"), trust, allowUnprotectedTrust: unsafe };
+  if (unsafe)
+    console.log(
+      "! UNSAFE development mode: the trust list comes from the checkout under review; this is not a trusted approval and a strict integrity check rejects it",
+    );
+  const input = {
+    changeId: need(rest[0], "<changeId>"),
+    expectedDigest: need(values.digest, "--digest"),
+    keyFile: need(values.key, "--key"),
+    trust,
+    allowUnprotectedTrust: unsafe,
+  };
   const r = a === "approve" ? reviewApprove(path, input) : reviewFinalize(path, input);
   console.log(`reviewer: ${r.reviewer.id} (key ${r.reviewer.keyFingerprint}, trusted per ${r.reviewer.trustSource})`);
   console.log(`  trust anchor: ${r.reviewer.trustAnchor}`);
   console.log(`  ! authorization ${r.authorization}`);
   const code = printOutcome(r.outcome);
-  if (r.attestation) console.log(`  attestation: ${r.attestation.file}${r.attestation.alreadyPresent ? " (already present; unchanged)" : " (commit it with the change record and the new revision)"}`);
+  if (r.attestation)
+    console.log(
+      `  attestation: ${r.attestation.file}${r.attestation.alreadyPresent ? " (already present; unchanged)" : " (commit it with the change record and the new revision)"}`,
+    );
   return code;
 }
 
 function printIntegrity(r: IntegrityReport) {
   console.log(`integrity: ${r.ok ? "ok" : "FAILED"}${r.projectId ? ` (${r.projectId} at ${r.revision})` : ""}`);
   if (r.base) console.log(`  base:  ${r.base.ref} ${r.base.commit.slice(0, 12)} at ${r.base.revision ?? "(no .vcv/)"}`);
-  console.log(`  trust: ${r.trust ? `${r.trust.source}, ${r.trust.reviewers} reviewer(s); ${r.trust.anchor}` : "none"}`);
+  console.log(
+    `  trust: ${r.trust ? `${r.trust.source}, ${r.trust.reviewers} reviewer(s); ${r.trust.anchor}` : "none"}`,
+  );
   console.log(`  authorization: ${r.authorization}`);
   for (const c of r.revisions) {
-    console.log(`  ${c.seq}. ${c.revision}${c.introduced ? " (new)" : ""}: ${c.derivation}${c.changeId ? ` by ${c.changeId}` : ""}; approval ${c.approval.state}${c.approval.detail ? ` (${c.approval.detail})` : ""}`);
+    console.log(
+      `  ${c.seq}. ${c.revision}${c.introduced ? " (new)" : ""}: ${c.derivation}${c.changeId ? ` by ${c.changeId}` : ""}; approval ${c.approval.state}${c.approval.detail ? ` (${c.approval.detail})` : ""}`,
+    );
   }
   for (const p of r.problems) console.log(`  ${p.severity === "error" ? "✗" : "!"} ${p.code}: ${p.message}`);
   console.log("  not provable here:");
@@ -949,7 +1188,11 @@ function printIntegrity(r: IntegrityReport) {
 }
 
 function integrityCommand(): number {
-  const r = checkIntegrity(need(a, "<path>"), { trust: trustSource(null), ...(values.base !== undefined ? { base: values.base } : {}), requireAttestation: values["require-attestation"] });
+  const r = checkIntegrity(need(a, "<path>"), {
+    trust: trustSource(null),
+    ...(values.base !== undefined ? { base: values.base } : {}),
+    requireAttestation: values["require-attestation"],
+  });
   if (values.json) console.log(JSON.stringify(r, null, 2));
   else printIntegrity(r);
   return r.ok ? 0 : 1;
@@ -957,7 +1200,13 @@ function integrityCommand(): number {
 
 function evidenceCommand(): number {
   const api = createEvidenceApi(need(a, "<path>"));
-  const list = (v: string | undefined) => (v === undefined ? undefined : v.split(",").map((x) => x.trim()).filter(Boolean));
+  const list = (v: string | undefined) =>
+    v === undefined
+      ? undefined
+      : v
+          .split(",")
+          .map((x) => x.trim())
+          .filter(Boolean);
   let request: Record<string, unknown>;
   if (values.request !== undefined) {
     try {
@@ -969,18 +1218,32 @@ function evidenceCommand(): number {
     const opt = <T extends object>(o: T) => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined));
     const common = { expectedRevision: values["expected-revision"], limit: num(values.limit), cursor: values.cursor };
     request =
-      b === "overview" ? opt({ ...common, states: list(values.states) })
-      : b === "object" ? opt({ ...common, id: rest[0], relations: list(values.relations), selectorKinds: list(values["selector-kinds"]), states: list(values.states) })
-      : b === "binding" ? opt({ expectedRevision: values["expected-revision"], bindingId: rest[0] })
-      : b === "refresh" ? opt({ ...common, bindingIds: rest.length ? rest : undefined, since: values.since })
-      : {};
+      b === "overview"
+        ? opt({ ...common, states: list(values.states) })
+        : b === "object"
+          ? opt({
+              ...common,
+              id: rest[0],
+              relations: list(values.relations),
+              selectorKinds: list(values["selector-kinds"]),
+              states: list(values.states),
+            })
+          : b === "binding"
+            ? opt({ expectedRevision: values["expected-revision"], bindingId: rest[0] })
+            : b === "refresh"
+              ? opt({ ...common, bindingIds: rest.length ? rest : undefined, since: values.since })
+              : {};
   }
   const result =
-    b === "overview" ? api.getEvidenceOverview(request as never)
-    : b === "object" ? api.getObjectEvidence(request as never)
-    : b === "binding" ? api.getBindingEvidence(request as never)
-    : b === "refresh" ? api.refreshEvidence(request as never)
-    : undefined;
+    b === "overview"
+      ? api.getEvidenceOverview(request as never)
+      : b === "object"
+        ? api.getObjectEvidence(request as never)
+        : b === "binding"
+          ? api.getBindingEvidence(request as never)
+          : b === "refresh"
+            ? api.refreshEvidence(request as never)
+            : undefined;
   if (!result) {
     console.log(USAGE);
     return 1;
@@ -996,7 +1259,13 @@ try {
   // Store problems (e.g. CONFLICTED or DIVERGED after a Git merge) and unreadable inputs are
   // reported, not thrown at the user.
   if (err instanceof InputError) console.error(`✗ INPUT: ${err.message}`);
-  else if (err instanceof StoreError || err instanceof BindingError || err instanceof ApprovalError || err instanceof GitRefusedError) console.error(`✗ ${err.code}: ${err.message}`);
+  else if (
+    err instanceof StoreError ||
+    err instanceof BindingError ||
+    err instanceof ApprovalError ||
+    err instanceof GitRefusedError
+  )
+    console.error(`✗ ${err.code}: ${err.message}`);
   else throw err;
   process.exitCode = 2;
 }

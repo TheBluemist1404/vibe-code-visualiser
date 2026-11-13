@@ -47,7 +47,17 @@ test("getProjectOverview summarizes modules, their boundaries and the inventory"
   assert.deepEqual(enr!.exposes, ["ctr-enrollment-events", "ctr-enrollment-review"]);
   assert.deepEqual(notif!.consumes, ["ctr-enrollment-events"]);
   assert.deepEqual(notif!.dependsOn, ["mod-enrollment"]);
-  assert.deepEqual(enr!.owned, { attribute: 2, behavior: 1, capability: 1, contract: 2, data: 1, event: 3, rule: 2, state: 3, transition: 2 });
+  assert.deepEqual(enr!.owned, {
+    attribute: 2,
+    behavior: 1,
+    capability: 1,
+    contract: 2,
+    data: 1,
+    event: 3,
+    rule: 2,
+    state: 3,
+    transition: 2,
+  });
   assert.equal(o.inventory.module, 2);
   assert.deepEqual(o.validation, { errors: 0, warnings: 0 });
 });
@@ -58,7 +68,10 @@ test("searching for enrollment and notifications discovers both modules", () => 
   assert.equal(r.total, 2);
 
   const all = data(api().searchObjects({ text: "enrollment notifications", limit: 5 }));
-  assert.ok(ids(all.hits).includes("mod-enrollment") && ids(all.hits).includes("mod-notifications"), "modules rank in the top 5 unfiltered");
+  assert.ok(
+    ids(all.hits).includes("mod-enrollment") && ids(all.hits).includes("mod-notifications"),
+    "modules rank in the top 5 unfiltered",
+  );
   const hit = all.hits.find((h) => h.id === "mod-notifications")!;
   assert.deepEqual(hit.matchedFields, ["id", "name"]);
   assert.equal(hit.moduleId, "mod-notifications");
@@ -69,7 +82,11 @@ test("search finds word variants and nested elements, with deterministic order",
   const r = data(q.searchObjects({ text: "rejection", kinds: ["event", "state"] }));
   assert.deepEqual(ids(r.hits), ["evt-rejection-submitted", "evt-enrollment-rejected", "st-rejected"]);
   assert.equal(r.hits.find((h) => h.id === "st-rejected")!.parentId, "beh-enrollment-approval");
-  assert.deepEqual(data(q.searchObjects({ text: "rejection", kinds: ["event", "state"] })), r, "same input, same output");
+  assert.deepEqual(
+    data(q.searchObjects({ text: "rejection", kinds: ["event", "state"] })),
+    r,
+    "same input, same output",
+  );
   assert.equal(data(q.searchObjects({ text: "zzz-nothing" })).total, 0);
 });
 
@@ -86,7 +103,12 @@ test("search pages are bounded and the cursor is bound to the revision", () => {
 
   // After a model change the old cursor is refused instead of silently skipping results.
   new ModelEngine(store).propose(
-    { changeId: "ch-rename", projectId: "prj-lms", expectedRevision: "rev-1", operations: [{ type: "renameObject", objectId: "mod-enrollment", name: "Enrolment" }] },
+    {
+      changeId: "ch-rename",
+      projectId: "prj-lms",
+      expectedRevision: "rev-1",
+      operations: [{ type: "renameObject", objectId: "mod-enrollment", name: "Enrolment" }],
+    },
     { principalId: "user:hoang", permissions: ["model:propose", "model:apply"] },
   );
   const stale = q.searchObjects({ text: "enrollment", limit: 3, cursor: first.nextCursor });
@@ -100,10 +122,20 @@ test("inspecting the rejection event reveals the publishing contract and who con
   const c = data(api().getContext({ id: "evt-enrollment-rejected", depth: 2 }));
   assert.equal(c.focus.kind, "event");
   assert.equal(c.focus.moduleId, "mod-enrollment");
-  const edge = (from: string, relation: string, to: string) => c.edges.some((e) => e.from === from && e.relation === relation && e.to === to);
-  assert.ok(edge("ctr-enrollment-events", "contractPublishes", "evt-enrollment-rejected"), "contract publishes the event");
-  assert.ok(edge("mod-notifications", "consumes", "ctr-enrollment-events"), "Notifications consumes that contract (2 hops)");
-  assert.ok(edge("tr-send-notice", "triggerEvent", "evt-enrollment-rejected"), "Notifications behavior is triggered by it");
+  const edge = (from: string, relation: string, to: string) =>
+    c.edges.some((e) => e.from === from && e.relation === relation && e.to === to);
+  assert.ok(
+    edge("ctr-enrollment-events", "contractPublishes", "evt-enrollment-rejected"),
+    "contract publishes the event",
+  );
+  assert.ok(
+    edge("mod-notifications", "consumes", "ctr-enrollment-events"),
+    "Notifications consumes that contract (2 hops)",
+  );
+  assert.ok(
+    edge("tr-send-notice", "triggerEvent", "evt-enrollment-rejected"),
+    "Notifications behavior is triggered by it",
+  );
   assert.ok(edge("tr-reject", "effectEvent", "evt-enrollment-rejected"), "Enrollment behavior emits it");
   assert.equal(c.edges.find((e) => e.relation === "contractPublishes")!.category, "contract");
   assert.equal(c.nodes.find((n) => n.id === "mod-notifications")!.distance, 2);
@@ -117,14 +149,19 @@ test("getContext honours direction, relation filters, depth and node budgets", (
   assert.ok(outOnly.edges.every((e) => e.from === "tr-send-notice"));
   assert.deepEqual(ids(outOnly.nodes).sort(), ["evt-enrollment-rejected", "st-notice-sent", "st-notice-waiting"]);
 
-  const filtered = data(q.getContext({ id: "evt-enrollment-rejected", relations: ["contractPublishes", "consumes"], depth: 2 }));
+  const filtered = data(
+    q.getContext({ id: "evt-enrollment-rejected", relations: ["contractPublishes", "consumes"], depth: 2 }),
+  );
   assert.deepEqual(ids(filtered.nodes), ["ctr-enrollment-events", "mod-notifications"]);
 
   const small = data(q.getContext({ id: "mod-enrollment", maxNodes: 4 }));
   assert.equal(small.nodes.length, 4);
   assert.equal(small.truncated, true);
   const full = data(q.getContext({ id: "mod-enrollment", maxNodes: 200 }));
-  assert.equal(full.nodes.every((n) => n.distance === 1), true);
+  assert.equal(
+    full.nodes.every((n) => n.distance === 1),
+    true,
+  );
   assert.equal(full.budget.depth, 1);
   assert.equal(data(q.getContext({ id: "evt-enrollment-rejected", depth: 1 })).truncated, true, "depth limit reported");
 });
@@ -184,7 +221,10 @@ test("unknown IDs and invalid queries return structured errors", () => {
     ["limit too large", q.searchObjects({ text: "enrollment", limit: 1000 })],
     ["no seeds", q.analyzeImpact({ ids: [] })],
     ["too many kinds", q.searchObjects({ text: "x", kinds: Array(LIMITS.search.maxKinds + 1).fill("module") })],
-    ["too many relations", q.getContext({ id: "mod-enrollment", relations: Array(LIMITS.context.maxRelations + 1).fill("consumes") })],
+    [
+      "too many relations",
+      q.getContext({ id: "mod-enrollment", relations: Array(LIMITS.context.maxRelations + 1).fill("consumes") }),
+    ],
     ["not an object", q.searchObjects(null as never)],
   ];
   for (const [label, r] of cases) {
@@ -211,8 +251,13 @@ test("draft snapshots surface unresolved references with diagnostics, never as r
   const r = q.getContext({ id: "mod-notifications", direction: "outgoing" });
   assert.ok(r.ok);
   assert.equal(r.context.snapshotStatus, "draft");
-  assert.ok(r.data.edges.some((e) => e.relation === "dependsOn" && typeof e.to !== "string" && e.to.unresolved === "Identity"));
-  assert.deepEqual(r.diagnostics.map((d) => d.code), ["UNRESOLVED_REF"]);
+  assert.ok(
+    r.data.edges.some((e) => e.relation === "dependsOn" && typeof e.to !== "string" && e.to.unresolved === "Identity"),
+  );
+  assert.deepEqual(
+    r.diagnostics.map((d) => d.code),
+    ["UNRESOLVED_REF"],
+  );
   assert.deepEqual(data(q.getProjectOverview()).validation, { errors: 0, warnings: 1 });
 });
 
@@ -277,7 +322,8 @@ test("a search cursor only continues the search that issued it", () => {
 
 test("the complete edge set between returned nodes is included", () => {
   const c = data(api().getContext({ id: "evt-enrollment-rejected", depth: 2 }));
-  const has = (from: string, relation: string, to: string) => c.edges.some((e) => e.from === from && e.relation === relation && e.to === to);
+  const has = (from: string, relation: string, to: string) =>
+    c.edges.some((e) => e.from === from && e.relation === relation && e.to === to);
   assert.ok(ids(c.nodes).includes("beh-rejection-notice") && ids(c.nodes).includes("mod-notifications"));
   assert.ok(has("beh-rejection-notice", "owner", "mod-notifications"), "edge between two non-focus nodes is returned");
   const inSet = new Set([c.focus.id, ...ids(c.nodes)]);
@@ -288,25 +334,47 @@ test("the complete edge set between returned nodes is included", () => {
   assert.equal(c.edgesTotal, c.edges.length);
 
   // Relation filters still apply to the complete set.
-  const f = data(api().getContext({ id: "evt-enrollment-rejected", depth: 2, relations: ["contractPublishes", "consumes"] }));
+  const f = data(
+    api().getContext({ id: "evt-enrollment-rejected", depth: 2, relations: ["contractPublishes", "consumes"] }),
+  );
   assert.ok(f.edges.every((e) => e.relation === "contractPublishes" || e.relation === "consumes"));
 });
 
 /** A model far larger than the fixture: many modules, a huge behavior and a wide data object. */
 function largeModel(): Model {
-  const m = structuredClone(model()) as Model & Record<string, any>;
+  const m = structuredClone(model());
   for (let i = 0; i < 300; i++) {
     const id = `mod-bulk-${String(i).padStart(3, "0")}`;
-    m.modules.push({ id, owner: "prj-lms", kind: "module", name: `Bulk ${i}`, purpose: "Generated", dependsOn: ["mod-enrollment"] } as any);
+    m.modules.push({
+      id,
+      owner: "prj-lms",
+      kind: "module",
+      name: `Bulk ${i}`,
+      purpose: "Generated",
+      dependsOn: ["mod-enrollment"],
+    });
   }
-  (m.data as any[]).push({
-    id: "data-wide", owner: "mod-enrollment", kind: "data", name: "Wide",
+  m.data.push({
+    id: "data-wide",
+    owner: "mod-enrollment",
+    kind: "data",
+    name: "Wide",
     attributes: Array.from({ length: 1000 }, (_, i) => ({ id: `attr-wide-${i}`, name: `Field ${i}`, type: "string" })),
   });
   const states = Array.from({ length: 1200 }, (_, i) => ({ id: `st-big-${i}`, name: `S${i}` }));
-  (m.behaviors as any[]).push({
-    id: "beh-big", owner: "mod-enrollment", kind: "behavior", name: "Big", initialStateId: "st-big-0", states,
-    transitions: states.slice(1).map((s, i) => ({ id: `tr-big-${i}`, fromStateId: `st-big-${i}`, toStateId: s.id, trigger: { kind: "event", eventId: "evt-approval-submitted" } })),
+  m.behaviors.push({
+    id: "beh-big",
+    owner: "mod-enrollment",
+    kind: "behavior",
+    name: "Big",
+    initialStateId: "st-big-0",
+    states,
+    transitions: states.slice(1).map((s, i) => ({
+      id: `tr-big-${i}`,
+      fromStateId: `st-big-${i}`,
+      toStateId: s.id,
+      trigger: { kind: "event", eventId: "evt-approval-submitted" },
+    })),
   });
   return m;
 }
@@ -337,8 +405,14 @@ test("responses stay bounded on a large model", () => {
   const beh = data(q.getContext({ id: "beh-big" }));
   const rec = beh.focus.record as { states: unknown[]; transitions: unknown[] };
   assert.equal(rec.states.length, 25);
-  assert.deepEqual(beh.focus.truncatedFields?.find((t) => t.field === "states"), { field: "states", returned: 25, total: 1200 });
-  assert.deepEqual(beh.focus.truncatedFields?.find((t) => t.field === "transitions"), { field: "transitions", returned: 25, total: 1199 });
+  assert.deepEqual(
+    beh.focus.truncatedFields?.find((t) => t.field === "states"),
+    { field: "states", returned: 25, total: 1200 },
+  );
+  assert.deepEqual(
+    beh.focus.truncatedFields?.find((t) => t.field === "transitions"),
+    { field: "transitions", returned: 25, total: 1199 },
+  );
   assert.equal(beh.truncated, true);
   assert.ok(beh.nodes.length <= 25 && beh.edges.length <= 100);
   assert.ok(size(beh) < 64_000, `context is ${size(beh)} bytes`);

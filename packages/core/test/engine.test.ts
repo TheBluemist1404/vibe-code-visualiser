@@ -11,16 +11,23 @@ import { assertRev } from "./helpers.ts";
 
 const FIXTURES = join(import.meta.dirname, "../../../examples/enrollment");
 const baseModel = (): Model => loadModel(readFileSync(join(FIXTURES, "model.rev-1.yaml"), "utf8")).model!;
-const timeoutChange = (): ProposedModelChange => parseYaml(readFileSync(join(FIXTURES, "change.timeout.yaml"), "utf8")) as ProposedModelChange;
+const timeoutChange = (): ProposedModelChange =>
+  parseYaml(readFileSync(join(FIXTURES, "change.timeout.yaml"), "utf8")) as ProposedModelChange;
 
 // Host-supplied identities. In the real product these come from the session, not the payload.
-const owner: HostContext = { principalId: "user:hoang", permissions: ["model:propose", "model:apply", "model:approve"] };
+const owner: HostContext = {
+  principalId: "user:hoang",
+  permissions: ["model:propose", "model:apply", "model:approve"],
+};
 const reviewer: HostContext = { principalId: "user:reviewer", permissions: ["model:propose", "model:approve"] };
 const mcpAgent: HostContext = { principalId: "agent:mcp-session-1", permissions: ["model:propose"] };
 const viewer: HostContext = { principalId: "user:viewer", permissions: [] };
 
 const engine = (m = baseModel()) => new ModelEngine(new MemoryStore(m));
-const change = (ops: ProposedModelChange["operations"], over: Partial<ProposedModelChange> = {}): ProposedModelChange => ({
+const change = (
+  ops: ProposedModelChange["operations"],
+  over: Partial<ProposedModelChange> = {},
+): ProposedModelChange => ({
   changeId: `ch-${Math.random().toString(36).slice(2, 8)}`,
   projectId: "prj-lms",
   expectedRevision: "rev-1",
@@ -36,14 +43,21 @@ test("the spec's seven-day timeout change applies at rev-1 and produces rev-2", 
   const now = e.current();
   assertRev(now.project.modelRevision, 2);
   const tr = now.behaviors[0]!.transitions.find((t) => t.id === "tr-timeout")!;
-  assert.deepEqual(tr.trigger, { kind: "elapsed", duration: "P7D", anchor: { dataId: "data-enrollment-request", attributeId: "attr-request-created-at" } });
+  assert.deepEqual(tr.trigger, {
+    kind: "elapsed",
+    duration: "P7D",
+    anchor: { dataId: "data-enrollment-request", attributeId: "attr-request-created-at" },
+  });
   assert.equal(checkModel(now).ok, true);
 });
 
 test("AC13: a second change on the stale base revision is rejected, and a replay is rejected", () => {
   const e = engine();
   e.propose(timeoutChange(), owner);
-  const stale = e.propose(change([{ type: "renameState", behaviorId: "beh-enrollment-approval", stateId: "st-pending", name: "Waiting" }]), owner);
+  const stale = e.propose(
+    change([{ type: "renameState", behaviorId: "beh-enrollment-approval", stateId: "st-pending", name: "Waiting" }]),
+    owner,
+  );
   assert.equal(stale.status, "rejected");
   assert.equal(stale.diagnostics[0]!.code, "STALE_REVISION");
 
@@ -63,7 +77,12 @@ test("AC11: a change set applies atomically or not at all", () => {
       {
         type: "addTransition",
         behaviorId: "beh-enrollment-approval",
-        transition: { id: "tr-withdraw", fromStateId: "st-pending", toStateId: "st-gone", trigger: { kind: "event", eventId: "evt-rejection-submitted" } },
+        transition: {
+          id: "tr-withdraw",
+          fromStateId: "st-pending",
+          toStateId: "st-gone",
+          trigger: { kind: "event", eventId: "evt-rejection-submitted" },
+        },
       },
     ]),
     owner,
@@ -72,7 +91,10 @@ test("AC11: a change set applies atomically or not at all", () => {
   assert.ok(r.diagnostics.some((d) => d.code === "UNKNOWN_REF"));
   const now = e.current();
   assert.equal(now.project.modelRevision, "rev-1");
-  assert.ok(!now.behaviors[0]!.states.some((s) => s.id === "st-withdrawn"), "the valid first op was not applied either");
+  assert.ok(
+    !now.behaviors[0]!.states.some((s) => s.id === "st-withdrawn"),
+    "the valid first op was not applied either",
+  );
 });
 
 test("AC12: an MCP agent can only propose; its change waits for a host-verified approver", () => {
@@ -111,7 +133,10 @@ test("AC12: callers cannot claim approval or identity inside the change payload"
 test("AC13: approval revalidates against the current revision", () => {
   const e = engine();
   e.propose(timeoutChange(), mcpAgent); // pending at rev-1
-  e.propose(change([{ type: "renameState", behaviorId: "beh-enrollment-approval", stateId: "st-pending", name: "Waiting" }]), owner); // now rev-2
+  e.propose(
+    change([{ type: "renameState", behaviorId: "beh-enrollment-approval", stateId: "st-pending", name: "Waiting" }]),
+    owner,
+  ); // now rev-2
   const r = e.approve("ch-timeout-01", reviewer);
   assert.equal(r.status, "rejected");
   assert.equal(r.diagnostics[0]!.code, "STALE_REVISION");
@@ -120,7 +145,12 @@ test("AC13: approval revalidates against the current revision", () => {
 
 test("AC5/AC14: renaming a state keeps every reference by ID", () => {
   const e = engine();
-  const r = e.propose(change([{ type: "renameState", behaviorId: "beh-enrollment-approval", stateId: "st-pending", name: "Awaiting lecturer" }]), owner);
+  const r = e.propose(
+    change([
+      { type: "renameState", behaviorId: "beh-enrollment-approval", stateId: "st-pending", name: "Awaiting lecturer" },
+    ]),
+    owner,
+  );
   assert.equal(r.status, "applied");
   const b = e.current().behaviors[0]!;
   assert.equal(b.states.find((s) => s.id === "st-pending")!.name, "Awaiting lecturer");
@@ -150,7 +180,12 @@ test("AC14: removing a referenced object is rejected unless the same change unli
   assert.equal(ok.status, "applied", JSON.stringify(ok.diagnostics));
   assert.ok(!e.current().behaviors[0]!.states.some((s) => s.id === "st-rejected"));
 
-  const module = e.propose(change([{ type: "removeObject", objectId: "mod-notifications" }], { expectedRevision: e.current().project.modelRevision }), owner);
+  const module = e.propose(
+    change([{ type: "removeObject", objectId: "mod-notifications" }], {
+      expectedRevision: e.current().project.modelRevision,
+    }),
+    owner,
+  );
   assert.equal(module.status, "rejected");
   assert.equal(module.diagnostics[0]!.code, "HAS_OWNED_OBJECTS", "no cascading deletion of owned objects");
 });
@@ -170,7 +205,10 @@ test("AC10: a draft with unresolved references cannot be approved until they are
     { type: "setModuleDependencies" as const, moduleId: "mod-notifications", dependsOn: ["mod-enrollment"] },
     { type: "approveDraft" as const },
   ];
-  const fromAgent = e.propose(change(fixAndApprove, { changeId: "ch-approve-draft" }), { ...mcpAgent, permissions: ["model:propose", "model:apply"] });
+  const fromAgent = e.propose(change(fixAndApprove, { changeId: "ch-approve-draft" }), {
+    ...mcpAgent,
+    permissions: ["model:propose", "model:apply"],
+  });
   assert.equal(fromAgent.status, "pending", "approving a draft needs approve rights, not just apply");
 
   // ...but only a principal with approve rights turns it into an approved snapshot.
@@ -195,7 +233,11 @@ test("AC15: bindings record model revision and commit; moving either marks them 
   assert.equal(assessBinding(b, { modelRevision: "rev-2", commits: { "lms-backend": "ffff000" } }), "stale");
   assert.equal(assessBinding(b, { modelRevision: "rev-3", commits: { "lms-backend": "a1b2c3d" } }), "stale");
   assert.equal(
-    assessBinding(b, { modelRevision: "rev-3", commits: { "lms-backend": "a1b2c3d" }, changedObjectIds: new Set(["st-pending"]) }),
+    assessBinding(b, {
+      modelRevision: "rev-3",
+      commits: { "lms-backend": "a1b2c3d" },
+      changedObjectIds: new Set(["st-pending"]),
+    }),
     "confirmed",
     "an unrelated model change does not invalidate the binding",
   );
@@ -217,7 +259,10 @@ test("FileStore persists revisions and change records and reloads them", () => {
   assertRev(reopened.current().project.modelRevision, 2);
   assert.ok(reopened.current().behaviors[0]!.transitions.some((t) => t.id === "tr-timeout"));
   assert.equal(reopened.record("ch-timeout-01")!.status, "applied");
-  assert.deepEqual(readdirSync(join(dir, "revisions")).sort(), ["rev-1.yaml", `${reopened.current().project.modelRevision}.yaml`].sort());
+  assert.deepEqual(
+    readdirSync(join(dir, "revisions")).sort(),
+    ["rev-1.yaml", `${reopened.current().project.modelRevision}.yaml`].sort(),
+  );
 });
 
 test("rule and description edits: createRule, setRuleStatement and setDescription are typed, validated and pending for an agent", () => {
@@ -227,7 +272,17 @@ test("rule and description edits: createRule, setRuleStatement and setDescriptio
     { type: "setRuleStatement", ruleId: rule.id, statement: "A new statement." },
     { type: "setDescription", objectId: rule.id, description: "Changed because the code changed." },
     { type: "setDescription", objectId: "prj-lms", description: "Project text." },
-    { type: "createRule", rule: { id: "rule-new", kind: "rule", owner: rule.owner, name: "New rule", ruleKind: "policy", statement: "Something holds." } },
+    {
+      type: "createRule",
+      rule: {
+        id: "rule-new",
+        kind: "rule",
+        owner: rule.owner,
+        name: "New rule",
+        ruleKind: "policy",
+        statement: "Something holds.",
+      },
+    },
   ];
   const pending = e.propose(change(ops), mcpAgent);
   assert.equal(pending.status, "pending", JSON.stringify(pending.diagnostics));
@@ -243,11 +298,24 @@ test("rule and description edits: createRule, setRuleStatement and setDescriptio
   assert.ok(now.rules.some((x) => x.id === "rule-new"));
 
   const next = now.project.modelRevision;
-  const bad = (op: ProposedModelChange["operations"][number]) => e.propose(change([op], { expectedRevision: next }), owner);
-  assert.equal(bad({ type: "setRuleStatement", ruleId: "rule-none", statement: "x" }).diagnostics[0]!.code, "TARGET_MISSING");
-  assert.equal(bad({ type: "setDescription", objectId: now.behaviors[0]!.states[0]!.id, description: "x" }).diagnostics[0]!.code, "NOT_DESCRIBABLE");
-  assert.equal(bad({ type: "createRule", rule: { ...(now.rules[0] as object), id: "rule-new" } as never }).diagnostics[0]!.code, "ID_IN_USE");
-  assert.equal(bad({ type: "setRuleStatement", ruleId: rule.id, statement: "" } as never).diagnostics[0]!.code, "SCHEMA");
+  const bad = (op: ProposedModelChange["operations"][number]) =>
+    e.propose(change([op], { expectedRevision: next }), owner);
+  assert.equal(
+    bad({ type: "setRuleStatement", ruleId: "rule-none", statement: "x" }).diagnostics[0]!.code,
+    "TARGET_MISSING",
+  );
+  assert.equal(
+    bad({ type: "setDescription", objectId: now.behaviors[0]!.states[0]!.id, description: "x" }).diagnostics[0]!.code,
+    "NOT_DESCRIBABLE",
+  );
+  assert.equal(
+    bad({ type: "createRule", rule: { ...(now.rules[0] as object), id: "rule-new" } as never }).diagnostics[0]!.code,
+    "ID_IN_USE",
+  );
+  assert.equal(
+    bad({ type: "setRuleStatement", ruleId: rule.id, statement: "" } as never).diagnostics[0]!.code,
+    "SCHEMA",
+  );
 });
 
 test("createCapability (M3.1) is typed and validated like the other create operations; checkChange and proposalDigest match the engine", async () => {
@@ -255,7 +323,13 @@ test("createCapability (M3.1) is typed and validated like the other create opera
   const e = engine();
   const m = e.current();
   const mod = m.modules[0]!.id;
-  const cap = { id: "cap-new", kind: "capability" as const, owner: mod, name: "New capability", initiatorActorId: m.actors[0]!.id };
+  const cap = {
+    id: "cap-new",
+    kind: "capability" as const,
+    owner: mod,
+    name: "New capability",
+    initiatorActorId: m.actors[0]!.id,
+  };
   const c = change([{ type: "createCapability", capability: cap }]);
   // The pure check is what propose decides on.
   const check = checkChange(c, m);
@@ -265,9 +339,14 @@ test("createCapability (M3.1) is typed and validated like the other create opera
   assert.notEqual(proposalDigest(c), proposalDigest({ ...c, rationale: "changed" }));
   const pending = e.propose(c, mcpAgent);
   assert.equal(pending.status, "pending");
-  assert.equal(e.current().capabilities.some((x) => x.id === "cap-new"), false, "pending changes nothing");
+  assert.equal(
+    e.current().capabilities.some((x) => x.id === "cap-new"),
+    false,
+    "pending changes nothing",
+  );
 
-  const bad = (capability: object) => e.propose(change([{ type: "createCapability", capability } as never]), owner).diagnostics[0]!.code;
+  const bad = (capability: object) =>
+    e.propose(change([{ type: "createCapability", capability } as never]), owner).diagnostics[0]!.code;
   assert.equal(bad({ ...cap, id: m.capabilities[0]!.id }), "ID_IN_USE");
   assert.equal(bad({ ...cap, id: "cap-x", owner: "mod-nope" }), "UNKNOWN_REF");
   assert.equal(bad({ ...cap, id: "cap-y", extra: 1 }), "SCHEMA");
