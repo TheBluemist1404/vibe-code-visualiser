@@ -1,4 +1,4 @@
-// Test runs as evidence (Issue #22, M4.3): a runner's per-case report, bound to what was tested.
+// Test runs as evidence: a runner's per-case report, bound to what was tested.
 //
 // VCV runs no tests. The host (CI, or a person at a shell) runs the project's ordinary runner with
 // a machine-readable reporter and hands VCV the report. `captureTestRun` reads it strictly
@@ -11,7 +11,7 @@
 //               can write one and recompute its digest. So a consumer treats a run as host-observed
 //               only when it captured it itself, in this process (`isTrustedCapture`: the record
 //               object returned by captureTestRun, unmodified). Every imported record, whatever it
-//               declares, is a claim. The pre-merge gate (M4.4) captures in its own trusted job;
+//               declares, is a claim. The pre-merge gate (gate.ts) captures in its own trusted job;
 //   invocation  the runner, its version if known, and the command, as the caller states them.
 //
 // A result is evidence for a criterion only while the candidate still has that identity: a run

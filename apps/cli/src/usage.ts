@@ -60,12 +60,12 @@ export const USAGE = `vcv <command> [options]
                                         ambiguous title). Map one with: binding add <path> --object <criterionId>
                                         --relation tests --locator '<file>#test:Suite > case'. With --run, each mapped
                                         case's result in runs of this exact candidate: passed / failed / stale /
-                                        missing / unknown per criterion (M4.3). --junit captures here, in this process:
+                                        missing / unknown per criterion. --junit captures here, in this process:
                                         the only way a run is host-observed. --run records are claims, whatever they
                                         declare. Exit 0 whenever a report is produced.
   gate <path> --base <full commit ID of the protected base> [--junit <report.xml> --runner <name> --invocation "<cmd>" [--root <dir>] --before <identityDigest>]
        [--run <test-run.json>]... [--observations <file>] [--policy <host file> | --policy-at-base <repo path>] [--coverage <f>] [--json]
-                                        The pre-merge policy gate (M4.4): integrity pinned to the base with attestation
+                                        The pre-merge policy gate: integrity pinned to the base with attestation
                                         required, structural and binding findings, every criterion's mapped test cases
                                         in runs of this exact candidate (--junit with --before, the identity the host
                                         read before the tests ran: captured here = host-observed; without --before

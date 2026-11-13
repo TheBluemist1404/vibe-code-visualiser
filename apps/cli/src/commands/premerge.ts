@@ -158,7 +158,7 @@ export function criteriaCommand(): number {
 }
 
 /**
- * The pre-merge gate (M4.4). Exit 0: pass or warn. 1: block. 2: usage or setup problem (never a pass).
+ * The pre-merge gate. Exit 0: pass or warn. 1: block. 2: usage or setup problem (never a pass).
  * --junit reports are captured here, in this process; --run records are claims.
  */
 export function gateCommand(): number {

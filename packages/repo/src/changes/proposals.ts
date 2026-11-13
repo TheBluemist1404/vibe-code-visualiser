@@ -1,4 +1,4 @@
-// Agent-accessible model proposals and the pre-approval review surface (Issue #17, M3.1).
+// Agent-accessible model proposals and the pre-approval review surface. Design notes: docs/proposals.md.
 //
 // One shared layer behind the CLI (`vcv proposal ...`) and MCP (`vcv_*_proposal*`). It adds no
 // model writer: submitting goes through ModelEngine.propose, and previews call the same
@@ -14,7 +14,7 @@
 //   - a lifecycle that keeps four things apart: the change record's state (rejected, pending,
 //     stale, applied), the model snapshot's own draft/approved status, binding resolution, and
 //     implementation (never inferred: approval does not mean the code was written; an implementing
-//     agent's report, M3.3, is a separate claim read with `vcv implementation show`).
+//     agent's implementation report is a separate claim read with `vcv implementation show`).
 //
 // Previews and listings never write anything, not even store recovery (FileStoreReader).
 import { z } from "zod";
@@ -107,7 +107,7 @@ export type HintedDiagnostic = Diagnostic & { hint?: string };
 export type ProposalLifecycle = "rejected" | "pending" | "stale" | "applied" | "invalid";
 
 /**
- * What the change record says about how it was applied, never who really decided (M3.2 adds the
+ * What the change record says about how it was applied, never who really decided (trusted review adds the
  * trusted reviewer step). "approved-by-separate-reviewer": applied with an approverId other than
  * the proposer; "applied-by-host": applied without a separate approver (direct apply by a host
  * holding model:apply, or a self-approval the policy allowed); "none": not applied.

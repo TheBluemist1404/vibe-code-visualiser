@@ -1,4 +1,4 @@
-// Repository-native VCV projects (ADR 0007, Issue #6 M2.1).
+// Repository-native VCV projects (ADR 0007).
 //
 // A VCV project lives in `.vcv/` at the root of the developer's own checkout and travels with
 // the code through ordinary Git commits, branches and PRs. This module finds that directory,

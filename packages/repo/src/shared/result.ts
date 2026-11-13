@@ -18,7 +18,7 @@ export type RepoErrorCode =
   | "STORE_ERROR"
   /** The checkout, model store, change records or claims changed while reading (e.g. a Git checkout). Nothing was mixed; retry. */
   | "STATE_CHANGED"
-  // M3.3 handoff and implementation reports:
+  // Handoff and implementation reports:
   /** The change is not applied (pending, rejected): there is nothing approved to implement. */
   | "NOT_APPLIED"
   /** The change's resulting revision is not in this checkout's model history (another branch?). */
@@ -37,19 +37,19 @@ export type RepoErrorCode =
   | "NO_REPORT"
   /** The handoff would exceed its byte limit even with every derived list cut. */
   | "HANDOFF_TOO_LARGE"
-  /** M4.1: the reconciliation report would exceed its byte budget even with every list cut. */
+  /** The reconciliation report would exceed its byte budget even with every list cut. */
   | "REPORT_TOO_LARGE"
-  /** M4.3: a test report that cannot be read as the supported JUnit XML subset. */
+  /** A test report that cannot be read as the supported JUnit XML subset. */
   | "REPORT_INVALID"
-  /** M4.3: a test report whose declared counts do not match its cases (truncated or edited). */
+  /** A test report whose declared counts do not match its cases (truncated or edited). */
   | "REPORT_INCONSISTENT"
-  /** M4.3: the candidate changed between reading its identity and capturing the run. */
+  /** The candidate changed between reading its identity and capturing the run. */
   | "TEST_RUN_RACED"
-  /** M4.3: a test-run record that does not check (shape, digest, summary). */
+  /** A test-run record that does not check (shape, digest, summary). */
   | "RUN_INVALID"
-  /** M4.3: the candidate's source cannot be identified exactly (no Git commit, a failed Git read, too much to hash). */
+  /** The candidate's source cannot be identified exactly (no Git commit, a failed Git read, too much to hash). */
   | "SOURCE_IDENTITY_UNAVAILABLE"
-  /** M4.4: the gate policy does not match vcv-policy-1, or cannot be read. */
+  /** The gate policy does not match vcv-policy-1, or cannot be read. */
   | "POLICY_INVALID";
 
 export type RepoError = { code: RepoErrorCode; message: string; details?: { path: string; message: string }[] };

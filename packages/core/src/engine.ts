@@ -26,7 +26,7 @@ export type Permission =
   | "binding:record"
   /** May mark a binding claim as disputed. */
   | "binding:dispute"
-  /** May record test runs as host-observed (M4.3): the host itself ran the tests and read the report. Without it a run is agent-claimed. */
+  /** May record test runs as host-observed: the host itself ran the tests and read the report. Without it a run is agent-claimed. */
   | "tests:observe";
 
 export type ChangeStatus = "pending" | "applied" | "rejected" | "denied";
@@ -217,7 +217,7 @@ export class ModelEngine {
         record,
       });
     }
-    // M3.2: bind the decision to the content the reviewer saw. A record edited after the preview
+    // Bind the decision to the content the reviewer saw. A record edited after the preview
     // no longer matches; nothing is changed and the proposal stays pending.
     if (opts.expectedDigest !== undefined && opts.expectedDigest !== proposalDigest(record.change)) {
       return this.log("approve", ctx, {
@@ -315,7 +315,7 @@ export type ChangeCheck = { model?: Model; errors: Diagnostic[]; warnings: Diagn
 /**
  * The engine's own validation of a well-formed change against one model state, without writing
  * anything: project, expected revision, the typed operations in order, then whole-model
- * validation. propose() and approve() decide on exactly this; read-only previews (M3.1) call it
+ * validation. propose() and approve() decide on exactly this; read-only previews call it
  * too, so a preview can never disagree with what an approval would check.
  */
 export function checkChange(change: ProposedModelChange, current: Model): ChangeCheck {
@@ -352,7 +352,7 @@ export function checkChange(change: ProposedModelChange, current: Model): Change
 }
 
 /**
- * Content identity of a proposal (M3.1): sha256 over the canonical JSON of the change exactly as
+ * Content identity of a proposal: sha256 over the canonical JSON of the change exactly as
  * submitted (change ID, project, expected revision, operations, rationale). Derived, never stored:
  * whoever previews a proposal sees this digest, and an approval can be bound to it, so a record
  * edited after the preview no longer matches what was reviewed.
@@ -362,7 +362,7 @@ export function proposalDigest(change: ProposedModelChange): string {
 }
 
 /**
- * The pre-M2 sequential scheme (rev-1 → rev-2). No longer used for new commits because two
+ * The original sequential scheme (rev-1 → rev-2). No longer used for new commits because two
  * Git branches would both produce rev-2; kept for callers and tests that relied on it.
  * @deprecated use branchSafeRevisionId
  */

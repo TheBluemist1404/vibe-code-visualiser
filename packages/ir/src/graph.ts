@@ -78,7 +78,7 @@ export type RefRole =
   | "anchorAttribute"
   | "guardRule"
   | "effectEvent"
-  /** A criterion and the objects it is about (M4.2). */
+  /** A criterion and the objects it is about. */
   | "verifies";
 
 export type RefSite = {

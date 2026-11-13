@@ -1,4 +1,4 @@
-// A strict, bounded reader for JUnit XML test reports (Issue #22, M4.3).
+// A strict, bounded reader for JUnit XML test reports. Design notes: docs/test-evidence.md.
 //
 // JUnit XML is what ordinary runners already emit per test case (Vitest `--reporter=junit`,
 // Jest via jest-junit, pytest `--junitxml`, Maven Surefire…), so VCV reads it instead of inventing

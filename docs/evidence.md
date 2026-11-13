@@ -1,5 +1,8 @@
 # Source evidence queries (M2.5)
 
+> **Not test evidence.** This page is about *binding claims*: where the code for a model object
+> is. Results of running tests against a candidate are [test evidence](test-evidence.md).
+
 Read-only queries over [binding claims](bindings.md): which claims exist for a model object,
 what each one says, whether its pointer still resolves, and whether its code or model object
 changed since the claim. The same API serves the CLI (`vcv evidence`) and MCP

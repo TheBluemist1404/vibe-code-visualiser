@@ -1,4 +1,4 @@
-// Binding claims in a repository project (Issue #13, ADR 0007 §5).
+// Binding claims in a repository project (ADR 0007 §5). Design notes: docs/bindings.md.
 //
 // A claim says "this source artifact implements/exposes/persists/tests that model object". It is
 // stored as one Git-tracked file, `.vcv/bindings/<bindingId>.json`, and Git is its only history:
@@ -538,7 +538,7 @@ export function recordBinding(
       `model object ${input.modelObjectId} does not exist at the current revision ${snap.model.project.modelRevision}`,
     );
   }
-  // An acceptance criterion (M4.2) is checked by test cases: its only claims are `tests` claims
+  // An acceptance criterion is checked by test cases: its only claims are `tests` claims
   // that name one individual test (file + full title), never a file, a suite or a symbol.
   if (
     buildIndex(snap.model).byId.get(input.modelObjectId)!.kind === "criterion" &&
