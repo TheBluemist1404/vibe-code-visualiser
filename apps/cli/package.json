@@ -1,1 +1,12 @@
-{ "name": "@vcv/cli", "version": "0.0.0", "private": true, "type": "module" }
+{
+  "name": "@vcv/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@vcv/core": "*",
+    "@vcv/ir": "*",
+    "@vcv/query": "*",
+    "@vcv/repo": "*"
+  }
+}

@@ -9,7 +9,7 @@ import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { listProposalsRequest, previewProposalRequest } from "../../../packages/repo/src/index.ts";
+import { listProposalsRequest, previewProposalRequest } from "@vcv/repo";
 import { ROOT, baseline } from "../../../packages/repo/test/course-desk.ts";
 
 const MAIN = join(ROOT, "apps/mcp/src/main.ts");

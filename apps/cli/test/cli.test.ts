@@ -544,8 +544,8 @@ test("reconcile: a readable report and --json with exit 0, a missing --base or u
 
 test("criteria: unmapped and mapped acceptance criteria, --json, a non-test mapping is refused", async () => {
   const { baseline, git, SPEC } = await import("../../../packages/repo/test/course-desk.ts");
-  const { FileStore, ModelEngine } = await import("../../../packages/core/src/index.ts");
-  const { projectStatus } = await import("../../../packages/repo/src/index.ts");
+  const { FileStore, ModelEngine } = await import("@vcv/core");
+  const { projectStatus } = await import("@vcv/repo");
   const repo = baseline();
   const out = new ModelEngine(new FileStore(join(repo, ".vcv"))).propose(
     {
@@ -626,8 +626,8 @@ test("criteria: unmapped and mapped acceptance criteria, --json, a non-test mapp
 
 test("tests capture + criteria --run: per-criterion results from a real Vitest report", async () => {
   const { baseline, git, SPEC } = await import("../../../packages/repo/test/course-desk.ts");
-  const { FileStore, ModelEngine } = await import("../../../packages/core/src/index.ts");
-  const { projectStatus } = await import("../../../packages/repo/src/index.ts");
+  const { FileStore, ModelEngine } = await import("@vcv/core");
+  const { projectStatus } = await import("@vcv/repo");
   const fixtures = join(import.meta.dirname, "../../../packages/repo/test/fixtures/junit");
   const repo = baseline();
   const out = new ModelEngine(new FileStore(join(repo, ".vcv"))).propose(
