@@ -15,7 +15,7 @@ import {
   evidenceOverviewRequest,
   objectEvidenceRequest,
   refreshEvidenceRequest,
-} from "../../../packages/repo/src/index.ts";
+} from "@vcv/repo";
 import { ROOT, SERVICE, baseline, edit } from "../../../packages/repo/test/course-desk.ts";
 
 const MAIN = join(ROOT, "apps/mcp/src/main.ts");

@@ -15,24 +15,18 @@ import { z } from "zod";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
-import {
-  LIMITS,
-  contextRequest,
-  impactRequest,
-  overviewRequest,
-  searchRequest,
-} from "../../../packages/query/src/index.ts";
-import type { QueryApi, QueryResult } from "../../../packages/query/src/index.ts";
+import { LIMITS, contextRequest, impactRequest, overviewRequest, searchRequest } from "@vcv/query";
+import type { QueryApi, QueryResult } from "@vcv/query";
 import {
   EVIDENCE_LIMITS,
   bindingEvidenceRequest,
   evidenceOverviewRequest,
   objectEvidenceRequest,
   refreshEvidenceRequest,
-} from "../../../packages/repo/src/evidence.ts";
-import type { EvidenceApi, EvidenceResult } from "../../../packages/repo/src/evidence.ts";
-import { PROPOSAL_LIMITS, listProposalsRequest, previewProposalRequest } from "../../../packages/repo/src/proposals.ts";
-import type { ProposalReadApi, ProposalResult } from "../../../packages/repo/src/proposals.ts";
+} from "@vcv/repo";
+import type { EvidenceApi, EvidenceResult } from "@vcv/repo";
+import { PROPOSAL_LIMITS, listProposalsRequest, previewProposalRequest } from "@vcv/repo";
+import type { ProposalReadApi, ProposalResult } from "@vcv/repo";
 
 export const SERVER_NAME = "vcv";
 export const SERVER_VERSION = "0.1.0";

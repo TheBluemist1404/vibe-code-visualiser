@@ -11,17 +11,11 @@ import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { loadModel, parseYaml } from "../../../packages/ir/src/index.ts";
-import type { Model } from "../../../packages/ir/src/index.ts";
-import { FileStore, ModelEngine } from "../../../packages/core/src/index.ts";
-import { contextRequest, impactRequest, overviewRequest, searchRequest } from "../../../packages/query/src/index.ts";
-import type {
-  ImpactAnalysis,
-  ObjectContext,
-  ProjectOverview,
-  QueryResult,
-  SearchResults,
-} from "../../../packages/query/src/index.ts";
+import { loadModel, parseYaml } from "@vcv/ir";
+import type { Model } from "@vcv/ir";
+import { FileStore, ModelEngine } from "@vcv/core";
+import { contextRequest, impactRequest, overviewRequest, searchRequest } from "@vcv/query";
+import type { ImpactAnalysis, ObjectContext, ProjectOverview, QueryResult, SearchResults } from "@vcv/query";
 
 const ROOT = join(import.meta.dirname, "../../..");
 const MAIN = join(ROOT, "apps/mcp/src/main.ts");

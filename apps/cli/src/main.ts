@@ -15,10 +15,10 @@ import {
 } from "node:fs";
 import { resolve as resolvePath, sep as pathSep } from "node:path";
 import { parseArgs } from "node:util";
-import { loadModel, parseYaml, ownershipTree } from "../../../packages/ir/src/index.ts";
-import type { Diagnostic, TreeNode } from "../../../packages/ir/src/index.ts";
-import { FileStore, ModelEngine, StoreError } from "../../../packages/core/src/index.ts";
-import { createQueryApi } from "../../../packages/query/src/index.ts";
+import { loadModel, parseYaml, ownershipTree } from "@vcv/ir";
+import type { Diagnostic, TreeNode } from "@vcv/ir";
+import { FileStore, ModelEngine, StoreError } from "@vcv/core";
+import { createQueryApi } from "@vcv/query";
 import {
   ApprovalError,
   GitRefusedError,
@@ -55,7 +55,7 @@ import {
   removeBinding,
   verifyBinding,
   verifyBindings,
-} from "../../../packages/repo/src/index.ts";
+} from "@vcv/repo";
 import type {
   GateReport,
   Reconciliation,
@@ -67,9 +67,9 @@ import type {
   ProposalPreview,
   ProposalResult,
   Verification,
-} from "../../../packages/repo/src/index.ts";
-import type { BindingRelation, ClaimSource } from "../../../packages/core/src/index.ts";
-import type { HostContext, ImplementationRequest, Outcome, Permission } from "../../../packages/core/src/index.ts";
+} from "@vcv/repo";
+import type { BindingRelation, ClaimSource } from "@vcv/core";
+import type { HostContext, ImplementationRequest, Outcome, Permission } from "@vcv/core";
 
 const USAGE = `vcv <command> [options]
 

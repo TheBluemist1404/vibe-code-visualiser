@@ -10,9 +10,9 @@
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { FileStoreReader } from "../../../packages/core/src/index.ts";
-import { createQueryApi } from "../../../packages/query/src/index.ts";
-import { createEvidenceApi, createProposalReadApi, projectStatus } from "../../../packages/repo/src/index.ts";
+import { FileStoreReader } from "@vcv/core";
+import { createQueryApi } from "@vcv/query";
+import { createEvidenceApi, createProposalReadApi, projectStatus } from "@vcv/repo";
 import { SERVER_VERSION, createVcvMcpServer } from "./server.ts";
 
 const USAGE = `usage: vcv-mcp --store <store-dir> | --repo <checkout>
