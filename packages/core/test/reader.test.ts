@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { FileStore, FileStoreReader, ModelEngine, StoreError } from "../src/index.ts";
 import { assertRev, baseModel, owner, renamePending } from "./helpers.ts";
+import { tempDir } from "@vcv/testkit";
 
-const newDir = () => join(mkdtempSync(join(tmpdir(), "vcv-reader-")), "store");
+const newDir = () => join(tempDir("vcv-reader-"), "store");
 
 function fingerprint(dir: string): string {
   const walk = (d: string): string[] =>
@@ -54,7 +54,7 @@ test("FileStoreReader never writes, not even the recovery FileStore would do", (
 });
 
 test("FileStoreReader fails clearly on missing or corrupt stores", () => {
-  const empty = mkdtempSync(join(tmpdir(), "vcv-reader-empty-"));
+  const empty = tempDir("vcv-reader-empty-");
   assert.throws(
     () => new FileStoreReader(empty),
     (e: unknown) => e instanceof StoreError && e.code === "NOT_INITIALIZED",

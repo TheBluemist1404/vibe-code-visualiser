@@ -19,7 +19,7 @@
 // the bytes of every mapped test file are rechecked before answering (STATE_CHANGED). Bounded,
 // deterministic, redacted; nothing is written.
 import { z } from "zod";
-import { buildIndex, refId } from "@vcv/ir";
+import { refId } from "@vcv/ir";
 import type { Criterion, Id } from "@vcv/ir";
 import { canonicalJson, sha256Hex } from "@vcv/core";
 import { verifyBinding, verifyMemo } from "../bindings/bindings.ts";

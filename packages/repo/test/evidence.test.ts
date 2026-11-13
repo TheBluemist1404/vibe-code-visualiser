@@ -4,16 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import {
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  realpathSync,
-  renameSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { readFileSync, readdirSync, realpathSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { loadModel } from "@vcv/ir";
@@ -22,6 +13,7 @@ import { createQueryApi } from "@vcv/query";
 import { VCV_DIR, createEvidenceApi, initProject, listBindings, recordBinding } from "../src/index.ts";
 import type { EvidenceResult } from "../src/index.ts";
 import { DRAFT, ROOT, SERVICE, SPEC, agent, baseline, edit, git, read } from "./course-desk.ts";
+import { tempDir } from "@vcv/testkit";
 
 /** sha256 of every file under .vcv/ and server/, plus `git status`: the observable state. */
 function fingerprintTree(repo: string): Record<string, string> {
@@ -204,7 +196,7 @@ test("a branch checkout cannot fabricate freshness: mid-read changes are refused
   git(repo, "checkout", "-q", "main");
 
   // A model from another line of history: the claim's revision is unknown here, never "resolved".
-  const branch = join(realpathSync(mkdtempSync(join(tmpdir(), "vcv-evidence-"))), "fresh");
+  const branch = join(realpathSync(tempDir("vcv-evidence-")), "fresh");
   execFileSync("bash", [join(ROOT, "examples/reference-app/materialize.sh"), branch], { encoding: "utf8" });
   const model = loadModel(read(DRAFT)).model!;
   model.project.modelRevision = "rev-x";
@@ -343,7 +335,7 @@ test("invalid requests, missing or unready projects, unsafe directories and unre
   err(api.getBindingEvidence({ bindingId: "impl.rul-seat-limit" }), "UNSAFE_PATH");
 
   // No project, and a conflicted model store.
-  const none = realpathSync(mkdtempSync(join(tmpdir(), "vcv-evidence-")));
+  const none = realpathSync(tempDir("vcv-evidence-"));
   const missing = err(createEvidenceApi(none).getEvidenceOverview(), "PROJECT_NOT_READY");
   assert.match(missing.error.message, /absent/);
   assert.ok(!JSON.stringify(missing).includes(none), "no absolute path in the error");

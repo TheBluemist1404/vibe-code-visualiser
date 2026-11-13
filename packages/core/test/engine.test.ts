@@ -1,13 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { loadModel, parseYaml, checkModel } from "@vcv/ir";
 import type { Model } from "@vcv/ir";
 import { FileStore, LayoutStore, MemoryStore, ModelEngine } from "../src/index.ts";
 import type { HostContext, ProposedModelChange } from "../src/index.ts";
 import { assertRev } from "./helpers.ts";
+import { tempDir } from "@vcv/testkit";
 
 const FIXTURES = join(import.meta.dirname, "../../../examples/enrollment");
 const baseModel = (): Model => loadModel(readFileSync(join(FIXTURES, "model.rev-1.yaml"), "utf8")).model!;
@@ -227,7 +227,7 @@ test("AC16: canvas layout edits never create a model revision", () => {
 });
 
 test("FileStore persists revisions and change records and reloads them", () => {
-  const dir = mkdtempSync(join(tmpdir(), "vcv-"));
+  const dir = tempDir("vcv-");
   const e = new ModelEngine(FileStore.init(dir, baseModel()));
   e.propose(timeoutChange(), owner);
   const reopened = new ModelEngine(new FileStore(dir));

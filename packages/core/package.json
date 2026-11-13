@@ -9,5 +9,8 @@
   "dependencies": {
     "@vcv/ir": "*",
     "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@vcv/testkit": "*"
   }
 }

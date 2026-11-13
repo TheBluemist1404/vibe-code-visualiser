@@ -1,8 +1,7 @@
 // The pre-merge reconciliation report and policy gate (Issue #22, M4.4).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { appendFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { FileStore, ModelEngine } from "../../core/src/index.ts";
 import type { HostContext } from "../../core/src/index.ts";
@@ -17,6 +16,7 @@ import {
 import type { GateReport, GateRequest } from "../src/index.ts";
 import { SERVICE, SPEC, edit, git } from "./course-desk.ts";
 import { FULL, setup } from "./criteria-fixture.ts";
+import { once, tempDir } from "@vcv/testkit";
 
 const FIX = join(import.meta.dirname, "fixtures/junit");
 const PASS = readFileSync(join(FIX, "vitest-pass.xml"));
@@ -312,13 +312,10 @@ test("the gate refuses a base that is not a full commit ID, and a candidate that
   assert.equal(!short.ok && short.error.code, "INVALID_REQUEST");
   const ref = preMergeGate(repo, { base: "main" }, host);
   assert.equal(!ref.ok && ref.error.code, "INVALID_REQUEST");
-  let once = true;
   const moved = preMergeGate(repo, { base, junit: junit(PASS, repo) }, host, {
-    afterRead: () =>
-      once
-        ? ((once = false),
-          edit(repo, SERVICE, "Enrollment rules; every decision", "Enrollment rules (moved); every decision"))
-        : undefined,
+    afterRead: once(() =>
+      edit(repo, SERVICE, "Enrollment rules; every decision", "Enrollment rules (moved); every decision"),
+    ),
   });
   assert.equal(!moved.ok && moved.error.code, "STATE_CHANGED");
 });
@@ -382,7 +379,7 @@ test("a pending proposal the candidate carries is shown, and is not part of the 
 
 test("Git reads in the candidate run none of its configured commands (fsmonitor, hooks, filter drivers)", () => {
   const { repo, base } = codeFirst();
-  const marks = mkdtempSync(join(tmpdir(), "vcv-gate-marks-"));
+  const marks = tempDir("vcv-gate-marks-");
   const touch = (name: string) => `sh -c 'touch ${join(marks, name)}; cat'`;
   git(repo, "config", "core.fsmonitor", `sh -c 'touch ${join(marks, "fsmonitor")}'`);
   git(repo, "config", "filter.evil.clean", touch("filter"));
@@ -402,7 +399,7 @@ test("Git reads in the candidate run none of its configured commands (fsmonitor,
 test("a driver configuration VCV cannot enumerate exactly refuses Git instead of running it unprotected", () => {
   for (const pad of ["many keys", "oversized output"] as const) {
     const { repo, base } = codeFirst();
-    const marks = mkdtempSync(join(tmpdir(), "vcv-gate-marks-"));
+    const marks = tempDir("vcv-gate-marks-");
     git(repo, "config", "filter.evil.clean", `sh -c 'touch ${join(marks, "filter")}; cat'`);
     git(repo, "config", "filter.evil.smudge", `sh -c 'touch ${join(marks, "smudge")}; cat'`);
     writeFileSync(join(repo, ".git/info/attributes"), "* filter=evil diff=evil\n");

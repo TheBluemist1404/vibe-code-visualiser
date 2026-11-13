@@ -1,8 +1,7 @@
 // Pre-merge candidate/base reconciliation baseline (Issue #22, M4.1).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { appendFileSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { FileStore, ModelEngine } from "../../core/src/index.ts";
 import type { HostContext } from "../../core/src/index.ts";
@@ -18,6 +17,7 @@ import {
 } from "../src/index.ts";
 import type { Reconciliation } from "../src/index.ts";
 import { SERVICE, baseline, edit, git } from "./course-desk.ts";
+import { once, tempDir } from "@vcv/testkit";
 
 const dev: HostContext = { principalId: "user:dev", permissions: ["model:propose", "model:apply"] };
 
@@ -258,8 +258,7 @@ test("a base without .vcv/ gives lineage new-model", () => {
 
 test("coherency: a dirty same-path edit, a branch flip or a moved base ref mid-read is STATE_CHANGED", () => {
   const { repo, base } = setup();
-  let once = true;
-  const flip = (fn: () => void) => ({ afterRead: () => (once ? ((once = false), fn()) : undefined) });
+  const flip = (fn: () => void) => ({ afterRead: once(fn) });
 
   const r1 = reconcile(
     repo,
@@ -273,7 +272,6 @@ test("coherency: a dirty same-path edit, a branch flip or a moved base ref mid-r
   edit(repo, SERVICE, "Enrollment rules. Every decision", "Enrollment rules? Every decision");
   git(repo, "commit", "-qam", "other");
   git(repo, "checkout", "-q", "feature");
-  once = true;
   const r2 = reconcile(
     repo,
     { base },
@@ -283,7 +281,6 @@ test("coherency: a dirty same-path edit, a branch flip or a moved base ref mid-r
 
   git(repo, "checkout", "-q", "feature");
   git(repo, "branch", "-q", "trunk", base);
-  once = true;
   const r3 = reconcile(
     repo,
     { base: "trunk" },
@@ -292,7 +289,6 @@ test("coherency: a dirty same-path edit, a branch flip or a moved base ref mid-r
   assert.equal(!r3.ok && r3.error.code, "STATE_CHANGED");
 
   // An edit to a claim file mid-read, too.
-  once = true;
   const r4 = reconcile(
     repo,
     { base },
@@ -327,7 +323,7 @@ test("bad requests and unknown bases are refused clearly", () => {
 
 // ---- review round 1 of PR #23 ---------------------------------------------------------------
 
-const keys = mkdtempSync(join(tmpdir(), "vcv-keys-")); // outside every checkout
+const keys = tempDir("vcv-keys-"); // outside every checkout
 
 /** A genuinely attested introduced revision on the feature branch, with the trust list on main. */
 function attested() {
@@ -381,14 +377,11 @@ test("P1: approval evidence read by integrity is rechecked, also when the attest
       (strict() as { data: { model: { integrity: { ok: boolean } } } }).data.model.integrity.ok,
     true,
   );
-  let once = true;
   const raced = strict({
-    afterRead: () => {
-      if (!once) return;
-      once = false;
+    afterRead: once(() => {
       const a = JSON.parse(readFileSync(attestation, "utf8"));
       writeFileSync(attestation, `${JSON.stringify({ ...a, approverId: "user:mallory" }, null, 2)}\n`);
-    },
+    }),
   });
   assert.equal(
     !raced.ok && raced.error.code,
@@ -403,22 +396,20 @@ test("P1: approval evidence read by integrity is rechecked, also when the attest
 test("P1: a trust file or trust ref that moves mid-read is STATE_CHANGED", () => {
   const { repo, base, trust } = attested();
   // External trust file (outside the checkout).
-  const file = join(mkdtempSync(join(tmpdir(), "vcv-trust-")), "reviewers.json");
+  const file = join(tempDir("vcv-trust-"), "reviewers.json");
   writeFileSync(file, `${git(repo, "show", `${base}:.vcv/reviewers.json`)}\n`);
-  let once = true;
   const r1 = reconcile(
     repo,
     { base, trust: { kind: "file", path: file } },
-    { afterRead: () => (once ? ((once = false), appendFileSync(file, " ")) : undefined) },
+    { afterRead: once(() => appendFileSync(file, " ")) },
   );
   assert.equal(!r1.ok && r1.error.code, "STATE_CHANGED");
   // An unpinned trust ref that is moved.
   git(repo, "branch", "-q", "trusted", trust.pinnedCommit);
-  once = true;
   const r2 = reconcile(
     repo,
     { base, trust: { kind: "git-ref", ref: "trusted" } },
-    { afterRead: () => (once ? ((once = false), git(repo, "branch", "-qf", "trusted", "HEAD")) : undefined) },
+    { afterRead: once(() => git(repo, "branch", "-qf", "trusted", "HEAD")) },
   );
   assert.equal(!r2.ok && r2.error.code, "STATE_CHANGED");
 });
@@ -429,7 +420,7 @@ test("P2: an unreadable claim store is reported as such, never as removed or una
     edit(repo, SERVICE, "Enrollment rules. Every decision", "Enrollment rules (x). Every decision");
     rmSync(join(repo, ".vcv/bindings"), { recursive: true });
     if (kind === "file") writeFileSync(join(repo, ".vcv/bindings"), "not a directory\n");
-    else symlinkSync(mkdtempSync(join(tmpdir(), "vcv-elsewhere-")), join(repo, ".vcv/bindings"));
+    else symlinkSync(tempDir("vcv-elsewhere-"), join(repo, ".vcv/bindings"));
     const d = ok(repo, base);
     assert.equal(d.bindings.available, false, kind);
     assert.match(d.bindings.problem!, kind === "file" ? /not a directory/ : /symlink/);

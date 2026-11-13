@@ -4,10 +4,10 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { projectStatus, resolveProjectRoot } from "../src/index.ts";
+import { tempDir } from "@vcv/testkit";
 
 const APP = join(import.meta.dirname, "../../../examples/reference-app");
 const materialize = (dest: string) =>
@@ -35,7 +35,7 @@ function gitGrep(cwd: string, ...words: string[]): string[] {
 const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
 
 test("the reference app materializes as its own Git repository with a clean baseline and no project", () => {
-  const dest = join(realpathSync(mkdtempSync(join(tmpdir(), "vcv-refapp-"))), "course-desk");
+  const dest = join(realpathSync(tempDir("vcv-refapp-")), "course-desk");
   const commit = materialize(dest);
 
   assert.match(commit, /^[0-9a-f]{40}$/);
@@ -81,13 +81,13 @@ test("the reference app materializes as its own Git repository with a clean base
 });
 
 test("the baseline commit is reproducible from the template", () => {
-  const a = materialize(join(mkdtempSync(join(tmpdir(), "vcv-refapp-")), "a"));
-  const b = materialize(join(mkdtempSync(join(tmpdir(), "vcv-refapp-")), "b"));
+  const a = materialize(join(tempDir("vcv-refapp-"), "a"));
+  const b = materialize(join(tempDir("vcv-refapp-"), "b"));
   assert.equal(a, b);
 });
 
 test("materialize refuses a non-empty destination", () => {
-  const dest = mkdtempSync(join(tmpdir(), "vcv-refapp-"));
+  const dest = tempDir("vcv-refapp-");
   materialize(join(dest, "x"));
   assert.throws(() => execFileSync("bash", [join(APP, "materialize.sh"), join(dest, "x")], { stdio: "pipe" }));
   assert.equal(readFileSync(join(dest, "x", "README.md"), "utf8").split("\n")[0], "# Course Desk");

@@ -1,12 +1,12 @@
 // Identifier validation for everything the store turns into a file name.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import { checkModel, isPersistedId } from "@vcv/ir";
 import { FileStore, MemoryStore, ModelEngine, StoreError, nextRevision } from "../src/index.ts";
 import { baseModel, owner, renamePending, reviewer } from "./helpers.ts";
+import { tempDir } from "@vcv/testkit";
 
 const BAD = [
   "../HEAD",
@@ -37,7 +37,7 @@ test("the persisted-ID grammar accepts safe names and rejects path-like or reser
 });
 
 test("a change with an unsafe changeId or expectedRevision is rejected with a structured error and writes nothing", () => {
-  const root = mkdtempSync(join(tmpdir(), "vcv-ids-"));
+  const root = tempDir("vcv-ids-");
   const dir = join(root, "store");
   FileStore.init(dir, baseModel());
   const e = new ModelEngine(new FileStore(dir));
@@ -77,7 +77,7 @@ test("a model whose modelRevision is not a safe identifier fails validation and 
     r.diagnostics.map((d) => [d.code, d.path]),
     [["SCHEMA", "project.modelRevision"]],
   );
-  const dir = join(mkdtempSync(join(tmpdir(), "vcv-ids-")), "store");
+  const dir = join(tempDir("vcv-ids-"), "store");
   assert.throws(
     () => FileStore.init(dir, m),
     (err: unknown) => err instanceof StoreError && err.code === "INVALID_ID",
@@ -89,7 +89,7 @@ test("a model whose modelRevision is not a safe identifier fails validation and 
 });
 
 test("the store itself refuses unsafe IDs even if a caller skips the engine", () => {
-  const dir = join(mkdtempSync(join(tmpdir(), "vcv-ids-")), "store");
+  const dir = join(tempDir("vcv-ids-"), "store");
   const store = FileStore.init(dir, baseModel());
   assert.throws(
     () => store.getChange("../HEAD"),
@@ -98,7 +98,7 @@ test("the store itself refuses unsafe IDs even if a caller skips the engine", ()
 });
 
 test("IDs that differ only by case cannot both be persisted (case-insensitive filesystems)", () => {
-  const dir = join(mkdtempSync(join(tmpdir(), "vcv-ids-")), "store");
+  const dir = join(tempDir("vcv-ids-"), "store");
   FileStore.init(dir, baseModel());
   const e = new ModelEngine(new FileStore(dir));
   assert.equal(e.propose(renamePending("ch-test"), owner).status, "applied");

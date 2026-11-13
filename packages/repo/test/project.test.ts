@@ -1,8 +1,7 @@
 // Repository-native project loading against real Git checkouts (Issue #6, M2.1).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { dumpModel, loadModel, parseYaml } from "@vcv/ir";
@@ -19,6 +18,7 @@ import {
   parsePorcelainZ,
   projectStatus,
 } from "../src/index.ts";
+import { git, tempDir } from "@vcv/testkit";
 
 const FIXTURES = join(import.meta.dirname, "../../../examples/enrollment");
 const baseModel = (): Model => loadModel(readFileSync(join(FIXTURES, "model.rev-1.yaml"), "utf8")).model!;
@@ -35,22 +35,6 @@ const rename = (changeId: string, expectedRevision: string, name: string): Propo
   operations: [{ type: "renameState", behaviorId: "beh-enrollment-approval", stateId: "st-pending", name }],
 });
 
-const GIT_ENV = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "VCV Test",
-  GIT_AUTHOR_EMAIL: "vcv-test@example.invalid",
-  GIT_COMMITTER_NAME: "VCV Test",
-  GIT_COMMITTER_EMAIL: "vcv-test@example.invalid",
-  GIT_CONFIG_NOSYSTEM: "1",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-};
-function git(cwd: string, ...args: string[]): string {
-  return execFileSync("git", ["-C", cwd, ...args], {
-    encoding: "utf8",
-    env: GIT_ENV,
-    stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
-}
 function tryGit(cwd: string, ...args: string[]): boolean {
   try {
     git(cwd, ...args);
@@ -62,7 +46,7 @@ function tryGit(cwd: string, ...args: string[]): boolean {
 
 /** A Git repo with some source and a committed .vcv/ project at rev-1. */
 function repoWithProject(): string {
-  const dir = mkdtempSync(join(tmpdir(), "vcv-repo-"));
+  const dir = tempDir("vcv-repo-");
   git(dir, "init", "-q", "-b", "main");
   mkdirSync(join(dir, "src"));
   writeFileSync(join(dir, "src", "enrollment.ts"), "export const reject = () => 'rejected';\n");
@@ -89,7 +73,7 @@ function snapshot(dir: string): string {
 }
 
 test("a checkout without .vcv/ is reported as absent, and nothing is created", () => {
-  const dir = mkdtempSync(join(tmpdir(), "vcv-repo-"));
+  const dir = tempDir("vcv-repo-");
   git(dir, "init", "-q", "-b", "main");
   const s = projectStatus(dir);
   assert.equal(s.state, "absent");
@@ -138,7 +122,7 @@ test("the same repo cloned into two paths resolves the same model; .vcv/ holds n
   assert.equal(e.propose(timeoutChange(), owner).status, "applied");
   commitAll(origin, "model: timeout");
 
-  const parent = mkdtempSync(join(tmpdir(), "vcv-clones-"));
+  const parent = tempDir("vcv-clones-");
   const one = join(parent, "one");
   const two = join(parent, "deeper", "path", "two");
   git(parent, "clone", "-q", origin, one);
@@ -530,7 +514,7 @@ test("model history survives restart and an ordinary checkout round trip", () =>
 });
 
 test("a plain directory (no Git) still loads, with a warning that commit context is missing", () => {
-  const dir = mkdtempSync(join(tmpdir(), "vcv-plain-"));
+  const dir = tempDir("vcv-plain-");
   initProject(dir, baseModel());
   const s = projectStatus(dir);
   assert.equal(s.state, "ready");

@@ -3,8 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, realpathSync, renameSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -17,6 +16,7 @@ import {
   refreshEvidenceRequest,
 } from "@vcv/repo";
 import { ROOT, SERVICE, baseline, edit } from "../../../packages/repo/test/course-desk.ts";
+import { tempDir } from "@vcv/testkit";
 
 const MAIN = join(ROOT, "apps/mcp/src/main.ts");
 const CLI = join(ROOT, "apps/cli/src/main.ts");
@@ -183,7 +183,7 @@ test("parity for conflicted and unsafe claim storage and a project that stops be
     await s.close();
   }
   // No project at all: the CLI says so, and the MCP server refuses to start with the same cause.
-  const none = realpathSync(mkdtempSync(join(tmpdir(), "vcv-noproj-")));
+  const none = realpathSync(tempDir("vcv-noproj-"));
   assert.equal(cli(none, "overview", {}).result.error?.code, "PROJECT_NOT_READY");
   const r = spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", MAIN, "--repo", none], {
     encoding: "utf8",

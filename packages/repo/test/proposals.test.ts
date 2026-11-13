@@ -3,17 +3,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  readdirSync,
-  renameSync,
-  statSync,
-  symlinkSync,
-  writeFileSync,
-} from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, readdirSync, renameSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { FileStore, ModelEngine } from "../../core/src/index.ts";
 import type { HostContext, ProposedModelChange } from "../../core/src/index.ts";
@@ -21,6 +11,7 @@ import { STORE_FILE_LIMITS } from "../../core/src/index.ts";
 import { PROPOSAL_LIMITS, listProposals, previewProposal, projectStatus, submitProposal } from "../src/index.ts";
 import type { ProposalList, ProposalPreview, RepoResult, SubmitResult } from "../src/index.ts";
 import { baseline, git } from "./course-desk.ts";
+import { tempDir } from "@vcv/testkit";
 
 const agent: HostContext = { principalId: "agent:coder", permissions: ["model:propose"] };
 /** A host that holds everything: the proposal-only surface must still not apply. */
@@ -473,7 +464,7 @@ test('crossModule is not-determined, not "no", when the impact list was cut befo
 
 /** A file outside the checkout that a malicious entry could point at. */
 function outsideRecord(id: string): string {
-  const dir = mkdtempSync(join(tmpdir(), "vcv-outside-"));
+  const dir = tempDir("vcv-outside-");
   const p = join(dir, "record.json");
   writeFileSync(
     p,
@@ -533,7 +524,7 @@ test("unsafe change-record entries are never followed or read: a symlink out of 
 
   // The whole changes/ directory replaced by a symlink to a directory outside the checkout.
   repo = baseline();
-  const outside = mkdtempSync(join(tmpdir(), "vcv-outside-dir-"));
+  const outside = tempDir("vcv-outside-dir-");
   writeFileSync(join(outside, "chg-evil.json"), readFileSync(outsideRecord("chg-evil")));
   renameSync(join(repo, ".vcv/changes"), join(repo, "changes-moved"));
   symlinkSync(outside, join(repo, ".vcv/changes"));
@@ -542,7 +533,7 @@ test("unsafe change-record entries are never followed or read: a symlink out of 
   // A symlinked revision file is refused the same way.
   repo = baseline();
   const rev = join(repo, ".vcv/revisions/rev-1.yaml");
-  const copy = join(mkdtempSync(join(tmpdir(), "vcv-outside-rev-")), "rev-1.yaml");
+  const copy = join(tempDir("vcv-outside-rev-"), "rev-1.yaml");
   writeFileSync(copy, readFileSync(rev));
   renameSync(rev, join(repo, "rev-1.moved"));
   symlinkSync(copy, rev);
