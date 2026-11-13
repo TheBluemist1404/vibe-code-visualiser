@@ -26,7 +26,14 @@ export type QueryResult<T> =
   | { ok: false; context?: QueryContext; error: QueryError };
 
 /** How an edge should be read by an agent. */
-export type RelationCategory = "ownership" | "dependency" | "contract" | "behavior" | "data" | "permission" | "traceability";
+export type RelationCategory =
+  | "ownership"
+  | "dependency"
+  | "contract"
+  | "behavior"
+  | "data"
+  | "permission"
+  | "traceability";
 
 export type Relation = RefRole | "contains";
 
@@ -55,11 +62,41 @@ export type Edge = {
 
 // ---- Requests --------------------------------------------------------------------------
 
-const KINDS = ["actor", "module", "capability", "data", "attribute", "rule", "event", "contract", "behavior", "criterion", "state", "transition"] as const;
+const KINDS = [
+  "actor",
+  "module",
+  "capability",
+  "data",
+  "attribute",
+  "rule",
+  "event",
+  "contract",
+  "behavior",
+  "criterion",
+  "state",
+  "transition",
+] as const;
 const RELATIONS = [
-  "owner", "dependsOn", "consumes", "initiator", "attributeRef", "permissionActor", "permissionCapability",
-  "contractAccepts", "contractPublishes", "realizes", "initialState", "fromState", "toState", "triggerEvent",
-  "anchorData", "anchorAttribute", "guardRule", "effectEvent", "contains", "verifies",
+  "owner",
+  "dependsOn",
+  "consumes",
+  "initiator",
+  "attributeRef",
+  "permissionActor",
+  "permissionCapability",
+  "contractAccepts",
+  "contractPublishes",
+  "realizes",
+  "initialState",
+  "fromState",
+  "toState",
+  "triggerEvent",
+  "anchorData",
+  "anchorAttribute",
+  "guardRule",
+  "effectEvent",
+  "contains",
+  "verifies",
 ] as const satisfies readonly Relation[];
 // Every relation the snapshot can emit is also a valid filter (a missing one is a compile error).
 const _everyRelation: readonly (typeof RELATIONS)[number][] = [] as Relation[];
@@ -71,7 +108,17 @@ const id = z.string().min(1).max(256);
 export const LIMITS = {
   overview: { defaultModules: 50, maxModules: 200, listItems: 25 },
   search: { default: 20, max: 100, maxKinds: KINDS.length },
-  context: { maxRelations: RELATIONS.length, defaultDepth: 1, maxDepth: 2, defaultNodes: 25, maxNodes: 200, defaultEdges: 100, maxEdges: 1000, defaultNested: 25, maxNested: 200 },
+  context: {
+    maxRelations: RELATIONS.length,
+    defaultDepth: 1,
+    maxDepth: 2,
+    defaultNodes: 25,
+    maxNodes: 200,
+    defaultEdges: 100,
+    maxEdges: 1000,
+    defaultNested: 25,
+    maxNested: 200,
+  },
   impact: { maxSeeds: 20, defaultDepth: 3, maxDepth: 5, defaultResults: 50, maxResults: 200 },
 } as const;
 
@@ -174,7 +221,13 @@ export type ObjectContext = {
   edgesTotal: number;
   /** True if nodes, edges or the focus record were cut by a budget or the depth limit. */
   truncated: boolean;
-  budget: { depth: number; maxNodes: number; maxEdges: number; maxNestedItems: number; direction: "incoming" | "outgoing" | "both" };
+  budget: {
+    depth: number;
+    maxNodes: number;
+    maxEdges: number;
+    maxNestedItems: number;
+    direction: "incoming" | "outgoing" | "both";
+  };
 };
 
 export type PathStep = { from: Id; relation: Relation; to: Id };

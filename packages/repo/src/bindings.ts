@@ -12,13 +12,33 @@
 // it immediately before the write. The caller also names the claim it expects to replace (by
 // digest, or null for "there is none"), so a claim read on one branch can never overwrite a
 // different same-ID claim after `git checkout`.
-import { closeSync, constants as fsConstants, fstatSync, lstatSync, mkdirSync, openSync, readSync, readdirSync, rmSync } from "node:fs";
+import {
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  readdirSync,
+  rmSync,
+} from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { z } from "zod";
 import { buildIndex, loadModel, persistedIdProblem } from "@vcv/ir";
 import type { Id, Model } from "@vcv/ir";
-import { BINDING_RELATIONS, HTTP_METHODS, SYMBOL_DECLARATIONS, canonicalJson, durableWrite, STORE_FILE_LIMITS, readHeadRevision, readStoreFile, storeFingerprint } from "@vcv/core";
+import {
+  BINDING_RELATIONS,
+  HTTP_METHODS,
+  SYMBOL_DECLARATIONS,
+  canonicalJson,
+  durableWrite,
+  STORE_FILE_LIMITS,
+  readHeadRevision,
+  readStoreFile,
+  storeFingerprint,
+} from "@vcv/core";
 import type { BindingClaim, BindingRelation, BindingState, ClaimSource, Permission, SourceLocator } from "@vcv/core";
 import { fileWorkingState, headCommit } from "./git.ts";
 import { pathProblem, resolveInside, selectorProblem } from "./locator.ts";
@@ -80,8 +100,17 @@ export type ClaimEntry = {
 
 const selectorSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("file") }).strict(),
-  z.object({ kind: z.literal("symbol"), name: z.string(), declaration: z.enum(SYMBOL_DECLARATIONS).optional() }).strict(),
-  z.object({ kind: z.literal("route"), method: z.enum(HTTP_METHODS), route: z.string(), handler: z.string().optional() }).strict(),
+  z
+    .object({ kind: z.literal("symbol"), name: z.string(), declaration: z.enum(SYMBOL_DECLARATIONS).optional() })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("route"),
+      method: z.enum(HTTP_METHODS),
+      route: z.string(),
+      handler: z.string().optional(),
+    })
+    .strict(),
   z.object({ kind: z.literal("test"), name: z.string() }).strict(),
 ]);
 const locatorSchema = z.object({ path: z.string(), selector: selectorSchema }).strict();
@@ -144,7 +173,11 @@ export function serializeClaim(c: BindingClaim): string {
     locator: { path: c.locator.path, selector },
     provenance: { source: p.source, principalId: p.principalId, rationale: p.rationale, confidence: p.confidence },
     modelRevision: c.modelRevision,
-    observed: { commit: o.commit, workingTree: o.workingTree, fingerprint: { algorithm: o.fingerprint.algorithm, file: o.fingerprint.file, selector: o.fingerprint.selector } },
+    observed: {
+      commit: o.commit,
+      workingTree: o.workingTree,
+      fingerprint: { algorithm: o.fingerprint.algorithm, file: o.fingerprint.file, selector: o.fingerprint.selector },
+    },
     disputed: c.disputed ? { by: c.disputed.by, reason: c.disputed.reason } : undefined,
   };
   return JSON.stringify(ordered, null, 2) + "\n"; // undefined members are omitted
@@ -160,10 +193,15 @@ function parseClaimFile(id: string, bytes: Buffer): Pick<ClaimEntry, "claim" | "
     return { claim: null, problem: "not valid JSON" };
   }
   const parsed = claimSchema.safeParse(json);
-  if (!parsed.success) return { claim: null, problem: `not a format-1 claim: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}` };
+  if (!parsed.success)
+    return {
+      claim: null,
+      problem: `not a format-1 claim: ${parsed.error.issues.map((i) => `${i.path.join(".") || "(root)"}: ${i.message}`).join("; ")}`,
+    };
   const problem = claimProblem(parsed.data);
   if (problem) return { claim: null, problem };
-  if (parsed.data.bindingId !== id) return { claim: null, problem: `file is named ${id}.json but holds claim ${parsed.data.bindingId}` };
+  if (parsed.data.bindingId !== id)
+    return { claim: null, problem: `file is named ${id}.json but holds claim ${parsed.data.bindingId}` };
   return { claim: parsed.data as BindingClaim };
 }
 
@@ -184,7 +222,12 @@ type ClaimFile =
   | { kind: "absent" }
   | { kind: "file"; bytes: Buffer; digest: string }
   /** Not read: a symlink, directory, special file, oversized or unreadable entry. `digest` is a stable token for --expect. */
-  | { kind: "unsafe"; what: "symlink" | "directory" | "special" | "oversize" | "unreadable"; problem: string; digest: string };
+  | {
+      kind: "unsafe";
+      what: "symlink" | "directory" | "special" | "oversize" | "unreadable";
+      problem: string;
+      digest: string;
+    };
 
 function lstatOrNull(p: string) {
   try {
@@ -200,11 +243,17 @@ function lstatOrNull(p: string) {
  * claims are never read or written through a symlink. Returns false when bindings/ is absent.
  */
 function checkBindingsDir(root: string): boolean {
-  for (const [p, label] of [[join(root, VCV_DIR), `${VCV_DIR}/`], [bindingsDir(root), `${VCV_DIR}/${BINDINGS_DIR}/`]] as const) {
+  for (const [p, label] of [
+    [join(root, VCV_DIR), `${VCV_DIR}/`],
+    [bindingsDir(root), `${VCV_DIR}/${BINDINGS_DIR}/`],
+  ] as const) {
     const st = lstatOrNull(p);
     if (!st) return false;
     if (st.isSymbolicLink() || !st.isDirectory()) {
-      throw new BindingError("UNSAFE_PATH", `${label} is ${st.isSymbolicLink() ? "a symlink" : "not a directory"}; binding claims are only read from and written to a plain directory inside the checkout`);
+      throw new BindingError(
+        "UNSAFE_PATH",
+        `${label} is ${st.isSymbolicLink() ? "a symlink" : "not a directory"}; binding claims are only read from and written to a plain directory inside the checkout`,
+      );
     }
   }
   return true;
@@ -284,7 +333,14 @@ export function listBindings(path: string): ClaimEntry[] {
     .sort()
     .map((f) => {
       const id = f.slice(0, -".json".length);
-      if (persistedIdProblem(id)) return { bindingId: id, file: claimRel(id), digest: "unsafe:name", claim: null, problem: `file name ${f} is not a valid binding ID` };
+      if (persistedIdProblem(id))
+        return {
+          bindingId: id,
+          file: claimRel(id),
+          digest: "unsafe:name",
+          claim: null,
+          problem: `file name ${f} is not a valid binding ID`,
+        };
       const c = readClaimFile(root, id);
       return c.kind === "absent" ? null : entryFor(id, c);
     })
@@ -293,13 +349,25 @@ export function listBindings(path: string): ClaimEntry[] {
 
 // --- the guarded write ----------------------------------------------------------------
 
-type Snapshot = { root: string; storeDir: string; model: Model; history: string[]; storeToken: string; commit: string | null; claim: ClaimFile; claimDigest: string | null };
+type Snapshot = {
+  root: string;
+  storeDir: string;
+  model: Model;
+  history: string[];
+  storeToken: string;
+  commit: string | null;
+  claim: ClaimFile;
+  claimDigest: string | null;
+};
 
 /** One coherent view of the project for one operation, or a refusal. */
 function takeSnapshot(path: string, bindingId: string): Snapshot {
   const status = projectStatus(path);
   if (status.state !== "ready" || !status.model) {
-    throw new BindingError("PROJECT_NOT_READY", `project is ${status.state}; binding claims are only written to a ready project (${status.diagnostics.map((d) => d.message).join("; ")})`);
+    throw new BindingError(
+      "PROJECT_NOT_READY",
+      `project is ${status.state}; binding claims are only written to a ready project (${status.diagnostics.map((d) => d.message).join("; ")})`,
+    );
   }
   const storeDir = status.storeDir;
   const storeToken = storeFingerprint(storeDir);
@@ -307,10 +375,22 @@ function takeSnapshot(path: string, bindingId: string): Snapshot {
   const history = status.model.history;
   // The store must not have moved between the status checks and the model read.
   if (storeFingerprint(storeDir) !== storeToken || model.project.modelRevision !== status.model.revision) {
-    throw new BindingError("STATE_CHANGED", "the model store changed while it was being read; nothing was written. Retry.");
+    throw new BindingError(
+      "STATE_CHANGED",
+      "the model store changed while it was being read; nothing was written. Retry.",
+    );
   }
   const claim = readClaimFile(status.root, bindingId); // refuses a symlinked .vcv/ or bindings/ before anything is read
-  return { root: status.root, storeDir, model, history, storeToken, commit: status.git?.commit ?? null, claim, claimDigest: claim.kind === "absent" ? null : claim.digest };
+  return {
+    root: status.root,
+    storeDir,
+    model,
+    history,
+    storeToken,
+    commit: status.git?.commit ?? null,
+    claim,
+    claimDigest: claim.kind === "absent" ? null : claim.digest,
+  };
 }
 
 /** The claim on disk must be exactly the one the caller decided on: `null` means "none". */
@@ -322,7 +402,11 @@ function checkExpected(snap: Snapshot, bindingId: string, expected: string | nul
       `binding ${bindingId} already exists on disk (${claimRel(bindingId)}, digest ${snap.claimDigest!.slice(0, 12)}); it may belong to another branch. Read it and reassert it with --expect instead; nothing was written`,
     );
   }
-  if (snap.claimDigest === null) throw new BindingError("NOT_FOUND", `binding ${bindingId} does not exist in this checkout (another branch?); nothing was written`);
+  if (snap.claimDigest === null)
+    throw new BindingError(
+      "NOT_FOUND",
+      `binding ${bindingId} does not exist in this checkout (another branch?); nothing was written`,
+    );
   throw new BindingError(
     "BINDING_CHANGED",
     `binding ${bindingId} on disk (digest ${snap.claimDigest.slice(0, 12)}) is not the claim you read (digest ${expected.slice(0, 12)}); it changed or belongs to another branch. Nothing was written`,
@@ -340,7 +424,13 @@ export type WriteHooks = {
  * This is check-then-rename, like the model store: a checkout landing inside the rename itself
  * is not prevented.
  */
-function commitWrite(snap: Snapshot, bindingId: string, content: string | null, source?: { rel: string; fingerprint: string }, hooks?: WriteHooks): void {
+function commitWrite(
+  snap: Snapshot,
+  bindingId: string,
+  content: string | null,
+  source?: { rel: string; fingerprint: string },
+  hooks?: WriteHooks,
+): void {
   hooks?.beforeWrite?.();
   const now = readClaimFile(snap.root, bindingId);
   const moved =
@@ -353,7 +443,11 @@ function commitWrite(snap: Snapshot, bindingId: string, content: string | null, 
           : source && currentFileFingerprint(snap.root, source.rel) !== source.fingerprint
             ? `source file ${source.rel}`
             : null;
-  if (moved) throw new BindingError("STATE_CHANGED", `${moved} changed during this operation (Git checkout, pull or another writer); nothing was written. Re-read and retry.`);
+  if (moved)
+    throw new BindingError(
+      "STATE_CHANGED",
+      `${moved} changed during this operation (Git checkout, pull or another writer); nothing was written. Re-read and retry.`,
+    );
   // readClaimFile above re-checked that .vcv/ and bindings/ are plain directories. A symlinked
   // claim entry is replaced or removed as a link (never followed); a directory or special file
   // under a claim's name is left for a person.
@@ -374,7 +468,8 @@ function currentFileFingerprint(root: string, rel: string): string | null {
 }
 
 function requirePermission(host: BindingHost, p: Permission, what: string) {
-  if (!host.permissions.includes(p)) throw new BindingError("NOT_AUTHORIZED", `${host.principalId} may not ${what} (needs ${p})`);
+  if (!host.permissions.includes(p))
+    throw new BindingError("NOT_AUTHORIZED", `${host.principalId} may not ${what} (needs ${p})`);
 }
 
 // --- operations -----------------------------------------------------------------------
@@ -397,7 +492,12 @@ export type RecordResult = { entry: ClaimEntry; resolution: Resolution; created:
 
 /** A deterministic default ID: same claim on two branches → same ID and same bytes. */
 export function defaultBindingId(objectId: Id, relation: BindingRelation, locator: SourceLocator): string {
-  const slug = objectId.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^[^a-z0-9]+/, "").slice(0, 80).replace(/[.-]+$/, "");
+  const slug = objectId
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^[^a-z0-9]+/, "")
+    .slice(0, 80)
+    .replace(/[.-]+$/, "");
   const hash = createHash("sha256").update(canonicalJson(locator)).digest("hex").slice(0, 8);
   return `${relation}.${slug || "object"}.${hash}`;
 }
@@ -407,12 +507,27 @@ export function defaultBindingId(objectId: Id, relation: BindingRelation, locato
  * binding claim. Refused, with nothing written, unless the locator resolves to exactly one
  * artifact now (or the caller explicitly allows an unchecked claim). Never touches `.vcv/HEAD`.
  */
-export function recordBinding(path: string, input: RecordInput, host: BindingHost, expected: string | null, hooks?: WriteHooks): RecordResult {
+export function recordBinding(
+  path: string,
+  input: RecordInput,
+  host: BindingHost,
+  expected: string | null,
+  hooks?: WriteHooks,
+): RecordResult {
   requirePermission(host, "binding:record", "record binding claims");
-  if (!(BINDING_RELATIONS as readonly string[]).includes(input.relation)) throw new BindingError("INVALID_CLAIM", `relation "${input.relation}" is not one of ${BINDING_RELATIONS.join(", ")}`);
-  if (input.confidence !== undefined && !(input.confidence >= 0 && input.confidence <= 1)) throw new BindingError("INVALID_CLAIM", "confidence must be between 0 and 1");
+  if (!(BINDING_RELATIONS as readonly string[]).includes(input.relation))
+    throw new BindingError(
+      "INVALID_CLAIM",
+      `relation "${input.relation}" is not one of ${BINDING_RELATIONS.join(", ")}`,
+    );
+  if (input.confidence !== undefined && !(input.confidence >= 0 && input.confidence <= 1))
+    throw new BindingError("INVALID_CLAIM", "confidence must be between 0 and 1");
   const locShape = locatorSchema.safeParse(input.locator);
-  if (!locShape.success) throw new BindingError("INVALID_CLAIM", `malformed locator: ${locShape.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
+  if (!locShape.success)
+    throw new BindingError(
+      "INVALID_CLAIM",
+      `malformed locator: ${locShape.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
+    );
   const pp = pathProblem(input.locator.path);
   if (pp) throw new BindingError("UNSAFE_PATH", `locator path "${input.locator.path}" ${pp}`);
   const sp = selectorProblem(input.locator.selector);
@@ -430,26 +545,48 @@ export function recordBinding(path: string, input: RecordInput, host: BindingHos
 
   // The object and the revision must exist in the validated project state.
   if (!buildIndex(snap.model).byId.has(input.modelObjectId)) {
-    throw new BindingError("UNKNOWN_OBJECT", `model object ${input.modelObjectId} does not exist at the current revision ${snap.model.project.modelRevision}`);
+    throw new BindingError(
+      "UNKNOWN_OBJECT",
+      `model object ${input.modelObjectId} does not exist at the current revision ${snap.model.project.modelRevision}`,
+    );
   }
   // An acceptance criterion (M4.2) is checked by test cases: its only claims are `tests` claims
   // that name one individual test (file + full title), never a file, a suite or a symbol.
-  if (buildIndex(snap.model).byId.get(input.modelObjectId)!.kind === "criterion" && (input.relation !== "tests" || input.locator.selector.kind !== "test")) {
-    throw new BindingError("INVALID_CLAIM", `criterion ${input.modelObjectId} can only be mapped to individual test cases: use --relation tests and a <file>#test:<Suite > case> locator`);
+  if (
+    buildIndex(snap.model).byId.get(input.modelObjectId)!.kind === "criterion" &&
+    (input.relation !== "tests" || input.locator.selector.kind !== "test")
+  ) {
+    throw new BindingError(
+      "INVALID_CLAIM",
+      `criterion ${input.modelObjectId} can only be mapped to individual test cases: use --relation tests and a <file>#test:<Suite > case> locator`,
+    );
   }
   const modelRevision = input.modelRevision ?? snap.model.project.modelRevision;
-  if (!snap.history.includes(modelRevision)) throw new BindingError("UNKNOWN_REVISION", `revision ${modelRevision} is not in this checkout's model history`);
-  const atRevision = modelRevision === snap.model.project.modelRevision ? snap.model : readRevision(snap.storeDir, modelRevision);
+  if (!snap.history.includes(modelRevision))
+    throw new BindingError("UNKNOWN_REVISION", `revision ${modelRevision} is not in this checkout's model history`);
+  const atRevision =
+    modelRevision === snap.model.project.modelRevision ? snap.model : readRevision(snap.storeDir, modelRevision);
   if (!atRevision || !buildIndex(atRevision).byId.has(input.modelObjectId)) {
-    throw new BindingError("UNKNOWN_OBJECT", `model object ${input.modelObjectId} does not exist at revision ${modelRevision}`);
+    throw new BindingError(
+      "UNKNOWN_OBJECT",
+      `model object ${input.modelObjectId} does not exist at revision ${modelRevision}`,
+    );
   }
 
   const resolution = resolveLocator(snap.root, input.locator);
   if (resolution.pathIssue === "unsafe") throw new BindingError("UNSAFE_PATH", resolution.detail);
-  if (resolution.state === "missing") throw new BindingError("LOCATOR_MISSING", `${resolution.detail}; a claim must point at something that exists`);
-  if (resolution.state === "ambiguous") throw new BindingError("LOCATOR_AMBIGUOUS", `${resolution.detail}; add a declaration kind or a handler to the selector`);
+  if (resolution.state === "missing")
+    throw new BindingError("LOCATOR_MISSING", `${resolution.detail}; a claim must point at something that exists`);
+  if (resolution.state === "ambiguous")
+    throw new BindingError(
+      "LOCATOR_AMBIGUOUS",
+      `${resolution.detail}; add a declaration kind or a handler to the selector`,
+    );
   if (resolution.state === "unchecked" && !input.allowUnchecked) {
-    throw new BindingError("LOCATOR_UNCHECKED", `${resolution.detail}. Use a file selector, or record it explicitly as unchecked`);
+    throw new BindingError(
+      "LOCATOR_UNCHECKED",
+      `${resolution.detail}. Use a file selector, or record it explicitly as unchecked`,
+    );
   }
 
   const claim: BindingClaim = {
@@ -477,11 +614,21 @@ export function recordBinding(path: string, input: RecordInput, host: BindingHos
   };
   const content = serializeClaim(claim);
   commitWrite(snap, bindingId, content, { rel: input.locator.path, fingerprint: resolution.fileFingerprint! }, hooks);
-  return { entry: { bindingId, file: claimRel(bindingId), digest: digestOf(Buffer.from(content)), claim }, resolution, created: expected === null };
+  return {
+    entry: { bindingId, file: claimRel(bindingId), digest: digestOf(Buffer.from(content)), claim },
+    resolution,
+    created: expected === null,
+  };
 }
 
 /** Delete a claim. `expected` is the digest of the claim the caller read. */
-export function removeBinding(path: string, bindingId: string, host: BindingHost, expected: string, hooks?: WriteHooks): void {
+export function removeBinding(
+  path: string,
+  bindingId: string,
+  host: BindingHost,
+  expected: string,
+  hooks?: WriteHooks,
+): void {
   requirePermission(host, "binding:record", "remove binding claims");
   const idp = persistedIdProblem(bindingId);
   if (idp) throw new BindingError("INVALID_CLAIM", `bindingId "${bindingId}" ${idp}`);
@@ -494,16 +641,28 @@ export function removeBinding(path: string, bindingId: string, host: BindingHost
  * Record that a principal disputes a claim. The claim stays (Git keeps who said what); its
  * verification shows the dispute verbatim. Reasserting the claim clears it.
  */
-export function disputeBinding(path: string, bindingId: string, reason: string, host: BindingHost, expected: string, hooks?: WriteHooks): ClaimEntry {
+export function disputeBinding(
+  path: string,
+  bindingId: string,
+  reason: string,
+  host: BindingHost,
+  expected: string,
+  hooks?: WriteHooks,
+): ClaimEntry {
   requirePermission(host, "binding:dispute", "dispute binding claims");
   if (!reason.trim()) throw new BindingError("INVALID_CLAIM", "a dispute needs a reason");
   const idp = persistedIdProblem(bindingId);
   if (idp) throw new BindingError("INVALID_CLAIM", `bindingId "${bindingId}" ${idp}`);
   const snap = takeSnapshot(path, bindingId);
   checkExpected(snap, bindingId, expected, false);
-  if (snap.claim.kind !== "file") throw new BindingError("INVALID_CLAIM", `binding ${bindingId} cannot be disputed: ${snap.claim.kind === "unsafe" ? snap.claim.problem : "it does not exist"}`);
+  if (snap.claim.kind !== "file")
+    throw new BindingError(
+      "INVALID_CLAIM",
+      `binding ${bindingId} cannot be disputed: ${snap.claim.kind === "unsafe" ? snap.claim.problem : "it does not exist"}`,
+    );
   const current = parseClaimFile(bindingId, snap.claim.bytes);
-  if (!current.claim) throw new BindingError("INVALID_CLAIM", `binding ${bindingId} cannot be disputed: ${current.problem}`);
+  if (!current.claim)
+    throw new BindingError("INVALID_CLAIM", `binding ${bindingId} cannot be disputed: ${current.problem}`);
   const claim: BindingClaim = { ...current.claim, disputed: { by: host.principalId, reason } };
   const content = serializeClaim(claim);
   commitWrite(snap, bindingId, content, undefined, hooks);
@@ -560,13 +719,33 @@ export type VerifyMemo = {
   working: Map<string, ReturnType<typeof fileWorkingState>>;
   resolutions: Map<string, Resolution>;
 };
-export const verifyMemo = (): VerifyMemo => ({ revisions: new Map(), indexes: new WeakMap(), working: new Map(), resolutions: new Map() });
+export const verifyMemo = (): VerifyMemo => ({
+  revisions: new Map(),
+  indexes: new WeakMap(),
+  working: new Map(),
+  resolutions: new Map(),
+});
 
-export function verifyBinding(path: string, entry: ClaimEntry, status: ProjectStatus = projectStatus(path), memo?: VerifyMemo): Verification {
+export function verifyBinding(
+  path: string,
+  entry: ClaimEntry,
+  status: ProjectStatus = projectStatus(path),
+  memo?: VerifyMemo,
+): Verification {
   const base = { bindingId: entry.bindingId, meaning: "unverified" as const, approved: false as const };
   const c = entry.claim;
   if (!c) {
-    return { ...base, claim: null, state: "invalid", problem: entry.problem, locator: null, source: null, model: null, git: { commitMoved: null, workingTree: null }, disputed: null };
+    return {
+      ...base,
+      claim: null,
+      state: "invalid",
+      problem: entry.problem,
+      locator: null,
+      source: null,
+      model: null,
+      git: { commitMoved: null, workingTree: null },
+      disputed: null,
+    };
   }
   const once = <K, V>(m: Map<K, V> | undefined, k: K, f: () => V): V => {
     if (!m) return f();
@@ -575,7 +754,10 @@ export function verifyBinding(path: string, entry: ClaimEntry, status: ProjectSt
   };
   const resolution = once(memo?.resolutions, canonicalJson(c.locator), () => resolveLocator(status.root, c.locator));
   const source = sourceFreshness(c, resolution);
-  const model = status.state === "ready" && status.model ? modelFreshness(status.storeDir, status.model.history, c, memo) : { state: "unknown" as const, cause: `project is ${status.state}` };
+  const model =
+    status.state === "ready" && status.model
+      ? modelFreshness(status.storeDir, status.model.history, c, memo)
+      : { state: "unknown" as const, cause: `project is ${status.state}` };
   // resolved needs complete evidence: a unique locator AND both axes known unchanged. Known
   // change wins (stale); anything still unknown is indeterminate, never a pass.
   const state: BindingState =
@@ -586,7 +768,9 @@ export function verifyBinding(path: string, entry: ClaimEntry, status: ProjectSt
         : source.state === "unchanged" && model.state === "unchanged"
           ? "resolved"
           : "indeterminate";
-  const workingTree = resolution.fileFingerprint ? once(memo?.working, c.locator.path, () => fileWorkingState(status.root, c.locator.path)) : null;
+  const workingTree = resolution.fileFingerprint
+    ? once(memo?.working, c.locator.path, () => fileWorkingState(status.root, c.locator.path))
+    : null;
   return {
     ...base,
     claim: c,
@@ -608,33 +792,78 @@ export function verifyBindings(path: string): Verification[] {
 function sourceFreshness(c: BindingClaim, r: Resolution): SourceFreshness {
   const fp = c.observed.fingerprint;
   const fileChanged = r.fileFingerprint === null ? null : r.fileFingerprint !== fp.file;
-  if (fp.algorithm !== FINGERPRINT_ALGORITHM) return { state: "unknown", cause: `claim was fingerprinted with ${fp.algorithm}, this VCV uses ${FINGERPRINT_ALGORITHM}`, fileChanged };
+  if (fp.algorithm !== FINGERPRINT_ALGORITHM)
+    return {
+      state: "unknown",
+      cause: `claim was fingerprinted with ${fp.algorithm}, this VCV uses ${FINGERPRINT_ALGORITHM}`,
+      fileChanged,
+    };
   if (r.state !== "resolved") return { state: "unknown", cause: `locator is ${r.state}`, fileChanged };
   if (c.locator.selector.kind === "file") {
-    return fileChanged ? { state: "changed", cause: "file content differs from the recorded fingerprint", fileChanged } : { state: "unchanged", cause: "file content matches the recorded fingerprint", fileChanged };
+    return fileChanged
+      ? { state: "changed", cause: "file content differs from the recorded fingerprint", fileChanged }
+      : { state: "unchanged", cause: "file content matches the recorded fingerprint", fileChanged };
   }
-  if (!fp.selector) return { state: "unknown", cause: "the claim was recorded without a selector fingerprint (unchecked when recorded)", fileChanged };
-  if (r.selectorFingerprint !== fp.selector) return { state: "changed", cause: "the selected declaration's code differs from the recorded fingerprint", fileChanged };
+  if (!fp.selector)
+    return {
+      state: "unknown",
+      cause: "the claim was recorded without a selector fingerprint (unchecked when recorded)",
+      fileChanged,
+    };
+  if (r.selectorFingerprint !== fp.selector)
+    return {
+      state: "changed",
+      cause: "the selected declaration's code differs from the recorded fingerprint",
+      fileChanged,
+    };
   return {
     state: "unchanged",
-    cause: fileChanged ? "the selected declaration is unchanged; other parts of the file changed, which is not evidence about this claim" : "the selected declaration matches the recorded fingerprint",
+    cause: fileChanged
+      ? "the selected declaration is unchanged; other parts of the file changed, which is not evidence about this claim"
+      : "the selected declaration matches the recorded fingerprint",
     fileChanged,
   };
 }
 
 /** Does the bound object's definition differ between the claim's revision and the current one? */
-function modelFreshness(storeDir: string, history: readonly string[], c: BindingClaim, memo?: VerifyMemo): ModelFreshness {
+function modelFreshness(
+  storeDir: string,
+  history: readonly string[],
+  c: BindingClaim,
+  memo?: VerifyMemo,
+): ModelFreshness {
   const current = memo ? (memo.head ??= readHeadRevision(storeDir)) : readHeadRevision(storeDir);
   const now = objectJson(current, c.modelObjectId, memo);
-  if (now === undefined) return { state: "removed", cause: `${c.modelObjectId} does not exist at the current revision ${current.project.modelRevision}` };
-  if (c.modelRevision === current.project.modelRevision) return { state: "unchanged", cause: `claim was made against the current revision ${c.modelRevision}` };
-  if (!history.includes(c.modelRevision)) return { state: "unknown", cause: `revision ${c.modelRevision} is not in this checkout's model history (another branch?)` };
-  const then = memo ? (memo.revisions.has(c.modelRevision) ? memo.revisions.get(c.modelRevision) : (memo.revisions.set(c.modelRevision, readRevision(storeDir, c.modelRevision)), memo.revisions.get(c.modelRevision))) : readRevision(storeDir, c.modelRevision);
+  if (now === undefined)
+    return {
+      state: "removed",
+      cause: `${c.modelObjectId} does not exist at the current revision ${current.project.modelRevision}`,
+    };
+  if (c.modelRevision === current.project.modelRevision)
+    return { state: "unchanged", cause: `claim was made against the current revision ${c.modelRevision}` };
+  if (!history.includes(c.modelRevision))
+    return {
+      state: "unknown",
+      cause: `revision ${c.modelRevision} is not in this checkout's model history (another branch?)`,
+    };
+  const then = memo
+    ? memo.revisions.has(c.modelRevision)
+      ? memo.revisions.get(c.modelRevision)
+      : (memo.revisions.set(c.modelRevision, readRevision(storeDir, c.modelRevision)),
+        memo.revisions.get(c.modelRevision))
+    : readRevision(storeDir, c.modelRevision);
   const before = then ? objectJson(then, c.modelObjectId, memo) : undefined;
-  if (before === undefined) return { state: "unknown", cause: `${c.modelObjectId} cannot be read at ${c.modelRevision}` };
+  if (before === undefined)
+    return { state: "unknown", cause: `${c.modelObjectId} cannot be read at ${c.modelRevision}` };
   return before === now
-    ? { state: "unchanged", cause: `${c.modelObjectId} is identical at ${c.modelRevision} and ${current.project.modelRevision}` }
-    : { state: "changed", cause: `${c.modelObjectId} changed between ${c.modelRevision} and ${current.project.modelRevision}` };
+    ? {
+        state: "unchanged",
+        cause: `${c.modelObjectId} is identical at ${c.modelRevision} and ${current.project.modelRevision}`,
+      }
+    : {
+        state: "changed",
+        cause: `${c.modelObjectId} changed between ${c.modelRevision} and ${current.project.modelRevision}`,
+      };
 }
 
 /** A revision listed in HEAD's history (already verified by the project's inspection). */

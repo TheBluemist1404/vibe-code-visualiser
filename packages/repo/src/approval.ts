@@ -21,11 +21,35 @@
 // (content digest, base and resulting revision). It does not prove which person held the key.
 import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
 import type { KeyObject } from "node:crypto";
-import { accessSync, closeSync, constants as fsConstants, fsyncSync, fstatSync, linkSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
+import {
+  accessSync,
+  closeSync,
+  constants as fsConstants,
+  fsyncSync,
+  fstatSync,
+  linkSync,
+  lstatSync,
+  mkdirSync,
+  openSync,
+  readSync,
+  realpathSync,
+  unlinkSync,
+  writeFileSync,
+  writeSync,
+} from "node:fs";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import { persistedIdProblem } from "@vcv/ir";
-import { FileStore, FileStoreReader, ModelEngine, canonicalJson, durableWrite, listChangeRecords, proposalDigest, readStoreFile } from "@vcv/core";
+import {
+  FileStore,
+  FileStoreReader,
+  ModelEngine,
+  canonicalJson,
+  durableWrite,
+  listChangeRecords,
+  proposalDigest,
+  readStoreFile,
+} from "@vcv/core";
 import type { ChangeRecord, Outcome } from "@vcv/core";
 import { currentBranchRef, fileAtCommit, fullRefName, refsContaining, resolveCommit } from "./git.ts";
 import { VCV_DIR, projectStatus } from "./project.ts";
@@ -38,13 +62,27 @@ export const MAX_ATTESTATION_BYTES = 64 * 1024;
 
 // ---- trust lists -----------------------------------------------------------------------
 
-const principalId = z.string().min(1).max(200).regex(/^[A-Za-z0-9._:@-]+$/, "letters, digits and . _ : @ -");
+const principalId = z
+  .string()
+  .min(1)
+  .max(200)
+  .regex(/^[A-Za-z0-9._:@-]+$/, "letters, digits and . _ : @ -");
 const publicKey = z.string().regex(/^ed25519:[A-Za-z0-9+/]+=*$/, 'must be "ed25519:<base64 SPKI DER>"');
 
 export const trustListSchema = z
   .object({
     format: z.literal(1),
-    reviewers: z.array(z.object({ id: principalId, publicKey, permissions: z.array(z.literal("model:approve")).min(1).default(["model:approve"]) }).strict()).max(200),
+    reviewers: z
+      .array(
+        z
+          .object({
+            id: principalId,
+            publicKey,
+            permissions: z.array(z.literal("model:approve")).min(1).default(["model:approve"]),
+          })
+          .strict(),
+      )
+      .max(200),
   })
   .strict();
 
@@ -58,7 +96,10 @@ export type TrustEntry = TrustList["reviewers"][number];
  * resolve to exactly that commit. A ref without a pin is only a local name, which anyone with a
  * shell in the checkout can create or move.
  */
-export type TrustSource = { kind: "file"; path: string } | { kind: "git-ref"; ref: string; pinnedCommit?: string } | { kind: "working-tree" };
+export type TrustSource =
+  | { kind: "file"; path: string }
+  | { kind: "git-ref"; ref: string; pinnedCommit?: string }
+  | { kind: "working-tree" };
 
 /**
  * How the trust list's authority was established:
@@ -90,7 +131,15 @@ export const AUTHORIZATION_GATE =
  * why. True never means "branch protection verified": Git cannot prove that. It means the list
  * comes from an anchor outside the candidate branch that the caller chose and vouches for.
  */
-export type LoadedTrust = { list: TrustList; source: string; commit?: string; authority: TrustAuthority; protectedFromCheckout: boolean; unprotectedReason?: string; anchor: string };
+export type LoadedTrust = {
+  list: TrustList;
+  source: string;
+  commit?: string;
+  authority: TrustAuthority;
+  protectedFromCheckout: boolean;
+  unprotectedReason?: string;
+  anchor: string;
+};
 
 export class ApprovalError extends Error {
   readonly code: string;
@@ -109,7 +158,11 @@ export function readPlainFile(path: string, max: number, what: string): Buffer {
   } catch {
     throw new ApprovalError("NOT_FOUND", `${what} ${path} does not exist`);
   }
-  if (st.isSymbolicLink() || !st.isFile()) throw new ApprovalError("UNSAFE_PATH", `${what} ${path} is ${st.isSymbolicLink() ? "a symlink" : "not a regular file"}; it was not read`);
+  if (st.isSymbolicLink() || !st.isFile())
+    throw new ApprovalError(
+      "UNSAFE_PATH",
+      `${what} ${path} is ${st.isSymbolicLink() ? "a symlink" : "not a regular file"}; it was not read`,
+    );
   if (st.size > max) throw new ApprovalError("UNSAFE_PATH", `${what} ${path} is larger than ${max} bytes`);
   const fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0));
   try {
@@ -132,8 +185,13 @@ function parseTrust(bytes: Buffer, where: string): TrustList {
     throw new ApprovalError("INVALID_TRUST", `trust list ${where} is not valid JSON`);
   }
   const r = trustListSchema.safeParse(raw);
-  if (!r.success) throw new ApprovalError("INVALID_TRUST", `trust list ${where} is invalid: ${r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`);
-  if (new Set(r.data.reviewers.map((x) => x.publicKey)).size !== r.data.reviewers.length) throw new ApprovalError("INVALID_TRUST", `trust list ${where} lists a key twice`);
+  if (!r.success)
+    throw new ApprovalError(
+      "INVALID_TRUST",
+      `trust list ${where} is invalid: ${r.error.issues.map((i) => `${i.path.join(".")}: ${i.message}`).join("; ")}`,
+    );
+  if (new Set(r.data.reviewers.map((x) => x.publicKey)).size !== r.data.reviewers.length)
+    throw new ApprovalError("INVALID_TRUST", `trust list ${where} lists a key twice`);
   return r.data;
 }
 
@@ -162,7 +220,8 @@ function candidateRefReason(root: string, ref: string, commit: string, pinned: b
   if (cur) {
     const short = cur.replace(/^refs\/heads\//, "");
     const name = ref.split(/[~^]/)[0]!;
-    if (fullRefName(root, name) === cur || name === short || name === cur) return `${ref} is the checked-out branch (${short})`;
+    if (fullRefName(root, name) === cur || name === short || name === cur)
+      return `${ref} is the checked-out branch (${short})`;
   }
   // For an unpinned name, a commit only the checked-out branch contains is the candidate. A pin
   // is the host's or reviewer's statement instead (a CI checkout may hold the base by ID only).
@@ -193,20 +252,36 @@ export function loadTrust(root: string, source: TrustSource): LoadedTrust {
         authority: inside ? "checkout" : "external-file",
         protectedFromCheckout: !inside,
         ...(inside ? { unprotectedReason: `${source.path} is inside the checkout under review` } : {}),
-        anchor: inside ? "file inside the checkout (unprotected)" : "file outside the checkout: caller-asserted and unverified; only as safe as who can write it",
+        anchor: inside
+          ? "file inside the checkout (unprotected)"
+          : "file outside the checkout: caller-asserted and unverified; only as safe as who can write it",
       };
     }
     case "git-ref": {
       if (source.pinnedCommit !== undefined && !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(source.pinnedCommit)) {
-        throw new ApprovalError("INVALID_PIN", "--trust-commit must be a full commit ID (40 or 64 hex), copied from the hosting service's protected branch");
+        throw new ApprovalError(
+          "INVALID_PIN",
+          "--trust-commit must be a full commit ID (40 or 64 hex), copied from the hosting service's protected branch",
+        );
       }
       const commit = resolveCommit(root, source.ref);
-      if (!commit) throw new ApprovalError("UNKNOWN_REF", `${source.ref} is not a commit in this repository${source.pinnedCommit ? " (fetch the protected branch first)" : ""}`);
+      if (!commit)
+        throw new ApprovalError(
+          "UNKNOWN_REF",
+          `${source.ref} is not a commit in this repository${source.pinnedCommit ? " (fetch the protected branch first)" : ""}`,
+        );
       if (source.pinnedCommit !== undefined && commit !== source.pinnedCommit) {
-        throw new ApprovalError("TRUST_PIN_MISMATCH", `${source.ref} resolves to ${commit}, not the pinned ${source.pinnedCommit}; the local ref was moved or is stale`);
+        throw new ApprovalError(
+          "TRUST_PIN_MISMATCH",
+          `${source.ref} resolves to ${commit}, not the pinned ${source.pinnedCommit}; the local ref was moved or is stale`,
+        );
       }
       const bytes = fileAtCommit(root, commit, `${VCV_DIR}/${REVIEWERS_FILE}`, MAX_TRUST_BYTES);
-      if (!bytes) throw new ApprovalError("NO_TRUST_LIST", `${source.ref} (${commit.slice(0, 12)}) has no ${VCV_DIR}/${REVIEWERS_FILE}`);
+      if (!bytes)
+        throw new ApprovalError(
+          "NO_TRUST_LIST",
+          `${source.ref} (${commit.slice(0, 12)}) has no ${VCV_DIR}/${REVIEWERS_FILE}`,
+        );
       const why = candidateRefReason(root, source.ref, commit, source.pinnedCommit !== undefined);
       return {
         list: parseTrust(bytes, `${VCV_DIR}/${REVIEWERS_FILE} at ${source.ref}`),
@@ -240,12 +315,17 @@ export function loadTrust(root: string, source: TrustSource): LoadedTrust {
 
 // ---- keys ------------------------------------------------------------------------------
 
-const encodePublic = (k: KeyObject) => `ed25519:${(k.export({ type: "spki", format: "der" }) as Buffer).toString("base64")}`;
-const decodePublic = (s: string): KeyObject => createPublicKey({ key: Buffer.from(s.slice("ed25519:".length), "base64"), format: "der", type: "spki" });
+const encodePublic = (k: KeyObject) =>
+  `ed25519:${(k.export({ type: "spki", format: "der" }) as Buffer).toString("base64")}`;
+const decodePublic = (s: string): KeyObject =>
+  createPublicKey({ key: Buffer.from(s.slice("ed25519:".length), "base64"), format: "der", type: "spki" });
 
 /** Short, stable identifier of a public key (sha256 of its DER, first 16 hex). */
 export function keyFingerprint(publicKey: string): string {
-  return createHash("sha256").update(Buffer.from(publicKey.slice("ed25519:".length), "base64")).digest("hex").slice(0, 16);
+  return createHash("sha256")
+    .update(Buffer.from(publicKey.slice("ed25519:".length), "base64"))
+    .digest("hex")
+    .slice(0, 16);
 }
 
 /**
@@ -260,7 +340,10 @@ export function createReviewerKey(id: string, keyPath: string): TrustEntry {
   try {
     writeFileSync(keyPath, privateKey.export({ type: "pkcs8", format: "pem" }) as string, { mode: 0o600, flag: "wx" });
   } catch (e) {
-    throw new ApprovalError("KEY_EXISTS", `cannot create ${keyPath}: ${(e as NodeJS.ErrnoException).code === "EEXIST" ? "it already exists (never overwritten)" : (e as Error).message}`);
+    throw new ApprovalError(
+      "KEY_EXISTS",
+      `cannot create ${keyPath}: ${(e as NodeJS.ErrnoException).code === "EEXIST" ? "it already exists (never overwritten)" : (e as Error).message}`,
+    );
   }
   return { id, publicKey: encodePublic(pub), permissions: ["model:approve"] };
 }
@@ -271,8 +354,10 @@ export function addTrustedReviewer(path: string, entry: TrustEntry): string {
   if (status.state !== "ready") throw new ApprovalError("PROJECT_NOT_READY", `the VCV project is ${status.state}`);
   const f = readStoreFile(status.storeDir, REVIEWERS_FILE, MAX_TRUST_BYTES);
   if (f.kind === "unsafe") throw new ApprovalError("UNSAFE_PATH", f.problem);
-  const list: TrustList = f.kind === "file" ? parseTrust(f.bytes, `${VCV_DIR}/${REVIEWERS_FILE}`) : { format: 1, reviewers: [] };
-  if (list.reviewers.some((r) => r.publicKey === entry.publicKey)) throw new ApprovalError("KEY_EXISTS", "this key is already listed");
+  const list: TrustList =
+    f.kind === "file" ? parseTrust(f.bytes, `${VCV_DIR}/${REVIEWERS_FILE}`) : { format: 1, reviewers: [] };
+  if (list.reviewers.some((r) => r.publicKey === entry.publicKey))
+    throw new ApprovalError("KEY_EXISTS", "this key is already listed");
   list.reviewers.push(entry);
   const file = join(status.storeDir, REVIEWERS_FILE);
   durableWrite(file, JSON.stringify(list, null, 2) + "\n");
@@ -286,7 +371,10 @@ function loadPrivateKey(keyFile: string): KeyObject {
     if (k.asymmetricKeyType !== "ed25519") throw new Error("not an Ed25519 key");
     return k;
   } catch (e) {
-    throw new ApprovalError("INVALID_KEY", `reviewer key ${keyFile} is not an Ed25519 private key (${(e as Error).message})`);
+    throw new ApprovalError(
+      "INVALID_KEY",
+      `reviewer key ${keyFile} is not an Ed25519 private key (${(e as Error).message})`,
+    );
   }
 }
 
@@ -324,7 +412,10 @@ export function signatureValid(a: Attestation): boolean {
 }
 
 /** The attestation file for a change, read safely. */
-export function readAttestation(storeDir: string, changeId: string): { attestation?: Attestation; problem?: string } | null {
+export function readAttestation(
+  storeDir: string,
+  changeId: string,
+): { attestation?: Attestation; problem?: string } | null {
   if (persistedIdProblem(changeId)) return { problem: "invalid change id" };
   const f = readStoreFile(storeDir, `${APPROVALS_DIR}/${changeId}.json`, MAX_ATTESTATION_BYTES);
   if (f.kind === "absent") return null;
@@ -336,7 +427,9 @@ export function readAttestation(storeDir: string, changeId: string): { attestati
     return { problem: `${APPROVALS_DIR}/${changeId}.json is not valid JSON` };
   }
   const r = attestationSchema.safeParse(raw);
-  return r.success ? { attestation: r.data } : { problem: `${APPROVALS_DIR}/${changeId}.json is not an attestation: ${r.error.issues[0]!.message}` };
+  return r.success
+    ? { attestation: r.data }
+    : { problem: `${APPROVALS_DIR}/${changeId}.json is not an attestation: ${r.error.issues[0]!.message}` };
 }
 
 // ---- the reviewer step -----------------------------------------------------------------
@@ -361,7 +454,14 @@ export type ReviewApproveInput = {
 
 export type ReviewApproveResult = {
   outcome: Outcome;
-  reviewer: { id: string; keyFingerprint: string; trustSource: string; trustAnchor: string; trustAuthority: TrustAuthority; trustVerification: typeof TRUST_VERIFICATION };
+  reviewer: {
+    id: string;
+    keyFingerprint: string;
+    trustSource: string;
+    trustAnchor: string;
+    trustAuthority: TrustAuthority;
+    trustVerification: typeof TRUST_VERIFICATION;
+  };
   attestation?: { file: string; attestation: Attestation; alreadyPresent?: boolean };
   /** Always the same: a local approval is evidence for the host gate, never authorization. */
   authorization: typeof AUTHORIZATION_GATE;
@@ -369,21 +469,46 @@ export type ReviewApproveResult = {
 
 type Reviewer = { entry: TrustEntry; key: KeyObject; pub: string; info: ReviewApproveResult["reviewer"] };
 
-function reviewerFor(root: string, input: Pick<ReviewApproveInput, "keyFile" | "trust" | "allowUnprotectedTrust">): Reviewer {
+function reviewerFor(
+  root: string,
+  input: Pick<ReviewApproveInput, "keyFile" | "trust" | "allowUnprotectedTrust">,
+): Reviewer {
   const trust = loadTrust(root, input.trust);
   // An approval anchor needs authority established outside the agent's reach: a local ref name
   // (tag, branch, remote-tracking ref) is not, because the agent can create or move it.
   const established = trust.authority === "external-file" || trust.authority === "pinned-commit";
   if (!established && !input.allowUnprotectedTrust) {
-    const why = trust.unprotectedReason ?? `${input.trust.kind === "git-ref" ? input.trust.ref : "it"} is a local ref, which anyone with a shell in this checkout can create or move`;
-    throw new ApprovalError("UNPROTECTED_TRUST", `the trust list (${trust.source}) cannot anchor an approval: ${why}. Pin the protected base with --trust-commit <full commit ID from the hosting service> (optionally with --trust-ref origin/main), or use --trust <reviewer-owned file outside the checkout>`);
+    const why =
+      trust.unprotectedReason ??
+      `${input.trust.kind === "git-ref" ? input.trust.ref : "it"} is a local ref, which anyone with a shell in this checkout can create or move`;
+    throw new ApprovalError(
+      "UNPROTECTED_TRUST",
+      `the trust list (${trust.source}) cannot anchor an approval: ${why}. Pin the protected base with --trust-commit <full commit ID from the hosting service> (optionally with --trust-ref origin/main), or use --trust <reviewer-owned file outside the checkout>`,
+    );
   }
   const key = loadPrivateKey(input.keyFile);
   const pub = encodePublic(createPublicKey(key));
   const entry = trust.list.reviewers.find((r) => r.publicKey === pub);
-  if (!entry) throw new ApprovalError("UNTRUSTED_KEY", `the key ${keyFingerprint(pub)} is not in the trust list (${trust.source})`);
-  if (!entry.permissions.includes("model:approve")) throw new ApprovalError("UNTRUSTED_KEY", `${entry.id} is listed without model:approve in ${trust.source}`);
-  return { entry, key, pub, info: { id: entry.id, keyFingerprint: keyFingerprint(pub), trustSource: trust.source, trustAnchor: trust.anchor, trustAuthority: trust.authority, trustVerification: TRUST_VERIFICATION } };
+  if (!entry)
+    throw new ApprovalError(
+      "UNTRUSTED_KEY",
+      `the key ${keyFingerprint(pub)} is not in the trust list (${trust.source})`,
+    );
+  if (!entry.permissions.includes("model:approve"))
+    throw new ApprovalError("UNTRUSTED_KEY", `${entry.id} is listed without model:approve in ${trust.source}`);
+  return {
+    entry,
+    key,
+    pub,
+    info: {
+      id: entry.id,
+      keyFingerprint: keyFingerprint(pub),
+      trustSource: trust.source,
+      trustAnchor: trust.anchor,
+      trustAuthority: trust.authority,
+      trustVerification: TRUST_VERIFICATION,
+    },
+  };
 }
 
 /** Refuse before committing anything if the attestation could not be written afterwards. */
@@ -391,7 +516,11 @@ function preflightAttestation(storeDir: string, changeId: string): void {
   if (persistedIdProblem(changeId)) return; // the engine refuses it
   const dir = join(storeDir, APPROVALS_DIR);
   const st = lstatOrNull(dir);
-  if (st && (st.isSymbolicLink() || !st.isDirectory())) throw new ApprovalError("UNSAFE_PATH", `${VCV_DIR}/${APPROVALS_DIR}/ is ${st.isSymbolicLink() ? "a symlink" : "not a directory"}; nothing was approved`);
+  if (st && (st.isSymbolicLink() || !st.isDirectory()))
+    throw new ApprovalError(
+      "UNSAFE_PATH",
+      `${VCV_DIR}/${APPROVALS_DIR}/ is ${st.isSymbolicLink() ? "a symlink" : "not a directory"}; nothing was approved`,
+    );
   if (!st) mkdirSync(dir);
   try {
     accessSync(dir, fsConstants.W_OK);
@@ -399,9 +528,14 @@ function preflightAttestation(storeDir: string, changeId: string): void {
     throw new ApprovalError("UNSAFE_PATH", `${VCV_DIR}/${APPROVALS_DIR}/ is not writable; nothing was approved`);
   }
   // Only a pending change will be committed; for anything else the engine's own refusal applies.
-  const pending = listChangeRecords(storeDir).some((e) => e.record?.changeId === changeId && e.record.status === "pending");
+  const pending = listChangeRecords(storeDir).some(
+    (e) => e.record?.changeId === changeId && e.record.status === "pending",
+  );
   if (pending && lstatOrNull(join(dir, `${changeId}.json`))) {
-    throw new ApprovalError("ATTESTATION_EXISTS", `${VCV_DIR}/${APPROVALS_DIR}/${changeId}.json already exists; it is never overwritten. Nothing was approved`);
+    throw new ApprovalError(
+      "ATTESTATION_EXISTS",
+      `${VCV_DIR}/${APPROVALS_DIR}/${changeId}.json already exists; it is never overwritten. Nothing was approved`,
+    );
   }
 }
 
@@ -461,7 +595,8 @@ function writeAttestation(storeDir: string, r: ChangeRecord, a: Attestation): st
   const rel = `${APPROVALS_DIR}/${r.changeId}.json`;
   const dir = join(storeDir, APPROVALS_DIR);
   const st = lstatOrNull(dir);
-  if (st && (st.isSymbolicLink() || !st.isDirectory())) throw new Error(`${VCV_DIR}/${APPROVALS_DIR}/ is not a plain directory`);
+  if (st && (st.isSymbolicLink() || !st.isDirectory()))
+    throw new Error(`${VCV_DIR}/${APPROVALS_DIR}/ is not a plain directory`);
   if (!st) mkdirSync(dir);
   writeNew(join(storeDir, rel), JSON.stringify(a, null, 2) + "\n");
   return `${VCV_DIR}/${rel}`;
@@ -482,19 +617,33 @@ const finalizeHint = (r: ChangeRecord) =>
 export function reviewApprove(path: string, input: ReviewApproveInput): ReviewApproveResult {
   const status = projectStatus(path);
   if (status.state !== "ready") throw new ApprovalError("PROJECT_NOT_READY", `the VCV project is ${status.state}`);
-  if (!/^[0-9a-f]{64}$/.test(input.expectedDigest)) throw new ApprovalError("INVALID_DIGEST", "--digest must be the 64-hex proposalDigest shown by vcv proposal preview");
+  if (!/^[0-9a-f]{64}$/.test(input.expectedDigest))
+    throw new ApprovalError(
+      "INVALID_DIGEST",
+      "--digest must be the 64-hex proposalDigest shown by vcv proposal preview",
+    );
   const who = reviewerFor(status.root, input);
   preflightAttestation(status.storeDir, input.changeId);
 
   const engine = new ModelEngine(new FileStore(status.storeDir), { now: input.now });
-  const outcome = engine.approve(input.changeId, { principalId: who.entry.id, permissions: who.entry.permissions }, { expectedDigest: input.expectedDigest });
-  if (outcome.status !== "applied" || !outcome.record) return { outcome, reviewer: who.info, authorization: AUTHORIZATION_GATE };
+  const outcome = engine.approve(
+    input.changeId,
+    { principalId: who.entry.id, permissions: who.entry.permissions },
+    { expectedDigest: input.expectedDigest },
+  );
+  if (outcome.status !== "applied" || !outcome.record)
+    return { outcome, reviewer: who.info, authorization: AUTHORIZATION_GATE };
 
   const r: ChangeRecord = outcome.record;
   try {
     input.afterCommit?.();
     const attestation = signFor(r, who, input.now);
-    return { outcome, reviewer: who.info, attestation: { file: writeAttestation(status.storeDir, r, attestation), attestation }, authorization: AUTHORIZATION_GATE };
+    return {
+      outcome,
+      reviewer: who.info,
+      attestation: { file: writeAttestation(status.storeDir, r, attestation), attestation },
+      authorization: AUTHORIZATION_GATE,
+    };
   } catch (e) {
     throw new ApprovalError("ATTESTATION_NOT_WRITTEN", `${(e as Error).message}. ${finalizeHint(r)}`);
   }
@@ -513,26 +662,67 @@ export type ReviewFinalizeInput = Omit<ReviewApproveInput, "afterCommit">;
 export function reviewFinalize(path: string, input: ReviewFinalizeInput): ReviewApproveResult {
   const status = projectStatus(path);
   if (status.state !== "ready") throw new ApprovalError("PROJECT_NOT_READY", `the VCV project is ${status.state}`);
-  if (!/^[0-9a-f]{64}$/.test(input.expectedDigest)) throw new ApprovalError("INVALID_DIGEST", "--digest must be the 64-hex proposalDigest shown by vcv proposal preview");
+  if (!/^[0-9a-f]{64}$/.test(input.expectedDigest))
+    throw new ApprovalError(
+      "INVALID_DIGEST",
+      "--digest must be the 64-hex proposalDigest shown by vcv proposal preview",
+    );
   if (persistedIdProblem(input.changeId)) throw new ApprovalError("UNKNOWN_CHANGE", `no change ${input.changeId}`);
   const who = reviewerFor(status.root, input);
   const r = listChangeRecords(status.storeDir).find((e) => e.record?.changeId === input.changeId)?.record;
   if (!r) throw new ApprovalError("UNKNOWN_CHANGE", `no change ${input.changeId}`);
-  if (r.status !== "applied" || !r.resultingRevision) throw new ApprovalError("NOT_APPLIED", `change ${r.changeId} is ${r.status}; use vcv review approve for a pending change`);
-  if (r.approverId !== who.entry.id) throw new ApprovalError("NOT_APPROVER", `change ${r.changeId} records ${r.approverId ? `approver ${r.approverId}` : "no separate approver"}; only that approver can attest it, and ${who.entry.id} is not it`);
-  if (r.approverId === r.proposerId) throw new ApprovalError("SELF_APPROVAL", `change ${r.changeId} was approved by its own proposer`);
+  if (r.status !== "applied" || !r.resultingRevision)
+    throw new ApprovalError(
+      "NOT_APPLIED",
+      `change ${r.changeId} is ${r.status}; use vcv review approve for a pending change`,
+    );
+  if (r.approverId !== who.entry.id)
+    throw new ApprovalError(
+      "NOT_APPROVER",
+      `change ${r.changeId} records ${r.approverId ? `approver ${r.approverId}` : "no separate approver"}; only that approver can attest it, and ${who.entry.id} is not it`,
+    );
+  if (r.approverId === r.proposerId)
+    throw new ApprovalError("SELF_APPROVAL", `change ${r.changeId} was approved by its own proposer`);
   const digest = proposalDigest(r.change);
-  if (digest !== input.expectedDigest) throw new ApprovalError("DIGEST_MISMATCH", `the change's content digest is ${digest}, not the reviewed ${input.expectedDigest}; preview it again`);
-  if (!new FileStoreReader(status.storeDir).revisions().includes(r.resultingRevision)) throw new ApprovalError("NOT_IN_HISTORY", `${r.resultingRevision} is not in this checkout's model history`);
+  if (digest !== input.expectedDigest)
+    throw new ApprovalError(
+      "DIGEST_MISMATCH",
+      `the change's content digest is ${digest}, not the reviewed ${input.expectedDigest}; preview it again`,
+    );
+  if (!new FileStoreReader(status.storeDir).revisions().includes(r.resultingRevision))
+    throw new ApprovalError("NOT_IN_HISTORY", `${r.resultingRevision} is not in this checkout's model history`);
 
   const existing = readAttestation(status.storeDir, r.changeId);
   if (existing) {
     const a = existing.attestation;
-    const same = a && a.publicKey === who.pub && signatureValid(a) && a.proposalDigest === digest && a.approverId === r.approverId && a.proposerId === r.proposerId && a.baseRevision === r.baseRevision && a.resultingRevision === r.resultingRevision && a.projectId === r.projectId;
-    if (same) return { outcome: { status: "applied", changeId: r.changeId, record: r, diagnostics: [] }, reviewer: who.info, attestation: { file: `${VCV_DIR}/${APPROVALS_DIR}/${r.changeId}.json`, attestation: a, alreadyPresent: true }, authorization: AUTHORIZATION_GATE };
-    throw new ApprovalError("ATTESTATION_EXISTS", `${VCV_DIR}/${APPROVALS_DIR}/${r.changeId}.json already exists and is not this reviewer's valid attestation of this change; it is never overwritten (${existing.problem ?? "different content"})`);
+    const same =
+      a &&
+      a.publicKey === who.pub &&
+      signatureValid(a) &&
+      a.proposalDigest === digest &&
+      a.approverId === r.approverId &&
+      a.proposerId === r.proposerId &&
+      a.baseRevision === r.baseRevision &&
+      a.resultingRevision === r.resultingRevision &&
+      a.projectId === r.projectId;
+    if (same)
+      return {
+        outcome: { status: "applied", changeId: r.changeId, record: r, diagnostics: [] },
+        reviewer: who.info,
+        attestation: { file: `${VCV_DIR}/${APPROVALS_DIR}/${r.changeId}.json`, attestation: a, alreadyPresent: true },
+        authorization: AUTHORIZATION_GATE,
+      };
+    throw new ApprovalError(
+      "ATTESTATION_EXISTS",
+      `${VCV_DIR}/${APPROVALS_DIR}/${r.changeId}.json already exists and is not this reviewer's valid attestation of this change; it is never overwritten (${existing.problem ?? "different content"})`,
+    );
   }
   preflightAttestation(status.storeDir, r.changeId);
   const attestation = signFor(r, who, input.now);
-  return { outcome: { status: "applied", changeId: r.changeId, record: r, diagnostics: [] }, reviewer: who.info, attestation: { file: writeAttestation(status.storeDir, r, attestation), attestation }, authorization: AUTHORIZATION_GATE };
+  return {
+    outcome: { status: "applied", changeId: r.changeId, record: r, diagnostics: [] },
+    reviewer: who.info,
+    attestation: { file: writeAttestation(status.storeDir, r, attestation), attestation },
+    authorization: AUTHORIZATION_GATE,
+  };
 }

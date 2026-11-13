@@ -39,7 +39,9 @@ export const operationSchema = z.discriminatedUnion("type", [
       verification: z.enum(["required", "optional"]).optional(),
     })
     .strict()
-    .refine((o) => o.statement !== undefined || o.verifies !== undefined || o.verification !== undefined, { message: "reviseCriterion needs statement, verifies or verification" }),
+    .refine((o) => o.statement !== undefined || o.verifies !== undefined || o.verification !== undefined, {
+      message: "reviseCriterion needs statement, verifies or verification",
+    }),
   z.object({ type: z.literal("approveDraft") }).strict(),
 ]);
 
@@ -50,7 +52,15 @@ const scopePath = z
   .string()
   .min(1)
   .max(200)
-  .refine((p) => !p.startsWith("/") && !/^[A-Za-z]:/.test(p) && !p.includes("\\") && !p.split("/").includes("..") && !p.includes("\0"), "must be a repository-relative path or glob (no leading /, no .., no backslashes)");
+  .refine(
+    (p) =>
+      !p.startsWith("/") &&
+      !/^[A-Za-z]:/.test(p) &&
+      !p.includes("\\") &&
+      !p.split("/").includes("..") &&
+      !p.includes("\0"),
+    "must be a repository-relative path or glob (no leading /, no .., no backslashes)",
+  );
 const line = (max: number) => z.string().min(1).max(max);
 
 /**
@@ -108,7 +118,9 @@ export function applyOperations(model: Model, ops: ModelOperation[]): { model: M
       applyOne(next, op);
     } catch (e) {
       if (!(e instanceof OpError)) throw e;
-      return { error: { code: e.code, severity: "error", path: `operations[${i}]`, message: `${op.type}: ${e.message}` } };
+      return {
+        error: { code: e.code, severity: "error", path: `operations[${i}]`, message: `${op.type}: ${e.message}` },
+      };
     }
   }
   return { model: next };
@@ -119,7 +131,8 @@ function applyOne(m: Model, op: ModelOperation): void {
   const fresh = (newId: Id) => {
     if (index.byId.has(newId)) throw new OpError("ID_IN_USE", `ID "${newId}" already exists`);
   };
-  const behavior = (bid: Id) => m.behaviors.find((b) => b.id === bid) ?? fail("TARGET_MISSING", `behavior "${bid}" not found`);
+  const behavior = (bid: Id) =>
+    m.behaviors.find((b) => b.id === bid) ?? fail("TARGET_MISSING", `behavior "${bid}" not found`);
 
   switch (op.type) {
     case "createModule":
@@ -145,7 +158,9 @@ function applyOne(m: Model, op: ModelOperation): void {
       behavior(op.behaviorId).transitions.push(op.transition);
       return;
     case "renameState": {
-      const s = behavior(op.behaviorId).states.find((x) => x.id === op.stateId) ?? fail("TARGET_MISSING", `state "${op.stateId}" not in "${op.behaviorId}"`);
+      const s =
+        behavior(op.behaviorId).states.find((x) => x.id === op.stateId) ??
+        fail("TARGET_MISSING", `state "${op.stateId}" not in "${op.behaviorId}"`);
       s.name = op.name;
       return;
     }
@@ -157,13 +172,15 @@ function applyOne(m: Model, op: ModelOperation): void {
       return;
     }
     case "linkContract": {
-      const mod = m.modules.find((x) => x.id === op.moduleId) ?? fail("TARGET_MISSING", `module "${op.moduleId}" not found`);
+      const mod =
+        m.modules.find((x) => x.id === op.moduleId) ?? fail("TARGET_MISSING", `module "${op.moduleId}" not found`);
       mod.consumes ??= [];
       if (!mod.consumes.includes(op.contractId)) mod.consumes.push(op.contractId);
       return;
     }
     case "setModuleDependencies": {
-      const mod = m.modules.find((x) => x.id === op.moduleId) ?? fail("TARGET_MISSING", `module "${op.moduleId}" not found`);
+      const mod =
+        m.modules.find((x) => x.id === op.moduleId) ?? fail("TARGET_MISSING", `module "${op.moduleId}" not found`);
       mod.dependsOn = [...op.dependsOn];
       return;
     }
@@ -195,7 +212,9 @@ function applyOne(m: Model, op: ModelOperation): void {
       (m.criteria ??= []).push(op.criterion);
       return;
     case "reviseCriterion": {
-      const c = (m.criteria ?? []).find((x) => x.id === op.criterionId) ?? fail("TARGET_MISSING", `criterion "${op.criterionId}" not found`);
+      const c =
+        (m.criteria ?? []).find((x) => x.id === op.criterionId) ??
+        fail("TARGET_MISSING", `criterion "${op.criterionId}" not found`);
       if (op.statement !== undefined) c.statement = op.statement;
       if (op.verifies !== undefined) c.verifies = [...op.verifies];
       if (op.verification !== undefined) c.verification = op.verification;
@@ -230,7 +249,8 @@ function removeObject(m: Model, targetId: Id): void {
     }
   }
   const owned = [...removed].filter((x) => x !== targetId && !isNested(index.byId.get(x)!.kind));
-  if (owned.length) fail("HAS_OWNED_OBJECTS", `"${targetId}" still owns ${owned.join(", ")}; transfer or remove them first`);
+  if (owned.length)
+    fail("HAS_OWNED_OBJECTS", `"${targetId}" still owns ${owned.join(", ")}; transfer or remove them first`);
 
   const incoming = collectRefs(m).filter((s) => {
     const to = refId(s.ref);

@@ -6,7 +6,16 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { FileStore, ModelEngine } from "../../core/src/index.ts";
 import type { HostContext } from "../../core/src/index.ts";
-import { RECONCILE_LIMITS, addTrustedReviewer, createReviewerKey, previewProposal, projectStatus, reconcile, reviewApprove, submitProposal } from "../src/index.ts";
+import {
+  RECONCILE_LIMITS,
+  addTrustedReviewer,
+  createReviewerKey,
+  previewProposal,
+  projectStatus,
+  reconcile,
+  reviewApprove,
+  submitProposal,
+} from "../src/index.ts";
 import type { Reconciliation } from "../src/index.ts";
 import { SERVICE, baseline, edit, git } from "./course-desk.ts";
 
@@ -26,10 +35,12 @@ function ok(repo: string, base: string, hooks = {}): Reconciliation {
   return r.data;
 }
 const codes = (d: Reconciliation) => d.findings.map((f) => f.code);
-const finding = (d: Reconciliation, code: string, bindingId?: string) => d.findings.find((f) => f.code === code && (bindingId === undefined || f.bindingId === bindingId));
+const finding = (d: Reconciliation, code: string, bindingId?: string) =>
+  d.findings.find((f) => f.code === code && (bindingId === undefined || f.bindingId === bindingId));
 
 // The code-first defect M4.5 will demonstrate: the rejection is no longer announced.
-const DROP_REJECTION_NOTICE = /if \(reason\) \{\s*this\.notifications\.notify\([\s\S]*?\);\s*\} else \{\s*(this\.notifications\.notify\(enrollment\.studentId, "enrollment-confirmed"[^;]*;)\s*\}/;
+const DROP_REJECTION_NOTICE =
+  /if \(reason\) \{\s*this\.notifications\.notify\([\s\S]*?\);\s*\} else \{\s*(this\.notifications\.notify\(enrollment\.studentId, "enrollment-confirmed"[^;]*;)\s*\}/;
 
 test("code-first change: bound code moved, claims are stale, nothing is called drift or a contradiction", () => {
   const { repo, base } = setup();
@@ -61,7 +72,10 @@ test("code-first change: bound code moved, claims are stale, nothing is called d
     assert.deepEqual([f.category, f.basis, f.related], ["binding", "checked", true]);
     assert.match(f.message, /whether it still does what the model says is for an agent or a person to judge/);
     const row = d.bindings.items.find((b) => b.bindingId === id)!;
-    assert.deepEqual([row.state, row.atBase, row.boundFileChanged, row.object, row.source?.state, row.model?.state], ["stale", "unchanged", true, "unchanged", "changed", "unchanged"]);
+    assert.deepEqual(
+      [row.state, row.atBase, row.boundFileChanged, row.object, row.source?.state, row.model?.state],
+      ["stale", "unchanged", true, "unchanged", "changed", "unchanged"],
+    );
   }
   assert.ok(finding(d, "BOUND_FILE_CHANGED"));
   assert.equal(finding(d, "BOUND_FILE_CHANGED")!.basis, "observed");
@@ -80,10 +94,16 @@ test("code-first change: bound code moved, claims are stale, nothing is called d
   assert.equal(d.model.impact, null);
   const si = d.sourceImpact!;
   assert.equal(si.impactClass, "declared-model-context");
-  assert.deepEqual(si.seeds.map((x) => x.objectId), ["cap-enroll", "rul-seat-limit"]);
+  assert.deepEqual(
+    si.seeds.map((x) => x.objectId),
+    ["cap-enroll", "rul-seat-limit"],
+  );
   assert.deepEqual(si.seeds[0]!.why, ["bound-file-changed"]);
   assert.deepEqual(si.seeds[0]!.bindings, ["impl.cap-enroll"]);
-  assert.ok(si.modules.some((m) => m.id === "mod-enrollment" && m.via === "seed"), JSON.stringify(si.modules));
+  assert.ok(
+    si.modules.some((m) => m.id === "mod-enrollment" && m.via === "seed"),
+    JSON.stringify(si.modules),
+  );
   assert.ok(si.rules.some((r) => r.id === "rul-seat-limit" && r.via === "seed"));
   assert.ok(si.candidates.length > 0, "the declared model has dependents of enrollment");
   assert.match(si.note, /not evidence that behaviour changed/);
@@ -100,7 +120,9 @@ test("a harmless edit in a bound file is observed, not reported as a stale claim
   assert.deepEqual([row.state, row.source?.fileChanged], ["resolved", true]);
   // Where to look, still offered as context, and still not a contradiction.
   assert.ok(d.sourceImpact?.seeds.some((x) => x.objectId === "cap-enroll"));
-  assert.ok(!d.findings.some((f) => f.category === "structural" || f.category === "integrity" || f.code === "CLAIM_STALE"));
+  assert.ok(
+    !d.findings.some((f) => f.category === "structural" || f.category === "integrity" || f.code === "CLAIM_STALE"),
+  );
 });
 
 test("model-first change: lineage, delta, impact, unattested approval and unbound new objects", () => {
@@ -112,8 +134,22 @@ test("model-first change: lineage, delta, impact, unattested approval and unboun
       projectId: "prj-course-desk",
       expectedRevision: projectStatus(repo).model!.revision,
       operations: [
-        { type: "setRuleStatement", ruleId: "rul-seat-limit", statement: "Confirmed enrollments never exceed capacity; a full course is rejected with COURSE_FULL and the student is told the capacity." },
-        { type: "createCapability", capability: { id: "cap-cancel-enrollment", kind: "capability", owner: "mod-enrollment", name: "Cancel enrollment", initiatorActorId: "act-student" } },
+        {
+          type: "setRuleStatement",
+          ruleId: "rul-seat-limit",
+          statement:
+            "Confirmed enrollments never exceed capacity; a full course is rejected with COURSE_FULL and the student is told the capacity.",
+        },
+        {
+          type: "createCapability",
+          capability: {
+            id: "cap-cancel-enrollment",
+            kind: "capability",
+            owner: "mod-enrollment",
+            name: "Cancel enrollment",
+            initiatorActorId: "act-student",
+          },
+        },
       ],
     },
     dev,
@@ -125,11 +161,17 @@ test("model-first change: lineage, delta, impact, unattested approval and unboun
   const d = ok(repo, base);
   assert.equal(d.model.lineage, "extends");
   assert.equal(d.model.introduced.length, 1);
-  assert.deepEqual([d.model.introduced[0]!.changeId, d.model.introduced[0]!.derivation, d.model.introduced[0]!.approval], ["chg-cancel", "verified", "missing"]);
+  assert.deepEqual(
+    [d.model.introduced[0]!.changeId, d.model.introduced[0]!.derivation, d.model.introduced[0]!.approval],
+    ["chg-cancel", "verified", "missing"],
+  );
   assert.equal(d.model.integrity.ok, true, "unattested is a warning without --require-attestation");
   assert.ok(d.model.integrity.warnings.some((w) => w.code === "APPROVAL_NOT_ATTESTED"));
   const changed = d.model.delta.changes.map((c) => `${c.change}:${c.id}`).sort();
-  assert.ok(changed.includes("modified:rul-seat-limit") && changed.includes("added:cap-cancel-enrollment"), changed.join());
+  assert.ok(
+    changed.includes("modified:rul-seat-limit") && changed.includes("added:cap-cancel-enrollment"),
+    changed.join(),
+  );
   assert.ok(d.model.impact);
   assert.ok(d.source.files.some((f) => f.area === "vcv-model"));
   // A claim on a changed object is stale on the model axis.
@@ -165,7 +207,10 @@ test("removed claims, claims on objects the model lacks, and invalid claim files
   git(repo, "rm", "-q", ".vcv/bindings/expose.cap-enroll.json");
   git(repo, "commit", "-qm", "drop the route claim");
   const ghost = JSON.parse(git(repo, "show", "HEAD:.vcv/bindings/impl.cap-enroll.json"));
-  writeFileSync(join(repo, ".vcv/bindings/impl.ghost.json"), JSON.stringify({ ...ghost, bindingId: "impl.ghost", modelObjectId: "cap-ghost" }, null, 2));
+  writeFileSync(
+    join(repo, ".vcv/bindings/impl.ghost.json"),
+    JSON.stringify({ ...ghost, bindingId: "impl.ghost", modelObjectId: "cap-ghost" }, null, 2),
+  );
   writeFileSync(join(repo, ".vcv/bindings/broken.json"), "{ not json");
 
   const d = ok(repo, base);
@@ -216,7 +261,11 @@ test("coherency: a dirty same-path edit, a branch flip or a moved base ref mid-r
   let once = true;
   const flip = (fn: () => void) => ({ afterRead: () => (once ? ((once = false), fn()) : undefined) });
 
-  const r1 = reconcile(repo, { base }, flip(() => edit(repo, SERVICE, "Enrollment rules. Every decision", "Enrollment rules! Every decision")));
+  const r1 = reconcile(
+    repo,
+    { base },
+    flip(() => edit(repo, SERVICE, "Enrollment rules. Every decision", "Enrollment rules! Every decision")),
+  );
   assert.equal(!r1.ok && r1.error.code, "STATE_CHANGED");
 
   git(repo, "checkout", "-q", "--", SERVICE);
@@ -225,18 +274,30 @@ test("coherency: a dirty same-path edit, a branch flip or a moved base ref mid-r
   git(repo, "commit", "-qam", "other");
   git(repo, "checkout", "-q", "feature");
   once = true;
-  const r2 = reconcile(repo, { base }, flip(() => git(repo, "checkout", "-q", "other")));
+  const r2 = reconcile(
+    repo,
+    { base },
+    flip(() => git(repo, "checkout", "-q", "other")),
+  );
   assert.equal(!r2.ok && r2.error.code, "STATE_CHANGED");
 
   git(repo, "checkout", "-q", "feature");
   git(repo, "branch", "-q", "trunk", base);
   once = true;
-  const r3 = reconcile(repo, { base: "trunk" }, flip(() => git(repo, "branch", "-qf", "trunk", git(repo, "rev-parse", "other"))));
+  const r3 = reconcile(
+    repo,
+    { base: "trunk" },
+    flip(() => git(repo, "branch", "-qf", "trunk", git(repo, "rev-parse", "other"))),
+  );
   assert.equal(!r3.ok && r3.error.code, "STATE_CHANGED");
 
   // An edit to a claim file mid-read, too.
   once = true;
-  const r4 = reconcile(repo, { base }, flip(() => appendFileSync(join(repo, ".vcv/bindings/impl.cap-enroll.json"), " ")));
+  const r4 = reconcile(
+    repo,
+    { base },
+    flip(() => appendFileSync(join(repo, ".vcv/bindings/impl.cap-enroll.json"), " ")),
+  );
   assert.equal(!r4.ok && r4.error.code, "STATE_CHANGED");
 });
 
@@ -278,12 +339,22 @@ function attested() {
   const base = git(repo, "rev-parse", "HEAD");
   git(repo, "checkout", "-q", "-b", "feature");
   const id = "chg-statement";
-  const sub = submitProposal(repo, {
-    changeId: id,
-    projectId: "prj-course-desk",
-    expectedRevision: projectStatus(repo).model!.revision,
-    operations: [{ type: "setRuleStatement", ruleId: "rul-seat-limit", statement: "A full course is rejected with COURSE_FULL and the capacity." }],
-  }, { principalId: "agent:coder", permissions: ["model:propose"] });
+  const sub = submitProposal(
+    repo,
+    {
+      changeId: id,
+      projectId: "prj-course-desk",
+      expectedRevision: projectStatus(repo).model!.revision,
+      operations: [
+        {
+          type: "setRuleStatement",
+          ruleId: "rul-seat-limit",
+          statement: "A full course is rejected with COURSE_FULL and the capacity.",
+        },
+      ],
+    },
+    { principalId: "agent:coder", permissions: ["model:propose"] },
+  );
   assert.ok(sub.ok);
   const pv = previewProposal(repo, { changeId: id });
   assert.ok(pv.ok);
@@ -304,7 +375,12 @@ test("P1: approval evidence read by integrity is rechecked, also when the attest
   assert.equal(before.data.model.introduced[0]!.approval, "attested");
 
   appendFileSync(attestation, "\n"); // harmless, but the path is now dirty: the changed-path set no longer moves
-  assert.equal(strict().ok && strict().ok && (strict() as { data: { model: { integrity: { ok: boolean } } } }).data.model.integrity.ok, true);
+  assert.equal(
+    strict().ok &&
+      strict().ok &&
+      (strict() as { data: { model: { integrity: { ok: boolean } } } }).data.model.integrity.ok,
+    true,
+  );
   let once = true;
   const raced = strict({
     afterRead: () => {
@@ -314,7 +390,11 @@ test("P1: approval evidence read by integrity is rechecked, also when the attest
       writeFileSync(attestation, JSON.stringify({ ...a, approverId: "user:mallory" }, null, 2) + "\n");
     },
   });
-  assert.equal(!raced.ok && raced.error.code, "STATE_CHANGED", JSON.stringify(raced.ok ? raced.data.model.integrity : raced.error));
+  assert.equal(
+    !raced.ok && raced.error.code,
+    "STATE_CHANGED",
+    JSON.stringify(raced.ok ? raced.data.model.integrity : raced.error),
+  );
   const after = strict();
   assert.ok(after.ok);
   assert.equal(after.data.model.integrity.ok, false, "the final bytes fail integrity, and a fresh call says so");
@@ -326,12 +406,20 @@ test("P1: a trust file or trust ref that moves mid-read is STATE_CHANGED", () =>
   const file = join(mkdtempSync(join(tmpdir(), "vcv-trust-")), "reviewers.json");
   writeFileSync(file, git(repo, "show", `${base}:.vcv/reviewers.json`) + "\n");
   let once = true;
-  const r1 = reconcile(repo, { base, trust: { kind: "file", path: file } }, { afterRead: () => (once ? ((once = false), appendFileSync(file, " ")) : undefined) });
+  const r1 = reconcile(
+    repo,
+    { base, trust: { kind: "file", path: file } },
+    { afterRead: () => (once ? ((once = false), appendFileSync(file, " ")) : undefined) },
+  );
   assert.equal(!r1.ok && r1.error.code, "STATE_CHANGED");
   // An unpinned trust ref that is moved.
   git(repo, "branch", "-q", "trusted", trust.pinnedCommit);
   once = true;
-  const r2 = reconcile(repo, { base, trust: { kind: "git-ref", ref: "trusted" } }, { afterRead: () => (once ? ((once = false), git(repo, "branch", "-qf", "trusted", "HEAD")) : undefined) });
+  const r2 = reconcile(
+    repo,
+    { base, trust: { kind: "git-ref", ref: "trusted" } },
+    { afterRead: () => (once ? ((once = false), git(repo, "branch", "-qf", "trusted", "HEAD")) : undefined) },
+  );
   assert.equal(!r2.ok && r2.error.code, "STATE_CHANGED");
 });
 
@@ -345,10 +433,23 @@ test("P2: an unreadable claim store is reported as such, never as removed or una
     const d = ok(repo, base);
     assert.equal(d.bindings.available, false, kind);
     assert.match(d.bindings.problem!, kind === "file" ? /not a directory/ : /symlink/);
-    assert.deepEqual([d.bindings.items.length, d.bindings.unaffected, d.summary.removedClaims, d.summary.bindingsAssessed, d.source.unmapped], [0, null, 0, false, null]);
+    assert.deepEqual(
+      [
+        d.bindings.items.length,
+        d.bindings.unaffected,
+        d.summary.removedClaims,
+        d.summary.bindingsAssessed,
+        d.source.unmapped,
+      ],
+      [0, null, 0, false, null],
+    );
     const f = finding(d, "CLAIM_STORE_UNREADABLE")!;
     assert.deepEqual([f.category, f.basis], ["binding", "not-checked"]);
-    assert.ok(!codes(d).includes("CLAIM_REMOVED") && !codes(d).includes("UNMAPPED_CHANGES") && !codes(d).includes("OBJECT_UNBOUND"));
+    assert.ok(
+      !codes(d).includes("CLAIM_REMOVED") &&
+        !codes(d).includes("UNMAPPED_CHANGES") &&
+        !codes(d).includes("OBJECT_UNBOUND"),
+    );
     assert.equal(d.sourceImpact, null);
   }
 });
@@ -357,7 +458,19 @@ test("P2: the serialized report stays within its byte budget for valid worst-cas
   const { repo, base } = setup();
   const template = JSON.parse(readFileSync(join(repo, ".vcv/bindings/test.rul-seat-limit.json"), "utf8"));
   const long = "EnrollmentService > " + "x".repeat(50_000);
-  for (let i = 0; i < 5; i++) writeFileSync(join(repo, `.vcv/bindings/test.long-${i}.json`), JSON.stringify({ ...template, bindingId: `test.long-${i}`, locator: { ...template.locator, selector: { kind: "test", name: long } } }, null, 2));
+  for (let i = 0; i < 5; i++)
+    writeFileSync(
+      join(repo, `.vcv/bindings/test.long-${i}.json`),
+      JSON.stringify(
+        {
+          ...template,
+          bindingId: `test.long-${i}`,
+          locator: { ...template.locator, selector: { kind: "test", name: long } },
+        },
+        null,
+        2,
+      ),
+    );
   const d = ok(repo, base);
   const bytes = Buffer.byteLength(JSON.stringify(d, null, 2));
   assert.ok(bytes <= RECONCILE_LIMITS.bytes, `${bytes} bytes`);
@@ -368,7 +481,19 @@ test("P2: the serialized report stays within its byte budget for valid worst-cas
   for (const f of d.findings) assert.ok(f.message.length <= RECONCILE_LIMITS.textChars);
 
   // Many valid claims: lists are cut further, flagged, and the size still fits.
-  for (let i = 0; i < 600; i++) writeFileSync(join(repo, `.vcv/bindings/test.many-${i}.json`), JSON.stringify({ ...template, bindingId: `test.many-${i}`, locator: { ...template.locator, selector: { kind: "test", name: `${long.slice(0, 2000)} ${i}` } } }, null, 2));
+  for (let i = 0; i < 600; i++)
+    writeFileSync(
+      join(repo, `.vcv/bindings/test.many-${i}.json`),
+      JSON.stringify(
+        {
+          ...template,
+          bindingId: `test.many-${i}`,
+          locator: { ...template.locator, selector: { kind: "test", name: `${long.slice(0, 2000)} ${i}` } },
+        },
+        null,
+        2,
+      ),
+    );
   const m = ok(repo, base);
   const mBytes = Buffer.byteLength(JSON.stringify(m, null, 2));
   assert.ok(mBytes <= RECONCILE_LIMITS.bytes, `${mBytes} bytes`);

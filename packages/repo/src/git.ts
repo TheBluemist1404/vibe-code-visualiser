@@ -34,20 +34,32 @@ export type GitObservation = {
  * driver applies, whatever .gitattributes the checkout carries.
  */
 const SAFE_OPTIONS = [
-  "-c", "core.fsmonitor=false",
-  "-c", `core.hooksPath=${process.platform === "win32" ? "NUL" : "/dev/null"}`,
-  "-c", "core.untrackedCache=false",
-  "-c", "diff.external=",
-  "-c", "core.pager=cat",
+  "-c",
+  "core.fsmonitor=false",
+  "-c",
+  `core.hooksPath=${process.platform === "win32" ? "NUL" : "/dev/null"}`,
+  "-c",
+  "core.untrackedCache=false",
+  "-c",
+  "diff.external=",
+  "-c",
+  "core.pager=cat",
   "--no-pager",
 ];
-const EMPTY_TREE = { sha1: "4b825dc642cb6eb9a060e54bf8d69288fbee4904", sha256: "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321" } as const;
+const EMPTY_TREE = {
+  sha1: "4b825dc642cb6eb9a060e54bf8d69288fbee4904",
+  sha256: "6ef19b41225c5369f1c104d45d8d85efa9b057b53b14b4b9b939dd74decc5321",
+} as const;
 const objectFormat = new Map<string, "sha1" | "sha256">();
 function safeEnv(cwd: string): NodeJS.ProcessEnv {
   let format = objectFormat.get(cwd);
   if (!format) {
     try {
-      const out = execFileSync("git", ["-C", cwd, ...SAFE_OPTIONS, "rev-parse", "--show-object-format"], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"], env: baseEnv() }).trim();
+      const out = execFileSync("git", ["-C", cwd, ...SAFE_OPTIONS, "rev-parse", "--show-object-format"], {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "ignore"],
+        env: baseEnv(),
+      }).trim();
       format = out === "sha256" ? "sha256" : "sha1";
     } catch {
       format = "sha1";
@@ -57,9 +69,25 @@ function safeEnv(cwd: string): NodeJS.ProcessEnv {
   return { ...baseEnv(), GIT_ATTR_SOURCE: EMPTY_TREE[format] };
 }
 function baseEnv(): NodeJS.ProcessEnv {
-  const env: NodeJS.ProcessEnv = { ...process.env, GIT_OPTIONAL_LOCKS: "0", GIT_TERMINAL_PROMPT: "0", LC_ALL: "C", GIT_PAGER: "cat" };
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    GIT_OPTIONAL_LOCKS: "0",
+    GIT_TERMINAL_PROMPT: "0",
+    LC_ALL: "C",
+    GIT_PAGER: "cat",
+  };
   // Inherited variables that would point Git at another repository, config or attributes.
-  for (const k of ["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_CONFIG", "GIT_CONFIG_PARAMETERS", "GIT_CONFIG_COUNT", "GIT_ATTR_SOURCE", "GIT_EXTERNAL_DIFF"]) delete env[k];
+  for (const k of [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "GIT_ATTR_SOURCE",
+    "GIT_EXTERNAL_DIFF",
+  ])
+    delete env[k];
   return env;
 }
 
@@ -91,18 +119,42 @@ export const GIT_DRIVER_LIMITS = { keys: 1000, outputBytes: 256 * 1024 } as cons
  */
 function driverOptions(cwd: string): string[] {
   // Read every time (config can change between reads in a long-lived process such as the MCP server).
-  const r = spawnSync("git", ["-C", cwd, ...SAFE_OPTIONS, "config", "--name-only", "--get-regexp", "^(filter|diff|merge)\\..+\\.(clean|smudge|process|command|textconv|driver)$"], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-    env: safeEnv(cwd),
-    maxBuffer: GIT_DRIVER_LIMITS.outputBytes,
-  });
-  if (r.error || r.signal) throw new GitRefusedError(`the checkout's Git driver configuration could not be read within ${GIT_DRIVER_LIMITS.outputBytes} bytes (${r.error?.message ?? r.signal})`);
+  const r = spawnSync(
+    "git",
+    [
+      "-C",
+      cwd,
+      ...SAFE_OPTIONS,
+      "config",
+      "--name-only",
+      "--get-regexp",
+      "^(filter|diff|merge)\\..+\\.(clean|smudge|process|command|textconv|driver)$",
+    ],
+    {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      env: safeEnv(cwd),
+      maxBuffer: GIT_DRIVER_LIMITS.outputBytes,
+    },
+  );
+  if (r.error || r.signal)
+    throw new GitRefusedError(
+      `the checkout's Git driver configuration could not be read within ${GIT_DRIVER_LIMITS.outputBytes} bytes (${r.error?.message ?? r.signal})`,
+    );
   if (r.status === 1 && r.stdout === "") return [];
-  if (r.status !== 0) throw new GitRefusedError(`the checkout's Git driver configuration could not be read (git config exited ${r.status})`);
+  if (r.status !== 0)
+    throw new GitRefusedError(
+      `the checkout's Git driver configuration could not be read (git config exited ${r.status})`,
+    );
   const keys = new Set(r.stdout.split("\n").filter(Boolean));
-  if (keys.size === 0) throw new GitRefusedError("the checkout's Git driver configuration could not be read (no keys in a successful listing)");
-  if (keys.size > GIT_DRIVER_LIMITS.keys) throw new GitRefusedError(`the checkout configures more than ${GIT_DRIVER_LIMITS.keys} Git filter or diff/merge driver keys`);
+  if (keys.size === 0)
+    throw new GitRefusedError(
+      "the checkout's Git driver configuration could not be read (no keys in a successful listing)",
+    );
+  if (keys.size > GIT_DRIVER_LIMITS.keys)
+    throw new GitRefusedError(
+      `the checkout configures more than ${GIT_DRIVER_LIMITS.keys} Git filter or diff/merge driver keys`,
+    );
   const out: string[] = [];
   for (const k of keys) {
     out.push("-c", `${k}=`);
@@ -240,7 +292,11 @@ export function fileAtCommit(root: string, commit: string, rel: string, max: num
  * be asked. Read-only. Callers that need "absent" to mean absent use this before fileAtCommit, whose
  * null also covers oversized and unreadable blobs.
  */
-export function entryAtCommit(root: string, commit: string, rel: string): { kind: "absent" } | { kind: "blob"; size: number } | { kind: "other"; mode: string } | null {
+export function entryAtCommit(
+  root: string,
+  commit: string,
+  rel: string,
+): { kind: "absent" } | { kind: "blob"; size: number } | { kind: "other"; mode: string } | null {
   if (!/^[0-9a-f]{40,64}$/.test(commit) || rel.startsWith("-") || rel.includes("\0")) return null;
   const out = git(root, ["ls-tree", "-z", "--long", "--full-tree", commit, "--", rel]);
   if (out === null) return null;
@@ -272,7 +328,10 @@ export function refsContaining(root: string, commit: string): string[] {
 /** Repository-relative paths of the files under `dir` at a commit (recursive), sorted. */
 export function filesAtCommit(root: string, commit: string, dir: string): string[] {
   if (!/^[0-9a-f]{40,64}$/.test(commit) || dir.startsWith("-") || dir.includes("\0")) return [];
-  return (git(root, ["ls-tree", "-r", "-z", "--name-only", commit, "--", dir]) ?? "").split("\0").filter(Boolean).sort();
+  return (git(root, ["ls-tree", "-r", "-z", "--name-only", commit, "--", dir]) ?? "")
+    .split("\0")
+    .filter(Boolean)
+    .sort();
 }
 
 /** Whether `ancestor` is `commit` or one of its ancestors (`git merge-base --is-ancestor`). */
@@ -303,6 +362,16 @@ export function mergeBase(root: string, a: string, b: string): string | null {
 /** Repository-relative paths that differ between two commits (no renames), sorted. Null when either is not a commit here. */
 export function changedFilesBetween(root: string, from: string, to: string): string[] | null {
   if (!/^[0-9a-f]{40,64}$/.test(from) || !/^[0-9a-f]{40,64}$/.test(to)) return null;
-  const diff = git(root, ["diff", "--no-ext-diff", "--no-textconv", "--name-only", "-z", "--no-renames", from, to, "--"]);
+  const diff = git(root, [
+    "diff",
+    "--no-ext-diff",
+    "--no-textconv",
+    "--name-only",
+    "-z",
+    "--no-renames",
+    from,
+    to,
+    "--",
+  ]);
   return diff === null ? null : [...new Set(diff.split("\0").filter(Boolean))].sort();
 }

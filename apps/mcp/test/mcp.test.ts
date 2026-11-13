@@ -15,7 +15,13 @@ import { loadModel, parseYaml } from "../../../packages/ir/src/index.ts";
 import type { Model } from "../../../packages/ir/src/index.ts";
 import { FileStore, ModelEngine } from "../../../packages/core/src/index.ts";
 import { contextRequest, impactRequest, overviewRequest, searchRequest } from "../../../packages/query/src/index.ts";
-import type { ImpactAnalysis, ObjectContext, ProjectOverview, QueryResult, SearchResults } from "../../../packages/query/src/index.ts";
+import type {
+  ImpactAnalysis,
+  ObjectContext,
+  ProjectOverview,
+  QueryResult,
+  SearchResults,
+} from "../../../packages/query/src/index.ts";
 
 const ROOT = join(import.meta.dirname, "../../..");
 const MAIN = join(ROOT, "apps/mcp/src/main.ts");
@@ -62,9 +68,13 @@ const ids = (xs: { id: string }[]) => xs.map((x) => x.id);
 
 function fingerprint(dir: string): string {
   const walk = (d: string): string[] =>
-    readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? [join(d, e.name) + "/", ...walk(join(d, e.name))] : [join(d, e.name)])).sort();
+    readdirSync(d, { withFileTypes: true })
+      .flatMap((e) => (e.isDirectory() ? [join(d, e.name) + "/", ...walk(join(d, e.name))] : [join(d, e.name)]))
+      .sort();
   return walk(dir)
-    .map((f) => (f.endsWith("/") ? f : `${f}:${statSync(f).mtimeMs}:${createHash("sha256").update(readFileSync(f)).digest("hex")}`))
+    .map((f) =>
+      f.endsWith("/") ? f : `${f}:${statSync(f).mtimeMs}:${createHash("sha256").update(readFileSync(f)).digest("hex")}`,
+    )
     .join("\n");
 }
 
@@ -94,7 +104,10 @@ test("the server advertises the four read-only tools, their query-contract schem
     };
     // Every relation the snapshot emits, including the M4.2 criterion edge, is an accepted filter.
     const ctxTool = tools.find((t) => t.name === "vcv_get_context")!;
-    assert.ok(JSON.stringify(ctxTool.inputSchema).includes('"verifies"'), "vcv_get_context accepts the verifies relation");
+    assert.ok(
+      JSON.stringify(ctxTool.inputSchema).includes('"verifies"'),
+      "vcv_get_context accepts the verifies relation",
+    );
     for (const t of tools) {
       assert.deepEqual(t.inputSchema, expected[t.name], `${t.name} schema comes from @vcv/query`);
       assert.equal(t.annotations?.readOnlyHint, true);
@@ -131,28 +144,59 @@ test("rejected enrollment → Notifications: overview, search, context and impac
     const rev = overview.ok ? overview.context.modelRevision : "";
 
     // 2. Search, pinned to the revision, bounded and paged.
-    const first = data(await s.call<SearchResults>("vcv_search_objects", { text: "rejected enrollment", limit: 3, expectedRevision: rev }));
+    const first = data(
+      await s.call<SearchResults>("vcv_search_objects", {
+        text: "rejected enrollment",
+        limit: 3,
+        expectedRevision: rev,
+      }),
+    );
     assert.equal(first.hits.length, 3);
     assert.ok(first.total > 3 && first.truncated && first.nextCursor);
     const hitIds = ids(first.hits);
-    const second = data(await s.call<SearchResults>("vcv_search_objects", { text: "rejected enrollment", limit: 3, cursor: first.nextCursor, expectedRevision: rev }));
-    assert.ok(ids(second.hits).every((id) => !hitIds.includes(id)), "next page continues, no repeats");
+    const second = data(
+      await s.call<SearchResults>("vcv_search_objects", {
+        text: "rejected enrollment",
+        limit: 3,
+        cursor: first.nextCursor,
+        expectedRevision: rev,
+      }),
+    );
+    assert.ok(
+      ids(second.hits).every((id) => !hitIds.includes(id)),
+      "next page continues, no repeats",
+    );
     const all = data(await s.call<SearchResults>("vcv_search_objects", { text: "rejected enrollment", limit: 100 }));
     assert.ok(ids(all.hits).includes("evt-enrollment-rejected"));
     assert.equal(all.hits.find((h) => h.id === "evt-enrollment-rejected")!.moduleId, "mod-enrollment");
 
     // 3. Context of the event: contract and event path from Enrollment to Notifications.
-    const ctx = data(await s.call<ObjectContext>("vcv_get_context", { id: "evt-enrollment-rejected", depth: 2, expectedRevision: rev }));
-    const edge = (from: string, relation: string, to: string) => ctx.edges.some((e) => e.from === from && e.relation === relation && e.to === to);
+    const ctx = data(
+      await s.call<ObjectContext>("vcv_get_context", {
+        id: "evt-enrollment-rejected",
+        depth: 2,
+        expectedRevision: rev,
+      }),
+    );
+    const edge = (from: string, relation: string, to: string) =>
+      ctx.edges.some((e) => e.from === from && e.relation === relation && e.to === to);
     assert.equal(ctx.focus.moduleId, "mod-enrollment");
     assert.ok(edge("tr-reject", "effectEvent", "evt-enrollment-rejected"), "Enrollment's reject transition emits it");
-    assert.ok(edge("ctr-enrollment-events", "contractPublishes", "evt-enrollment-rejected"), "published by the Enrollment events contract");
+    assert.ok(
+      edge("ctr-enrollment-events", "contractPublishes", "evt-enrollment-rejected"),
+      "published by the Enrollment events contract",
+    );
     assert.ok(edge("mod-notifications", "consumes", "ctr-enrollment-events"), "Notifications consumes that contract");
-    assert.ok(edge("tr-send-notice", "triggerEvent", "evt-enrollment-rejected"), "Notifications' behavior is triggered by it");
+    assert.ok(
+      edge("tr-send-notice", "triggerEvent", "evt-enrollment-rejected"),
+      "Notifications' behavior is triggered by it",
+    );
     assert.equal(ctx.edges.find((e) => e.relation === "consumes")!.declaredAt, "modules[1].consumes[0]");
 
     // 4. Impact: Notifications is a dependent candidate, with path and reason.
-    const imp = data(await s.call<ImpactAnalysis>("vcv_analyze_impact", { ids: ["evt-enrollment-rejected"], expectedRevision: rev }));
+    const imp = data(
+      await s.call<ImpactAnalysis>("vcv_analyze_impact", { ids: ["evt-enrollment-rejected"], expectedRevision: rev }),
+    );
     assert.equal(imp.impactClass, "structural-candidate");
     assert.match(imp.note, /not.*checked/i);
     const cand = imp.candidates.find((c) => c.id === "mod-notifications")!;
@@ -161,10 +205,15 @@ test("rejected enrollment → Notifications: overview, search, context and impac
       { from: "evt-enrollment-rejected", relation: "contractPublishes", to: "ctr-enrollment-events" },
       { from: "ctr-enrollment-events", relation: "consumes", to: "mod-notifications" },
     ]);
-    assert.match(cand.reason, /module mod-notifications references contract ctr-enrollment-events \(consumes this contract\)/);
+    assert.match(
+      cand.reason,
+      /module mod-notifications references contract ctr-enrollment-events \(consumes this contract\)/,
+    );
 
     // Budgets are enforced by the query package and reported.
-    const small = data(await s.call<ImpactAnalysis>("vcv_analyze_impact", { ids: ["evt-enrollment-rejected"], maxResults: 2 }));
+    const small = data(
+      await s.call<ImpactAnalysis>("vcv_analyze_impact", { ids: ["evt-enrollment-rejected"], maxResults: 2 }),
+    );
     assert.equal(small.candidates.length, 2);
     assert.equal(small.truncated, true);
     const cut = data(await s.call<ObjectContext>("vcv_get_context", { id: "mod-enrollment", maxNodes: 3 }));
@@ -184,11 +233,17 @@ test("bad queries return structured tool errors and the server keeps serving", a
     assert.equal(unknown.context?.modelRevision, "rev-1");
 
     const unknownSeed = await s.call("vcv_analyze_impact", { ids: ["evt-enrollment-rejected", "mod-ghost"] });
-    assert.ok(!unknownSeed.ok && unknownSeed.error.code === "UNKNOWN_ID" && /mod-ghost/.test(unknownSeed.error.message));
+    assert.ok(
+      !unknownSeed.ok && unknownSeed.error.code === "UNKNOWN_ID" && /mod-ghost/.test(unknownSeed.error.message),
+    );
 
     const tooDeep = await s.call("vcv_get_context", { id: "mod-enrollment", depth: 9, colour: "red" });
     assert.ok(!tooDeep.ok && tooDeep.error.code === "INVALID_REQUEST");
-    assert.deepEqual(tooDeep.error.details?.map((d) => d.path).sort(), ["", "depth"], "range and unknown-key problems are both listed");
+    assert.deepEqual(
+      tooDeep.error.details?.map((d) => d.path).sort(),
+      ["", "depth"],
+      "range and unknown-key problems are both listed",
+    );
 
     const missing = await s.call("vcv_search_objects", {});
     assert.ok(!missing.ok && missing.error.code === "INVALID_REQUEST" && missing.error.details?.[0]?.path === "text");
@@ -197,11 +252,33 @@ test("bad queries return structured tool errors and the server keeps serving", a
     // any element is looked at (100k invalid entries do not produce 100k issues).
     const manyKinds = await s.call("vcv_search_objects", { text: "enrollment", kinds: Array(100_000).fill("table") });
     assert.ok(!manyKinds.ok && manyKinds.error.code === "INVALID_REQUEST");
-    assert.deepEqual(manyKinds.error.details, [{ path: "kinds", message: "Too big: expected array to have <=12 items" }]);
-    const manyRelations = await s.call("vcv_get_context", { id: "mod-enrollment", relations: Array(100_000).fill("consumes") });
+    assert.deepEqual(manyKinds.error.details, [
+      { path: "kinds", message: "Too big: expected array to have <=12 items" },
+    ]);
+    const manyRelations = await s.call("vcv_get_context", {
+      id: "mod-enrollment",
+      relations: Array(100_000).fill("consumes"),
+    });
     assert.ok(!manyRelations.ok && manyRelations.error.code === "INVALID_REQUEST");
-    assert.deepEqual(manyRelations.error.details, [{ path: "relations", message: "Too big: expected array to have <=20 items" }]);
-    const allKinds = await s.call("vcv_search_objects", { text: "enrollment", kinds: ["actor", "module", "capability", "data", "attribute", "rule", "event", "contract", "behavior", "state", "transition"] });
+    assert.deepEqual(manyRelations.error.details, [
+      { path: "relations", message: "Too big: expected array to have <=20 items" },
+    ]);
+    const allKinds = await s.call("vcv_search_objects", {
+      text: "enrollment",
+      kinds: [
+        "actor",
+        "module",
+        "capability",
+        "data",
+        "attribute",
+        "rule",
+        "event",
+        "contract",
+        "behavior",
+        "state",
+        "transition",
+      ],
+    });
     assert.ok(allKinds.ok, "a list of every kind once is within the cap");
 
     const badCursor = await s.call("vcv_search_objects", { text: "enrollment", cursor: "not-a-cursor" });
@@ -235,14 +312,23 @@ test("a draft store is served as a draft, with unresolved references as diagnost
     assert.ok(overview.ok);
     assert.equal(overview.context.snapshotStatus, "draft");
     assert.deepEqual(overview.data.validation, { errors: 0, warnings: 1 });
-    assert.deepEqual(overview.data.modules.find((m) => m.id === "mod-notifications")!.dependsOn, [{ unresolved: "Identity" }]);
+    assert.deepEqual(overview.data.modules.find((m) => m.id === "mod-notifications")!.dependsOn, [
+      { unresolved: "Identity" },
+    ]);
 
     const ctx = await s.call<ObjectContext>("vcv_get_context", { id: "mod-notifications", direction: "outgoing" });
     assert.ok(ctx.ok);
     assert.equal(ctx.context.snapshotStatus, "draft");
-    assert.ok(ctx.data.edges.some((e) => e.relation === "dependsOn" && typeof e.to !== "string" && e.to.unresolved === "Identity"));
+    assert.ok(
+      ctx.data.edges.some(
+        (e) => e.relation === "dependsOn" && typeof e.to !== "string" && e.to.unresolved === "Identity",
+      ),
+    );
     assert.ok(!ctx.data.nodes.some((n) => n.id === "Identity"), "an unresolved name is never a node");
-    assert.deepEqual(ctx.diagnostics.map((d) => d.code), ["UNRESOLVED_REF"]);
+    assert.deepEqual(
+      ctx.diagnostics.map((d) => d.code),
+      ["UNRESOLVED_REF"],
+    );
   } finally {
     await s.close();
   }
@@ -282,7 +368,10 @@ test("queries never write to the store; a revision committed elsewhere is seen o
 
     // Another process (here: this test, as the CLI would) applies a change through the engine.
     const change = parseYaml(readFileSync(join(FIXTURES, "change.timeout.yaml"), "utf8"));
-    const outcome = new ModelEngine(new FileStore(dir)).propose(change, { principalId: "user:hoang", permissions: ["model:propose", "model:apply"] });
+    const outcome = new ModelEngine(new FileStore(dir)).propose(change, {
+      principalId: "user:hoang",
+      permissions: ["model:propose", "model:apply"],
+    });
     assert.equal(outcome.status, "applied");
     const next = outcome.record!.resultingRevision!;
 
@@ -299,7 +388,11 @@ test("queries never write to the store; a revision committed elsewhere is seen o
 
 test("the server refuses to start without an explicit, initialized store and keeps stdout clean", () => {
   const run = (args: string[], env: Record<string, string> = {}) =>
-    spawnSync(process.execPath, ["--experimental-strip-types", MAIN, ...args], { encoding: "utf8", env: { PATH: process.env.PATH ?? "", ...env }, input: "" });
+    spawnSync(process.execPath, ["--experimental-strip-types", MAIN, ...args], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH ?? "", ...env },
+      input: "",
+    });
 
   const none = run([]);
   assert.equal(none.status, 2);

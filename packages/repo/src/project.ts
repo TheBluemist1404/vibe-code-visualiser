@@ -73,7 +73,13 @@ export type ModelLineChange =
   | "appeared"
   | "disappeared";
 
-export type ProjectRefresh = { status: ProjectStatus; previous: ProjectStatus; modelLine: ModelLineChange; gitCommitChanged: boolean; branchChanged: boolean };
+export type ProjectRefresh = {
+  status: ProjectStatus;
+  previous: ProjectStatus;
+  modelLine: ModelLineChange;
+  gitCommitChanged: boolean;
+  branchChanged: boolean;
+};
 
 /** Resolve the repository root for `path`: the Git working tree root, or the directory itself. */
 export function resolveProjectRoot(path: string): { root: string; isGit: boolean } {
@@ -95,11 +101,19 @@ export function projectStatus(path: string): ProjectStatus {
   switch (inspection.state) {
     case "absent":
       state = "absent";
-      diagnostics.push({ code: "NO_PROJECT", severity: "error", message: `no ${VCV_DIR}/ directory in ${root}; create one explicitly with \`vcv project init\`` });
+      diagnostics.push({
+        code: "NO_PROJECT",
+        severity: "error",
+        message: `no ${VCV_DIR}/ directory in ${root}; create one explicitly with \`vcv project init\``,
+      });
       break;
     case "uninitialized":
       state = "uninitialized";
-      diagnostics.push({ code: "NOT_INITIALIZED", severity: "error", message: `${VCV_DIR}/ exists but holds no model store (no ${VCV_DIR}/HEAD)` });
+      diagnostics.push({
+        code: "NOT_INITIALIZED",
+        severity: "error",
+        message: `${VCV_DIR}/ exists but holds no model store (no ${VCV_DIR}/HEAD)`,
+      });
       break;
     case "conflicted":
       state = "conflicted";
@@ -134,17 +148,35 @@ export function projectStatus(path: string): ProjectStatus {
         });
       }
       for (const l of inspection.leftovers) {
-        diagnostics.push({ code: "UNCOMMITTED_REVISION", severity: "info", message: `${l.id} is left over from an interrupted commit; the next write will move it to ${VCV_DIR}/orphaned/` });
+        diagnostics.push({
+          code: "UNCOMMITTED_REVISION",
+          severity: "info",
+          message: `${l.id} is left over from an interrupted commit; the next write will move it to ${VCV_DIR}/orphaned/`,
+        });
       }
       break;
     }
   }
 
-  if (!git) diagnostics.push({ code: "NOT_A_GIT_REPOSITORY", severity: "warning", message: `${root} is not a Git working tree; commit and branch context is unavailable` });
+  if (!git)
+    diagnostics.push({
+      code: "NOT_A_GIT_REPOSITORY",
+      severity: "warning",
+      message: `${root} is not a Git working tree; commit and branch context is unavailable`,
+    });
   else {
-    if (git.operation) diagnostics.push({ code: "GIT_OPERATION_IN_PROGRESS", severity: "warning", message: `a Git ${git.operation} is in progress; ${VCV_DIR}/ may be half-merged` });
+    if (git.operation)
+      diagnostics.push({
+        code: "GIT_OPERATION_IN_PROGRESS",
+        severity: "warning",
+        message: `a Git ${git.operation} is in progress; ${VCV_DIR}/ may be half-merged`,
+      });
     if (git.storeChanges.length) {
-      diagnostics.push({ code: "UNCOMMITTED_MODEL_CHANGES", severity: "info", message: `${git.storeChanges.length} ${VCV_DIR}/ path(s) differ from Git HEAD ${git.commit ?? "(no commits)"}` });
+      diagnostics.push({
+        code: "UNCOMMITTED_MODEL_CHANGES",
+        severity: "info",
+        message: `${git.storeChanges.length} ${VCV_DIR}/ path(s) differ from Git HEAD ${git.commit ?? "(no commits)"}`,
+      });
     }
   }
   return { state, root, storeDir, git, model, inspection, diagnostics };
@@ -153,7 +185,12 @@ export function projectStatus(path: string): ProjectStatus {
 export class ProjectError extends Error {
   readonly status: ProjectStatus;
   constructor(status: ProjectStatus) {
-    super(status.diagnostics.filter((d) => d.severity === "error").map((d) => d.message).join("; ") || `project is ${status.state}`);
+    super(
+      status.diagnostics
+        .filter((d) => d.severity === "error")
+        .map((d) => d.message)
+        .join("; ") || `project is ${status.state}`,
+    );
     this.name = "ProjectError";
     this.status = status;
   }
@@ -205,7 +242,8 @@ export class RepositoryProject {
 function lineChange(previous: ProjectStatus, now: ProjectStatus): ModelLineChange {
   const change = compareLines(previous.model?.history ?? null, now.model?.history ?? null);
   // Same IDs, different bytes: e.g. two branches that each initialized their own rev-1.
-  if (change === "unchanged" && previous.model && now.model && previous.model.fileDigest !== now.model.fileDigest) return "switched";
+  if (change === "unchanged" && previous.model && now.model && previous.model.fileDigest !== now.model.fileDigest)
+    return "switched";
   return change;
 }
 
@@ -226,9 +264,11 @@ export function compareLines(before: readonly string[] | null, after: readonly s
  */
 export function initProject(path: string, initial: Model): ProjectStatus {
   const { root } = resolveProjectRoot(path);
-  if (!existsSync(root) || !statSync(root).isDirectory()) throw new StoreError("NOT_INITIALIZED", `${root} is not a directory`);
+  if (!existsSync(root) || !statSync(root).isDirectory())
+    throw new StoreError("NOT_INITIALIZED", `${root} is not a directory`);
   const storeDir = join(root, VCV_DIR);
-  if (existsSync(join(storeDir, "HEAD"))) throw new StoreError("ALREADY_INITIALIZED", `${storeDir} already holds a model store`);
+  if (existsSync(join(storeDir, "HEAD")))
+    throw new StoreError("ALREADY_INITIALIZED", `${storeDir} already holds a model store`);
   mkdirSync(storeDir, { recursive: true });
   FileStore.init(storeDir, initial);
   writeFileSync(join(storeDir, ".gitignore"), VCV_GITIGNORE);

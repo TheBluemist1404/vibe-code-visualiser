@@ -10,7 +10,12 @@ import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { bindingEvidenceRequest, evidenceOverviewRequest, objectEvidenceRequest, refreshEvidenceRequest } from "../../../packages/repo/src/index.ts";
+import {
+  bindingEvidenceRequest,
+  evidenceOverviewRequest,
+  objectEvidenceRequest,
+  refreshEvidenceRequest,
+} from "../../../packages/repo/src/index.ts";
 import { ROOT, SERVICE, baseline, edit } from "../../../packages/repo/test/course-desk.ts";
 
 const MAIN = join(ROOT, "apps/mcp/src/main.ts");
@@ -24,12 +29,20 @@ const OPS = {
 type Op = keyof typeof OPS;
 
 function cli(repo: string, op: Op, request: unknown) {
-  const r = spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", CLI, "evidence", repo, op, "--request", JSON.stringify(request)], { encoding: "utf8" });
+  const r = spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", "--no-warnings", CLI, "evidence", repo, op, "--request", JSON.stringify(request)],
+    { encoding: "utf8" },
+  );
   return { status: r.status, result: JSON.parse(r.stdout) as { ok: boolean; error?: { code: string } } };
 }
 
 async function connect(repo: string) {
-  const transport = new StdioClientTransport({ command: process.execPath, args: ["--experimental-strip-types", MAIN, "--repo", repo], stderr: "pipe" });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: ["--experimental-strip-types", MAIN, "--repo", repo],
+    stderr: "pipe",
+  });
   const client = new Client({ name: "vcv-evidence-parity", version: "0" });
   await client.connect(transport);
   return {
@@ -73,9 +86,16 @@ test("repository mode adds four evidence tools (and the read-only proposal tools
   try {
     const { tools } = await s.client.listTools();
     assert.deepEqual(tools.map((t) => t.name).sort(), [
-      "vcv_analyze_impact", "vcv_get_binding_evidence", "vcv_get_context", "vcv_get_evidence_overview",
-      "vcv_get_object_evidence", "vcv_get_project_overview", "vcv_list_proposals", "vcv_preview_proposal",
-      "vcv_refresh_evidence", "vcv_search_objects",
+      "vcv_analyze_impact",
+      "vcv_get_binding_evidence",
+      "vcv_get_context",
+      "vcv_get_evidence_overview",
+      "vcv_get_object_evidence",
+      "vcv_get_project_overview",
+      "vcv_list_proposals",
+      "vcv_preview_proposal",
+      "vcv_refresh_evidence",
+      "vcv_search_objects",
     ]);
     const schema = (n: string) => tools.find((t) => t.name === n)!.inputSchema;
     const strip = (x: z.ZodType) => {
@@ -110,10 +130,22 @@ test("CLI and MCP give identical results for the same requests, valid and malfor
       assert.equal(viaCli.status, viaCli.result.ok ? 0 : 1);
     }
     // The same object evidence through both: claim ID, provenance, locator and state agree.
-    const both = [cli(repo, "object", { id: "rul-seat-limit" }).result, await s.call(OPS.object, { id: "rul-seat-limit" })] as unknown as {
-      data: { bindings: { bindingId: string; state: string; claim: { provenance: unknown; locator: { text: string } } }[] };
+    const both = [
+      cli(repo, "object", { id: "rul-seat-limit" }).result,
+      await s.call(OPS.object, { id: "rul-seat-limit" }),
+    ] as unknown as {
+      data: {
+        bindings: { bindingId: string; state: string; claim: { provenance: unknown; locator: { text: string } } }[];
+      };
     }[];
-    for (const r of both) assert.deepEqual(r.data.bindings.map((b) => [b.bindingId, b.state]), [["impl.rul-seat-limit", "stale"], ["test.rul-seat-limit", "resolved"]]);
+    for (const r of both)
+      assert.deepEqual(
+        r.data.bindings.map((b) => [b.bindingId, b.state]),
+        [
+          ["impl.rul-seat-limit", "stale"],
+          ["test.rul-seat-limit", "resolved"],
+        ],
+      );
   } finally {
     await s.close();
   }
@@ -125,7 +157,11 @@ test("parity for conflicted and unsafe claim storage and a project that stops be
   try {
     const file = join(repo, ".vcv/bindings/impl.cap-enroll.json");
     writeFileSync(file, `<<<<<<< ours\n${readFileSync(file, "utf8")}=======\n>>>>>>> theirs\n`);
-    for (const [op, req] of [["overview", {}], ["binding", { bindingId: "impl.cap-enroll" }], ["object", { id: "cap-enroll" }]] as [Op, unknown][]) {
+    for (const [op, req] of [
+      ["overview", {}],
+      ["binding", { bindingId: "impl.cap-enroll" }],
+      ["object", { id: "cap-enroll" }],
+    ] as [Op, unknown][]) {
       const viaCli = cli(repo, op, req).result;
       assert.ok(viaCli.ok);
       assert.deepEqual(await s.call(OPS[op], req), viaCli);
@@ -149,7 +185,10 @@ test("parity for conflicted and unsafe claim storage and a project that stops be
   // No project at all: the CLI says so, and the MCP server refuses to start with the same cause.
   const none = realpathSync(mkdtempSync(join(tmpdir(), "vcv-noproj-")));
   assert.equal(cli(none, "overview", {}).result.error?.code, "PROJECT_NOT_READY");
-  const r = spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", MAIN, "--repo", none], { encoding: "utf8", input: "" });
+  const r = spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", MAIN, "--repo", none], {
+    encoding: "utf8",
+    input: "",
+  });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /is absent/);
 });

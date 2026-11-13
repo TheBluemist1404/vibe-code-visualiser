@@ -17,7 +17,12 @@ const base = <K extends string>(kind: K) => ({
 
 const actor = z.object(base("actor")).strict();
 const module = z
-  .object({ ...base("module"), purpose: z.string().optional(), dependsOn: z.array(ref).optional(), consumes: z.array(ref).optional() })
+  .object({
+    ...base("module"),
+    purpose: z.string().optional(),
+    dependsOn: z.array(ref).optional(),
+    consumes: z.array(ref).optional(),
+  })
   .strict();
 const capability = z.object({ ...base("capability"), initiatorActorId: ref.optional() }).strict();
 const attribute = z
@@ -33,11 +38,21 @@ const data = z.object({ ...base("data"), attributes: z.array(attribute) }).stric
 // Rules may omit a display name (the spec's own permission-rule example has none).
 const ruleBase = { ...base("rule"), name: z.string().min(1).optional() };
 const rule = z.discriminatedUnion("ruleKind", [
-  z.object({ ...ruleBase, ruleKind: z.literal("permission"), actorId: ref, capabilityId: ref, statement: z.string().optional() }).strict(),
+  z
+    .object({
+      ...ruleBase,
+      ruleKind: z.literal("permission"),
+      actorId: ref,
+      capabilityId: ref,
+      statement: z.string().optional(),
+    })
+    .strict(),
   z.object({ ...ruleBase, ruleKind: z.enum(["invariant", "policy"]), statement: z.string().min(1) }).strict(),
 ]);
 const event = z.object(base("event")).strict();
-const contract = z.object({ ...base("contract"), accepts: z.array(ref).optional(), publishes: z.array(ref).optional() }).strict();
+const contract = z
+  .object({ ...base("contract"), accepts: z.array(ref).optional(), publishes: z.array(ref).optional() })
+  .strict();
 
 const criterion = z
   .object({
@@ -49,17 +64,32 @@ const criterion = z
   .strict();
 
 // ISO 8601 duration, date and time parts (e.g. P7D, PT12H, P1DT2H).
-const isoDuration = z.string().regex(/^P(?!$)(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+S)?)?$/, "ISO 8601 duration expected");
+const isoDuration = z
+  .string()
+  .regex(/^P(?!$)(\d+Y)?(\d+M)?(\d+W)?(\d+D)?(T(?=\d)(\d+H)?(\d+M)?(\d+S)?)?$/, "ISO 8601 duration expected");
 
 const trigger = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("event"), eventId: ref }).strict(),
-  z.object({ kind: z.literal("elapsed"), duration: isoDuration, anchor: z.object({ dataId: ref, attributeId: ref }).strict() }).strict(),
+  z
+    .object({
+      kind: z.literal("elapsed"),
+      duration: isoDuration,
+      anchor: z.object({ dataId: ref, attributeId: ref }).strict(),
+    })
+    .strict(),
 ]);
 const guard = z.object({ kind: z.literal("permission"), ruleId: ref }).strict();
 const effect = z.object({ kind: z.literal("emitEvent"), eventId: ref }).strict();
 const state = z.object({ id, name: z.string().min(1) }).strict();
 export const transitionSchema = z
-  .object({ id, fromStateId: ref, toStateId: ref, trigger, guards: z.array(guard).optional(), effects: z.array(effect).optional() })
+  .object({
+    id,
+    fromStateId: ref,
+    toStateId: ref,
+    trigger,
+    guards: z.array(guard).optional(),
+    effects: z.array(effect).optional(),
+  })
   .strict();
 const behavior = z
   .object({

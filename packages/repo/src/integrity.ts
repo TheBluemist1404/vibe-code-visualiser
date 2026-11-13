@@ -17,17 +17,42 @@
 // Store-wide: the store is ready (HEAD, revisions and records readable and verified), HEAD's last
 // commit is the applied record of the HEAD revision, no applied record points outside the
 // history, no stray attestations, and, with a base ref, the base's history is an unchanged prefix.
-import { canonicalJson, checkChange, listChangeRecords, proposalDigest, proposedChangeSchema, revisionDigest, FileStoreReader, readStoreFile, STORE_FILE_LIMITS } from "@vcv/core";
+import {
+  canonicalJson,
+  checkChange,
+  listChangeRecords,
+  proposalDigest,
+  proposedChangeSchema,
+  revisionDigest,
+  FileStoreReader,
+  readStoreFile,
+  STORE_FILE_LIMITS,
+} from "@vcv/core";
 import type { ChangeRecord } from "@vcv/core";
 import type { Model } from "@vcv/ir";
 import { readdirSync, lstatSync } from "node:fs";
 import { join } from "node:path";
-import { APPROVALS_DIR, ApprovalError, MAX_ATTESTATION_BYTES, TRUST_VERIFICATION, keyFingerprint, loadTrust, readAttestation, signatureValid } from "./approval.ts";
+import {
+  APPROVALS_DIR,
+  ApprovalError,
+  MAX_ATTESTATION_BYTES,
+  TRUST_VERIFICATION,
+  keyFingerprint,
+  loadTrust,
+  readAttestation,
+  signatureValid,
+} from "./approval.ts";
 import type { LoadedTrust, TrustSource } from "./approval.ts";
 import { fileAtCommit, filesAtCommit, isAncestor, resolveCommit } from "./git.ts";
 import { VCV_DIR, projectStatus } from "./project.ts";
 
-export type IntegrityProblem = { code: string; severity: "error" | "warning"; message: string; revision?: string; changeId?: string };
+export type IntegrityProblem = {
+  code: string;
+  severity: "error" | "warning";
+  message: string;
+  revision?: string;
+  changeId?: string;
+};
 
 export type ApprovalCheck =
   /** Valid signature by a key the trust source lists for the recorded approver, who is not the proposer. */
@@ -47,7 +72,15 @@ export type RevisionCheck = {
   changeId: string | null;
   /** Revisions after the base ref's HEAD (all derived revisions without a base). */
   introduced: boolean;
-  derivation: "initial" | "verified" | "no-record" | "ambiguous" | "base-mismatch" | "invalid-change" | "failed" | "mismatch";
+  derivation:
+    | "initial"
+    | "verified"
+    | "no-record"
+    | "ambiguous"
+    | "base-mismatch"
+    | "invalid-change"
+    | "failed"
+    | "mismatch";
   /** What the change record says (not proof). */
   recorded: { proposerId: string; approverId: string | null } | null;
   approval: { state: ApprovalCheck | "not-applicable"; approverId?: string; keyFingerprint?: string; detail: string };
@@ -59,7 +92,15 @@ export type IntegrityReport = {
   revision: string | null;
   revisions: RevisionCheck[];
   problems: IntegrityProblem[];
-  trust: { source: string; reviewers: number; protectedFromCheckout: boolean; authority: LoadedTrust["authority"]; verification: typeof TRUST_VERIFICATION; anchor: string; commit: string | null } | null;
+  trust: {
+    source: string;
+    reviewers: number;
+    protectedFromCheckout: boolean;
+    authority: LoadedTrust["authority"];
+    verification: typeof TRUST_VERIFICATION;
+    anchor: string;
+    commit: string | null;
+  } | null;
   /**
    * What `ok` means for authorization. `ok` says the history is consistent and attested under
    * the given anchor; it authorizes only when the host supplied that anchor (CI on the protected
@@ -95,8 +136,10 @@ const LIMITS = [
 /** Check a checkout's `.vcv/` history. Read-only: no recovery, no writes, no network. */
 export function checkIntegrity(path: string, opts: IntegrityOptions = {}): IntegrityReport {
   const problems: IntegrityProblem[] = [];
-  const err = (code: string, message: string, extra: Partial<IntegrityProblem> = {}) => problems.push({ code, severity: "error", message, ...extra });
-  const warn = (code: string, message: string, extra: Partial<IntegrityProblem> = {}) => problems.push({ code, severity: "warning", message, ...extra });
+  const err = (code: string, message: string, extra: Partial<IntegrityProblem> = {}) =>
+    problems.push({ code, severity: "error", message, ...extra });
+  const warn = (code: string, message: string, extra: Partial<IntegrityProblem> = {}) =>
+    problems.push({ code, severity: "warning", message, ...extra });
   const requireAttestation = !!opts.requireAttestation;
   const report = (over: Partial<IntegrityReport>): IntegrityReport => ({
     ok: !problems.some((p) => p.severity === "error"),
@@ -114,7 +157,10 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
 
   const status = projectStatus(path);
   if (status.state !== "ready" || !status.model) {
-    const why = status.diagnostics.filter((d) => d.severity === "error").map((d) => d.message).join("; ");
+    const why = status.diagnostics
+      .filter((d) => d.severity === "error")
+      .map((d) => d.message)
+      .join("; ");
     err("STORE_NOT_READY", `the VCV project is ${status.state}${why ? `: ${why}` : ""}`);
     return report({});
   }
@@ -140,7 +186,10 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
       trust = loadTrust(status.root, opts.trust);
       if (!trust.protectedFromCheckout) {
         // A strict check cannot accept trust the change under review controls.
-        (requireAttestation ? err : warn)("TRUST_FROM_CHECKOUT", `the trust list (${trust.source}) cannot establish trusted approval: ${trust.unprotectedReason}; use --trust-ref <protected base> or a file outside the checkout`);
+        (requireAttestation ? err : warn)(
+          "TRUST_FROM_CHECKOUT",
+          `the trust list (${trust.source}) cannot establish trusted approval: ${trust.unprotectedReason}; use --trust-ref <protected base> or a file outside the checkout`,
+        );
       }
     } catch (e) {
       err(e instanceof ApprovalError ? e.code : "INVALID_TRUST", (e as Error).message);
@@ -159,7 +208,12 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
       if (headBytes) {
         try {
           const h = JSON.parse(headBytes.toString("utf8")) as { revision?: unknown; history?: unknown };
-          if (!Array.isArray(h.history) || !h.history.every((x) => typeof x === "string") || typeof h.revision !== "string") throw new Error("bad");
+          if (
+            !Array.isArray(h.history) ||
+            !h.history.every((x) => typeof x === "string") ||
+            typeof h.revision !== "string"
+          )
+            throw new Error("bad");
           baseHistory = h.history as string[];
           baseRev = h.revision;
         } catch {
@@ -168,13 +222,26 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
       }
       base = { ref: opts.base, commit, revision: baseRev, history: baseHistory };
       const prefix = baseHistory.every((r, i) => history[i] === r);
-      if (!prefix) err("BASE_HISTORY_REWRITTEN", `the base's model history (${baseHistory.join(" → ")}) is not a prefix of this checkout's (${history.join(" → ")}); history was rewritten or replaced`);
+      if (!prefix)
+        err(
+          "BASE_HISTORY_REWRITTEN",
+          `the base's model history (${baseHistory.join(" → ")}) is not a prefix of this checkout's (${history.join(" → ")}); history was rewritten or replaced`,
+        );
       else {
         for (const rev of baseHistory) {
-          const theirs = fileAtCommit(status.root, commit, `${VCV_DIR}/revisions/${rev}.yaml`, STORE_FILE_LIMITS.revision);
+          const theirs = fileAtCommit(
+            status.root,
+            commit,
+            `${VCV_DIR}/revisions/${rev}.yaml`,
+            STORE_FILE_LIMITS.revision,
+          );
           const ours = readStoreFile(storeDir, `revisions/${rev}.yaml`, STORE_FILE_LIMITS.revision);
           if (!theirs || ours.kind !== "file" || !theirs.equals(ours.bytes)) {
-            err("BASE_REVISION_CHANGED", `revision ${rev} differs from the base's copy at ${opts.base}; committed revisions are never rewritten`, { revision: rev });
+            err(
+              "BASE_REVISION_CHANGED",
+              `revision ${rev} differs from the base's copy at ${opts.base}; committed revisions are never rewritten`,
+              { revision: rev },
+            );
           }
         }
         baseEvidence(status.root, storeDir, commit, opts.base, err);
@@ -185,7 +252,10 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
   // With a base, a Git trust anchor must be that base (or an ancestor of it): the trust list that
   // governs a change is the one the change is merged into, never one the branch chose for itself.
   if (base && trust?.commit && !isAncestor(status.root, trust.commit, base.commit)) {
-    (requireAttestation ? err : warn)("TRUST_NOT_FROM_BASE", `the trust list's commit ${trust.commit.slice(0, 12)} is not ${base.ref} (${base.commit.slice(0, 12)}) or one of its ancestors; read trust from the base under check`);
+    (requireAttestation ? err : warn)(
+      "TRUST_NOT_FROM_BASE",
+      `the trust list's commit ${trust.commit.slice(0, 12)} is not ${base.ref} (${base.commit.slice(0, 12)}) or one of its ancestors; read trust from the base under check`,
+    );
   }
 
   // Records.
@@ -193,10 +263,16 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
   const applied = new Map<string, ChangeRecord[]>();
   for (const e of entries) {
     const r = e.record;
-    if (r?.status === "applied" && typeof r.resultingRevision === "string") applied.set(r.resultingRevision, [...(applied.get(r.resultingRevision) ?? []), r]);
+    if (r?.status === "applied" && typeof r.resultingRevision === "string")
+      applied.set(r.resultingRevision, [...(applied.get(r.resultingRevision) ?? []), r]);
   }
   for (const [rev, rs] of applied) {
-    if (!history.includes(rev)) for (const r of rs) err("ORPHAN_APPLIED_RECORD", `change ${r.changeId} says it produced ${rev}, which is not in this history`, { changeId: r.changeId, revision: rev });
+    if (!history.includes(rev))
+      for (const r of rs)
+        err("ORPHAN_APPLIED_RECORD", `change ${r.changeId} says it produced ${rev}, which is not in this history`, {
+          changeId: r.changeId,
+          revision: rev,
+        });
   }
 
   // Revisions.
@@ -206,25 +282,57 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
     const rev = history[i]!;
     const introduced = opts.base !== undefined ? !baseSet.has(rev) : i > 0;
     if (i === 0) {
-      if (applied.has(rev)) warn("INITIAL_HAS_RECORD", `a change record claims to have produced the initial revision ${rev}`, { revision: rev });
-      revisions.push({ seq: 1, revision: rev, changeId: null, introduced, derivation: "initial", recorded: null, approval: { state: "not-applicable", detail: "initial revision (created by init; provenance not provable)" } });
-      if (introduced) warn("INITIAL_INTRODUCED", `the initial revision ${rev} is new relative to the base: the whole model is new and its origin is not provable`, { revision: rev });
+      if (applied.has(rev))
+        warn("INITIAL_HAS_RECORD", `a change record claims to have produced the initial revision ${rev}`, {
+          revision: rev,
+        });
+      revisions.push({
+        seq: 1,
+        revision: rev,
+        changeId: null,
+        introduced,
+        derivation: "initial",
+        recorded: null,
+        approval: { state: "not-applicable", detail: "initial revision (created by init; provenance not provable)" },
+      });
+      if (introduced)
+        warn(
+          "INITIAL_INTRODUCED",
+          `the initial revision ${rev} is new relative to the base: the whole model is new and its origin is not provable`,
+          { revision: rev },
+        );
       continue;
     }
     const parent = history[i - 1]!;
     const rs = applied.get(rev) ?? [];
-    const check: RevisionCheck = { seq: i + 1, revision: rev, changeId: null, introduced, derivation: "verified", recorded: null, approval: { state: "not-applicable", detail: "" } };
+    const check: RevisionCheck = {
+      seq: i + 1,
+      revision: rev,
+      changeId: null,
+      introduced,
+      derivation: "verified",
+      recorded: null,
+      approval: { state: "not-applicable", detail: "" },
+    };
     revisions.push(check);
     if (rs.length === 0) {
       check.derivation = "no-record";
       check.approval = { state: "missing", detail: "no change record" };
-      err("UNEXPLAINED_REVISION", `no applied change record produced ${rev}: it was written by hand, or its record was removed`, { revision: rev });
+      err(
+        "UNEXPLAINED_REVISION",
+        `no applied change record produced ${rev}: it was written by hand, or its record was removed`,
+        { revision: rev },
+      );
       continue;
     }
     if (rs.length > 1) {
       check.derivation = "ambiguous";
       check.approval = { state: "invalid", detail: "several records claim this revision" };
-      err("AMBIGUOUS_REVISION", `${rs.length} change records (${rs.map((r) => r.changeId).join(", ")}) claim to have produced ${rev}`, { revision: rev });
+      err(
+        "AMBIGUOUS_REVISION",
+        `${rs.length} change records (${rs.map((r) => r.changeId).join(", ")}) claim to have produced ${rev}`,
+        { revision: rev },
+      );
       continue;
     }
     const r = rs[0]!;
@@ -232,20 +340,34 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
     check.recorded = { proposerId: r.proposerId, approverId: r.approverId ?? null };
     if (r.baseRevision !== parent) {
       check.derivation = "base-mismatch";
-      err("BASE_MISMATCH", `change ${r.changeId} was based on ${r.baseRevision}, but ${rev} follows ${parent}`, { revision: rev, changeId: r.changeId });
+      err("BASE_MISMATCH", `change ${r.changeId} was based on ${r.baseRevision}, but ${rev} follows ${parent}`, {
+        revision: rev,
+        changeId: r.changeId,
+      });
     } else {
       const parsed = proposedChangeSchema.safeParse(r.change);
       if (!parsed.success) {
         check.derivation = "invalid-change";
-        err("INVALID_CHANGE", `change ${r.changeId} does not hold a typed change, so ${rev} cannot be derived`, { revision: rev, changeId: r.changeId });
+        err("INVALID_CHANGE", `change ${r.changeId} does not hold a typed change, so ${rev} cannot be derived`, {
+          revision: rev,
+          changeId: r.changeId,
+        });
       } else {
         const derived = checkChange(parsed.data, models[i - 1]!);
         if (!derived.model) {
           check.derivation = "failed";
-          err("DERIVATION_FAILED", `replaying change ${r.changeId} on ${parent} fails (${derived.errors.map((d) => d.code).join(", ")})`, { revision: rev, changeId: r.changeId });
+          err(
+            "DERIVATION_FAILED",
+            `replaying change ${r.changeId} on ${parent} fails (${derived.errors.map((d) => d.code).join(", ")})`,
+            { revision: rev, changeId: r.changeId },
+          );
         } else if (revisionDigest(derived.model, parent) !== revisionDigest(models[i]!, parent)) {
           check.derivation = "mismatch";
-          err("DERIVATION_MISMATCH", `${rev} is not what change ${r.changeId}'s operations produce from ${parent}: the revision or the record was edited`, { revision: rev, changeId: r.changeId });
+          err(
+            "DERIVATION_MISMATCH",
+            `${rev} is not what change ${r.changeId}'s operations produce from ${parent}: the revision or the record was edited`,
+            { revision: rev, changeId: r.changeId },
+          );
         }
       }
     }
@@ -255,7 +377,8 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
       const msg = `${rev} (change ${r.changeId}): approval ${a.state}: ${a.detail}`;
       // An attestation that is present but does not verify is evidence of tampering: always an error.
       if (a.state === "invalid") err("APPROVAL_INVALID", msg, { revision: rev, changeId: r.changeId });
-      else if (introduced && requireAttestation) err("APPROVAL_NOT_ATTESTED", msg, { revision: rev, changeId: r.changeId });
+      else if (introduced && requireAttestation)
+        err("APPROVAL_NOT_ATTESTED", msg, { revision: rev, changeId: r.changeId });
       else if (introduced) warn("APPROVAL_NOT_ATTESTED", msg, { revision: rev, changeId: r.changeId });
     }
   }
@@ -267,7 +390,9 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
     const headRecord = (applied.get(revision) ?? [])[0];
     if (history.length > 1 && !last) warn("HEAD_WITHOUT_LAST_COMMIT", "HEAD does not record its last commit");
     else if (last && (!headRecord || canonicalJson(last) !== canonicalJson(headRecord))) {
-      err("HEAD_RECORD_MISMATCH", `HEAD's last commit (${last.changeId}) is not the applied record of ${revision}`, { revision });
+      err("HEAD_RECORD_MISMATCH", `HEAD's last commit (${last.changeId}) is not the applied record of ${revision}`, {
+        revision,
+      });
     }
   }
 
@@ -275,14 +400,29 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
   const attested = new Set(revisions.map((c) => c.changeId).filter(Boolean));
   for (const f of listDir(join(storeDir, APPROVALS_DIR))) {
     const id = f.replace(/\.json$/, "");
-    if (f.endsWith(".json") && !attested.has(id)) warn("STRAY_ATTESTATION", `${VCV_DIR}/${APPROVALS_DIR}/${f} attests a change that produced no revision in this history`, { changeId: id });
+    if (f.endsWith(".json") && !attested.has(id))
+      warn(
+        "STRAY_ATTESTATION",
+        `${VCV_DIR}/${APPROVALS_DIR}/${f} attests a change that produced no revision in this history`,
+        { changeId: id },
+      );
   }
 
   return report({
     projectId,
     revision,
     revisions,
-    trust: trust ? { source: trust.source, reviewers: trust.list.reviewers.length, protectedFromCheckout: trust.protectedFromCheckout, authority: trust.authority, verification: TRUST_VERIFICATION, anchor: trust.anchor, commit: trust.commit ?? null } : null,
+    trust: trust
+      ? {
+          source: trust.source,
+          reviewers: trust.list.reviewers.length,
+          protectedFromCheckout: trust.protectedFromCheckout,
+          authority: trust.authority,
+          verification: TRUST_VERIFICATION,
+          anchor: trust.anchor,
+          commit: trust.commit ?? null,
+        }
+      : null,
     base,
   });
 }
@@ -292,7 +432,13 @@ export function checkIntegrity(path: string, opts: IntegrityOptions = {}): Integ
  * the base already settled (applied or rejected). A pending record may still be decided on the
  * branch, so it may change. Legacy unattested base revisions are not required to gain one.
  */
-function baseEvidence(root: string, storeDir: string, commit: string, ref: string, err: (code: string, message: string, extra?: Partial<IntegrityProblem>) => void) {
+function baseEvidence(
+  root: string,
+  storeDir: string,
+  commit: string,
+  ref: string,
+  err: (code: string, message: string, extra?: Partial<IntegrityProblem>) => void,
+) {
   const check = (sub: string, max: number, settledOnly: boolean) => {
     for (const rel of filesAtCommit(root, commit, `${VCV_DIR}/${sub}`)) {
       if (!rel.endsWith(".json")) continue;
@@ -310,8 +456,18 @@ function baseEvidence(root: string, storeDir: string, commit: string, ref: strin
         if (st === "pending") continue;
       }
       const ours = readStoreFile(storeDir, name, max);
-      if (ours.kind === "absent") err("BASE_EVIDENCE_REMOVED", `${rel} exists at ${ref} but was removed here; the base's ${sub === APPROVALS_DIR ? "approval attestations" : "settled change records"} are never removed`, { changeId });
-      else if (ours.kind !== "file" || !theirs.equals(ours.bytes)) err("BASE_EVIDENCE_CHANGED", `${rel} differs from its copy at ${ref}; the base's ${sub === APPROVALS_DIR ? "approval attestations" : "settled change records"} are never rewritten`, { changeId });
+      if (ours.kind === "absent")
+        err(
+          "BASE_EVIDENCE_REMOVED",
+          `${rel} exists at ${ref} but was removed here; the base's ${sub === APPROVALS_DIR ? "approval attestations" : "settled change records"} are never removed`,
+          { changeId },
+        );
+      else if (ours.kind !== "file" || !theirs.equals(ours.bytes))
+        err(
+          "BASE_EVIDENCE_CHANGED",
+          `${rel} differs from its copy at ${ref}; the base's ${sub === APPROVALS_DIR ? "approval attestations" : "settled change records"} are never rewritten`,
+          { changeId },
+        );
     }
   };
   check(APPROVALS_DIR, MAX_ATTESTATION_BYTES, false);
@@ -328,9 +484,21 @@ function listDir(dir: string): string[] {
   }
 }
 
-export function approvalCheck(storeDir: string, r: ChangeRecord, rev: string, trust: LoadedTrust | null, trustRequested: boolean): RevisionCheck["approval"] {
+export function approvalCheck(
+  storeDir: string,
+  r: ChangeRecord,
+  rev: string,
+  trust: LoadedTrust | null,
+  trustRequested: boolean,
+): RevisionCheck["approval"] {
   const read = readAttestation(storeDir, r.changeId);
-  if (!read) return { state: "missing", detail: r.approverId ? `record names ${r.approverId}, but there is no attestation: provenance unknown` : "applied without a separate approver and without an attestation: provenance unknown" };
+  if (!read)
+    return {
+      state: "missing",
+      detail: r.approverId
+        ? `record names ${r.approverId}, but there is no attestation: provenance unknown`
+        : "applied without a separate approver and without an attestation: provenance unknown",
+    };
   if (!read.attestation) return { state: "invalid", detail: read.problem! };
   const a = read.attestation;
   const fp = keyFingerprint(a.publicKey);
@@ -345,13 +513,23 @@ export function approvalCheck(storeDir: string, r: ChangeRecord, rev: string, tr
     a.resultingRevision !== rev && "resultingRevision",
     a.keyFingerprint !== fp && "keyFingerprint",
   ].filter(Boolean);
-  if (mismatch.length) return { ...base, state: "invalid", detail: `attestation does not match the record (${mismatch.join(", ")})` };
+  if (mismatch.length)
+    return { ...base, state: "invalid", detail: `attestation does not match the record (${mismatch.join(", ")})` };
   if (!signatureValid(a)) return { ...base, state: "invalid", detail: "signature does not verify" };
   if (a.approverId === a.proposerId) return { ...base, state: "invalid", detail: "approver is the proposer" };
-  if (!trust) return { ...base, state: "trust-unavailable", detail: trustRequested ? "the trust list could not be loaded" : "no trust source given (--trust or --trust-ref)" };
+  if (!trust)
+    return {
+      ...base,
+      state: "trust-unavailable",
+      detail: trustRequested ? "the trust list could not be loaded" : "no trust source given (--trust or --trust-ref)",
+    };
   const entry = trust.list.reviewers.find((x) => x.publicKey === a.publicKey);
   if (!entry || entry.id !== a.approverId || !entry.permissions.includes("model:approve")) {
-    return { ...base, state: "untrusted-key", detail: `key ${fp} is not listed for ${a.approverId} in ${trust.source}` };
+    return {
+      ...base,
+      state: "untrusted-key",
+      detail: `key ${fp} is not listed for ${a.approverId} in ${trust.source}`,
+    };
   }
   return { ...base, state: "attested", detail: `signed by ${a.approverId} (key ${fp}), trusted per ${trust.source}` };
 }

@@ -24,7 +24,11 @@ const FAIL = readFileSync(join(FIX, "vitest-fail-skip.xml"));
 const host: HostContext = { principalId: "ci:gate", permissions: ["tests:observe"] };
 const dev: HostContext = { principalId: "user:dev", permissions: ["model:propose", "model:apply"] };
 const agentHost: HostContext = { principalId: "agent:coder", permissions: [] };
-const JUNIT = { root: "server", runner: { name: "vitest", version: "5.1.0" }, invocation: "npx vitest run --reporter=junit" };
+const JUNIT = {
+  root: "server",
+  runner: { name: "vitest", version: "5.1.0" },
+  invocation: "npx vitest run --reporter=junit",
+};
 /** A report as the host hands it over: with the identity it read before the tests ran. */
 const junit = (report: Uint8Array, repo: string) => {
   const id = testIdentity(repo);
@@ -46,7 +50,8 @@ function gate(repo: string, req: GateRequest, who: HostContext = host): GateRepo
   return r.data;
 }
 const blocking = (g: GateReport) => g.reasons.filter((r) => r.severity === "block");
-const codes = (g: GateReport, sev?: "block" | "warn") => g.reasons.filter((r) => !sev || r.severity === sev).map((r) => r.code);
+const codes = (g: GateReport, sev?: "block" | "warn") =>
+  g.reasons.filter((r) => !sev || r.severity === sev).map((r) => r.code);
 
 test("a code-first PR whose required criterion passed in a run captured here is not blocked", () => {
   const { repo, base } = codeFirst();
@@ -54,7 +59,13 @@ test("a code-first PR whose required criterion passed in a run captured here is 
   assert.notEqual(g.decision, "block", JSON.stringify(blocking(g)));
   assert.equal(g.change.kind, "code-first");
   assert.equal(g.change.lineage, "unchanged");
-  assert.deepEqual(g.criteria.items.map((c) => [c.id, c.result, c.observedBy]), [["crt-confirm", "passed", "host"], ["crt-full-course", "passed", "host"]]);
+  assert.deepEqual(
+    g.criteria.items.map((c) => [c.id, c.result, c.observedBy]),
+    [
+      ["crt-confirm", "passed", "host"],
+      ["crt-full-course", "passed", "host"],
+    ],
+  );
   assert.equal(g.runs[0]!.observedBy, "host");
   assert.equal(g.policy.source, "default");
   assert.match(g.headline, /1\/1 required criteria passed/);
@@ -110,26 +121,43 @@ test("a model-first PR with an attested approval passes; a hand-edited revision 
   // Weaken the approved criterion with a direct engine write: a valid revision, but no approval.
   git(repo, "checkout", "-qb", "sneaky");
   const engine = new ModelEngine(new FileStore(join(repo, ".vcv")));
-  const out = engine.propose({ changeId: "chg-sneaky", projectId: "prj-course-desk", expectedRevision: projectStatus(repo).model!.revision, operations: [{ type: "reviseCriterion", criterionId: "crt-full-course", verification: "optional" }] }, dev);
+  const out = engine.propose(
+    {
+      changeId: "chg-sneaky",
+      projectId: "prj-course-desk",
+      expectedRevision: projectStatus(repo).model!.revision,
+      operations: [{ type: "reviseCriterion", criterionId: "crt-full-course", verification: "optional" }],
+    },
+    dev,
+  );
   assert.equal(out.status, "applied", JSON.stringify(out));
   git(repo, "add", "-A");
   git(repo, "commit", "-qm", "make it optional");
   const unapproved = gate(repo, { base, junit: junit(FAIL, repo) });
   assert.equal(unapproved.decision, "block");
-  assert.ok(blocking(unapproved).some((r) => r.code === "APPROVAL_NOT_ATTESTED" && r.rule === "integrity"), JSON.stringify(unapproved.reasons));
+  assert.ok(
+    blocking(unapproved).some((r) => r.code === "APPROVAL_NOT_ATTESTED" && r.rule === "integrity"),
+    JSON.stringify(unapproved.reasons),
+  );
   // The failure is now optional in the candidate's (unapproved) model, but integrity still blocks.
   assert.equal(unapproved.criteria.items.find((c) => c.id === "crt-full-course")!.verification, "optional");
 
   // A hand-edited revision file: the candidate's model is not even readable. Blocked, not an error.
   git(repo, "checkout", "-qb", "hand-edit", base);
   const dir = join(repo, ".vcv/revisions");
-  const latest = readdirSync(dir).filter((f) => f.endsWith(".yaml")).sort().at(-1)!;
+  const latest = readdirSync(dir)
+    .filter((f) => f.endsWith(".yaml"))
+    .sort()
+    .at(-1)!;
   const file = join(dir, latest);
   writeFileSync(file, readFileSync(file, "utf8").replace("verification: required", "verification: optional"));
   git(repo, "commit", "-qam", "edit the revision");
   const bad = gate(repo, { base, junit: junit(PASS, repo) });
   assert.equal(bad.decision, "block");
-  assert.deepEqual(blocking(bad).map((r) => [r.code, r.rule]), [["PROJECT_NOT_READY", "integrity"]]);
+  assert.deepEqual(
+    blocking(bad).map((r) => [r.code, r.rule]),
+    [["PROJECT_NOT_READY", "integrity"]],
+  );
   assert.match(bad.reasons[0]!.message, /does not match its ID/);
 });
 
@@ -137,14 +165,20 @@ test("the policy comes from the host or the base commit; a candidate's own polic
   const { repo, base: b0 } = setup();
   // The base carries a strict policy: an observation of kind contradiction blocks.
   mkdirSync(join(repo, ".github"), { recursive: true });
-  writeFileSync(join(repo, ".github/vcv-policy.json"), JSON.stringify({ format: "vcv-policy-1", observations: { contradiction: "block" } }));
+  writeFileSync(
+    join(repo, ".github/vcv-policy.json"),
+    JSON.stringify({ format: "vcv-policy-1", observations: { contradiction: "block" } }),
+  );
   git(repo, "add", "-A");
   git(repo, "commit", "-qm", "gate policy");
   const base = git(repo, "rev-parse", "HEAD");
   assert.notEqual(base, b0);
   git(repo, "checkout", "-qb", "feature");
   // The candidate relaxes required failures to warnings.
-  writeFileSync(join(repo, ".github/vcv-policy.json"), JSON.stringify({ format: "vcv-policy-1", required: { failed: "warn" } }));
+  writeFileSync(
+    join(repo, ".github/vcv-policy.json"),
+    JSON.stringify({ format: "vcv-policy-1", required: { failed: "warn" } }),
+  );
   git(repo, "commit", "-qam", "relax the gate");
   const g = gate(repo, { base, junit: junit(FAIL, repo), policyAtBase: ".github/vcv-policy.json" });
   assert.equal(g.decision, "block");
@@ -156,14 +190,22 @@ test("the policy comes from the host or the base commit; a candidate's own polic
 
   // No policy can lower a required criterion: that is approved intent (M3), not configuration.
   for (const required of [{ failed: "warn" }, { unverified: "off" }, { claimed: "warn" }]) {
-    const r = preMergeGate(repo, { base, junit: junit(FAIL, repo), policy: { format: "vcv-policy-1", required } }, host);
+    const r = preMergeGate(
+      repo,
+      { base, junit: junit(FAIL, repo), policy: { format: "vcv-policy-1", required } },
+      host,
+    );
     assert.equal(!r.ok && r.error.code, "POLICY_INVALID", JSON.stringify(required));
   }
   const unknownKey = preMergeGate(repo, { base, policy: { format: "vcv-policy-1", integrity: "off" } }, host);
   assert.equal(!unknownKey.ok && unknownKey.error.code, "POLICY_INVALID");
   assert.equal(REQUIRED_EVIDENCE.failed, "block");
   // Optional criteria stay configurable.
-  const optionalOff = gate(repo, { base, junit: junit(FAIL, repo), policy: { format: "vcv-policy-1", optional: { failed: "off" } } });
+  const optionalOff = gate(repo, {
+    base,
+    junit: junit(FAIL, repo),
+    policy: { format: "vcv-policy-1", optional: { failed: "off" } },
+  });
   assert.equal(optionalOff.decision, "block", "the required failure still blocks");
 });
 
@@ -172,10 +214,32 @@ test("agent observations are claims: references are checked, interpretations are
   const observations = {
     format: "vcv-observations-1",
     observations: [
-      { id: "obs-reason", kind: "contradiction", statement: "enroll() drops the rejection reason", objects: ["rul-seat-limit"], locations: [{ path: SERVICE, startLine: 1, endLine: 3 }], tests: [{ path: SPEC, name: FULL }], resolution: "fix-code", author: "agent:coder" },
-      { id: "obs-ghost", kind: "concern", statement: "something about a module that does not exist", objects: ["mod-ghost"], locations: [{ path: "server/src/ghost.ts" }], resolution: "inspect" },
+      {
+        id: "obs-reason",
+        kind: "contradiction",
+        statement: "enroll() drops the rejection reason",
+        objects: ["rul-seat-limit"],
+        locations: [{ path: SERVICE, startLine: 1, endLine: 3 }],
+        tests: [{ path: SPEC, name: FULL }],
+        resolution: "fix-code",
+        author: "agent:coder",
+      },
+      {
+        id: "obs-ghost",
+        kind: "concern",
+        statement: "something about a module that does not exist",
+        objects: ["mod-ghost"],
+        locations: [{ path: "server/src/ghost.ts" }],
+        resolution: "inspect",
+      },
       { id: "obs-vague", kind: "contradiction", statement: "the code is wrong", resolution: "inspect" },
-      { id: "obs-lines", kind: "note", statement: "context", locations: [{ path: SERVICE, startLine: 100000 }], resolution: "none" },
+      {
+        id: "obs-lines",
+        kind: "note",
+        statement: "context",
+        locations: [{ path: SERVICE, startLine: 100000 }],
+        resolution: "none",
+      },
     ],
   };
   const g = gate(repo, { base, junit: junit(PASS, repo), observations });
@@ -190,25 +254,55 @@ test("agent observations are claims: references are checked, interpretations are
   assert.equal(by("obs-vague").references, "unsupported");
   assert.equal(by("obs-lines").locations[0]!.check, "line-out-of-range");
   const warn = codes(g, "warn");
-  for (const c of ["AGENT_CONTRADICTION", "AGENT_CONCERN", "OBSERVATION_REFERENCES_INVALID", "OBSERVATION_WITHOUT_LOCATION"]) assert.ok(warn.includes(c), c);
+  for (const c of [
+    "AGENT_CONTRADICTION",
+    "AGENT_CONCERN",
+    "OBSERVATION_REFERENCES_INVALID",
+    "OBSERVATION_WITHOUT_LOCATION",
+  ])
+    assert.ok(warn.includes(c), c);
   assert.ok(g.reasons.filter((r) => r.observationId).every((r) => r.basis === "claim"));
 
   // A team may block on unresolved agent contradictions; the reason still says it is a claim.
-  const strict = gate(repo, { base, junit: junit(PASS, repo), observations, policy: { format: "vcv-policy-1", observations: { contradiction: "block" } } });
+  const strict = gate(repo, {
+    base,
+    junit: junit(PASS, repo),
+    observations,
+    policy: { format: "vcv-policy-1", observations: { contradiction: "block" } },
+  });
   assert.equal(strict.decision, "block");
-  assert.match(blocking(strict).find((r) => r.observationId === "obs-reason")!.message, /agent claim, not checked by VCV/);
+  assert.match(
+    blocking(strict).find((r) => r.observationId === "obs-reason")!.message,
+    /agent claim, not checked by VCV/,
+  );
 
-  const dup = preMergeGate(repo, { base, observations: { format: "vcv-observations-1", observations: [observations.observations[0], observations.observations[0]] } }, host);
+  const dup = preMergeGate(
+    repo,
+    {
+      base,
+      observations: {
+        format: "vcv-observations-1",
+        observations: [observations.observations[0], observations.observations[0]],
+      },
+    },
+    host,
+  );
   assert.equal(!dup.ok && dup.error.code, "INVALID_REQUEST");
 });
 
 test("requireEvidence blocks a touched object without a host-observed required pass", () => {
   const { repo, base } = codeFirst();
-  const policy = { format: "vcv-policy-1", requireEvidence: [{ object: "rul-seat-limit" }, { object: "cap-enroll", reason: "enrollment is billing-relevant" }] };
+  const policy = {
+    format: "vcv-policy-1",
+    requireEvidence: [{ object: "rul-seat-limit" }, { object: "cap-enroll", reason: "enrollment is billing-relevant" }],
+  };
   const g = gate(repo, { base, junit: junit(PASS, repo), policy });
   const ev = blocking(g).filter((r) => r.code === "EVIDENCE_REQUIRED");
   // rul-seat-limit is verified by crt-full-course, which passed; no required criterion verifies cap-enroll.
-  assert.deepEqual(ev.map((r) => r.objectIds), [["cap-enroll"]]);
+  assert.deepEqual(
+    ev.map((r) => r.objectIds),
+    [["cap-enroll"]],
+  );
   assert.match(ev[0]!.message, /none verifies it\. enrollment is billing-relevant/);
 });
 
@@ -219,7 +313,13 @@ test("the gate refuses a base that is not a full commit ID, and a candidate that
   const ref = preMergeGate(repo, { base: "main" }, host);
   assert.equal(!ref.ok && ref.error.code, "INVALID_REQUEST");
   let once = true;
-  const moved = preMergeGate(repo, { base, junit: junit(PASS, repo) }, host, { afterRead: () => (once ? ((once = false), edit(repo, SERVICE, "Enrollment rules; every decision", "Enrollment rules (moved); every decision")) : undefined) });
+  const moved = preMergeGate(repo, { base, junit: junit(PASS, repo) }, host, {
+    afterRead: () =>
+      once
+        ? ((once = false),
+          edit(repo, SERVICE, "Enrollment rules; every decision", "Enrollment rules (moved); every decision"))
+        : undefined,
+  });
   assert.equal(!moved.ok && moved.error.code, "STATE_CHANGED");
 });
 
@@ -240,7 +340,11 @@ test("a report is host-observed only with the identity read before the run: an o
   assert.ok(before.ok);
   // The tests ran (PASS) on identity A; then the implementation changes (identity B).
   edit(repo, SERVICE, "...(reason ? { reason } : {}),", "");
-  const raced = preMergeGate(repo, { base, junit: [{ report: PASS, ...JUNIT, before: before.data.identityDigest }] }, host);
+  const raced = preMergeGate(
+    repo,
+    { base, junit: [{ report: PASS, ...JUNIT, before: before.data.identityDigest }] },
+    host,
+  );
   assert.equal(!raced.ok && raced.error.code, "TEST_RUN_RACED");
   // Without the pre-run identity the gate does not make one up: the report is a claim, and blocks.
   const unbound = gate(repo, { base, junit: [{ report: PASS, ...JUNIT }] });
@@ -251,15 +355,29 @@ test("a report is host-observed only with the identity read before the run: an o
 
 test("a pending proposal the candidate carries is shown, and is not part of the model the gate used", () => {
   const { repo, base } = codeFirst();
-  const sub = submitProposal(repo, { changeId: "chg-pending", projectId: "prj-course-desk", expectedRevision: projectStatus(repo).model!.revision, operations: [
-    { type: "reviseCriterion", criterionId: "crt-full-course", verification: "optional" },
-  ] }, { principalId: "agent:coder", permissions: ["model:propose"] });
+  const sub = submitProposal(
+    repo,
+    {
+      changeId: "chg-pending",
+      projectId: "prj-course-desk",
+      expectedRevision: projectStatus(repo).model!.revision,
+      operations: [{ type: "reviseCriterion", criterionId: "crt-full-course", verification: "optional" }],
+    },
+    { principalId: "agent:coder", permissions: ["model:propose"] },
+  );
   assert.ok(sub.ok);
   git(repo, "add", "-A");
   git(repo, "commit", "-qm", "propose making the criterion optional");
   const g = gate(repo, { base, junit: junit(PASS, repo) });
-  assert.deepEqual(g.reasons.filter((r) => r.code === "PROPOSAL_PENDING").map((r) => [r.severity, r.message.includes("chg-pending")]), [["warn", true]]);
-  assert.equal(g.criteria.items.find((c) => c.id === "crt-full-course")?.verification, "required", "the approved policy still applies");
+  assert.deepEqual(
+    g.reasons.filter((r) => r.code === "PROPOSAL_PENDING").map((r) => [r.severity, r.message.includes("chg-pending")]),
+    [["warn", true]],
+  );
+  assert.equal(
+    g.criteria.items.find((c) => c.id === "crt-full-course")?.verification,
+    "required",
+    "the approved policy still applies",
+  );
 });
 
 test("Git reads in the candidate run none of its configured commands (fsmonitor, hooks, filter drivers)", () => {
@@ -304,7 +422,8 @@ test("a driver configuration VCV cannot enumerate exactly refuses Git instead of
 
 test("a store the snapshot cannot hash whole is never decided on, even when an approval is tampered mid-gate", () => {
   const { repo, trusted } = setup();
-  for (let i = 0; i < 300; i++) mkdirSync(join(repo, ".vcv/aaa", `d${String(i).padStart(3, "0")}`), { recursive: true });
+  for (let i = 0; i < 300; i++)
+    mkdirSync(join(repo, ".vcv/aaa", `d${String(i).padStart(3, "0")}`), { recursive: true });
   const before = testIdentity(repo);
   assert.ok(before.ok);
   const req = { base: trusted, junit: [{ report: PASS, ...JUNIT, before: before.data.identityDigest }] };
@@ -316,12 +435,22 @@ test("a store the snapshot cannot hash whole is never decided on, even when an a
   const valid = readFileSync(att, "utf8");
   for (let k = 0; k <= 12; k++) {
     let n = 0;
-    const r = preMergeGate(repo, req, host, {
-      afterRead: () => {
-        if (++n === k) writeFileSync(att, valid.replace(/"signedAt": "[^"]+"/, '"signedAt": "2000-01-01T00:00:00.000Z"'));
+    const r = preMergeGate(
+      repo,
+      req,
+      host,
+      {
+        afterRead: () => {
+          if (++n === k)
+            writeFileSync(att, valid.replace(/"signedAt": "[^"]+"/, '"signedAt": "2000-01-01T00:00:00.000Z"'));
+        },
       },
-    }, { storeBudget: { entries: 200 } });
-    assert.ok(!r.ok && r.error.code === "SOURCE_IDENTITY_UNAVAILABLE", `tamper at read ${k}: ${JSON.stringify(r.ok ? r.data.decision : r.error)}`);
+      { storeBudget: { entries: 200 } },
+    );
+    assert.ok(
+      !r.ok && r.error.code === "SOURCE_IDENTITY_UNAVAILABLE",
+      `tamper at read ${k}: ${JSON.stringify(r.ok ? r.data.decision : r.error)}`,
+    );
     writeFileSync(att, valid);
   }
 });
@@ -338,14 +467,24 @@ test("approvals are rechecked through the final answer: a post-reconciliation ta
   assert.ok(before.ok);
   for (let k = 1; k <= 12; k++) {
     let n = 0;
-    const r = preMergeGate(repo, { base: trusted, junit: [{ report: PASS, ...JUNIT, before: before.data.identityDigest }] }, host, {
-      afterRead: () => {
-        if (++n === k) writeFileSync(att, `${valid.replace(/"signedAt": "[^"]+"/, '"signedAt": "2000-01-01T00:00:00.000Z"')}\n`);
+    const r = preMergeGate(
+      repo,
+      { base: trusted, junit: [{ report: PASS, ...JUNIT, before: before.data.identityDigest }] },
+      host,
+      {
+        afterRead: () => {
+          if (++n === k)
+            writeFileSync(att, `${valid.replace(/"signedAt": "[^"]+"/, '"signedAt": "2000-01-01T00:00:00.000Z"')}\n`);
+        },
       },
-    });
+    );
     // Either the change is seen (STATE_CHANGED), or the tamper came after the last read and the
     // answer describes the bytes it read; never a pass computed on bytes that are no longer there.
-    if (n >= k) assert.ok(!r.ok && r.error.code === "STATE_CHANGED", `tamper at read ${k}: ${JSON.stringify(r.ok ? r.data.decision : r.error)}`);
+    if (n >= k)
+      assert.ok(
+        !r.ok && r.error.code === "STATE_CHANGED",
+        `tamper at read ${k}: ${JSON.stringify(r.ok ? r.data.decision : r.error)}`,
+      );
     writeFileSync(att, `${valid}\n`);
   }
 });
@@ -354,7 +493,11 @@ test("adding lower-severity findings never hides a blocking one behind the repor
   const { repo, base: b0 } = setup();
   // On the base: a claim whose file does not exist (already broken there, so unrelated to the PR).
   const template = JSON.parse(readFileSync(join(repo, ".vcv/bindings/impl.cap-enroll.json"), "utf8"));
-  const claim = (id: string, path: string) => writeFileSync(join(repo, `.vcv/bindings/${id}.json`), `${JSON.stringify({ ...template, bindingId: id, locator: { path, selector: { kind: "symbol", name: "Gone.away" } } }, null, 2)}\n`);
+  const claim = (id: string, path: string) =>
+    writeFileSync(
+      join(repo, `.vcv/bindings/${id}.json`),
+      `${JSON.stringify({ ...template, bindingId: id, locator: { path, selector: { kind: "symbol", name: "Gone.away" } } }, null, 2)}\n`,
+    );
   claim("old.broken", "server/src/old-gone.ts");
   git(repo, "add", "-A");
   git(repo, "commit", "-qm", "an old broken claim");
@@ -378,17 +521,30 @@ test("removing a changed object's claims does not take it out of requireEvidence
   const { repo, base } = setup();
   git(repo, "checkout", "-qb", "feature");
   edit(repo, SERVICE, "...(reason ? { reason } : {}),", "");
-  for (const id of ["impl.cap-enroll", "impl.rul-seat-limit", "expose.cap-enroll"]) rmSync(join(repo, `.vcv/bindings/${id}.json`));
+  for (const id of ["impl.cap-enroll", "impl.rul-seat-limit", "expose.cap-enroll"])
+    rmSync(join(repo, `.vcv/bindings/${id}.json`));
   git(repo, "commit", "-qam", "drop the reason, and the claims that pointed at it");
-  const g = gate(repo, { base, junit: junit(PASS, repo), policy: { format: "vcv-policy-1", requireEvidence: [{ object: "cap-enroll" }] } });
+  const g = gate(repo, {
+    base,
+    junit: junit(PASS, repo),
+    policy: { format: "vcv-policy-1", requireEvidence: [{ object: "cap-enroll" }] },
+  });
   assert.equal(g.decision, "block");
-  assert.deepEqual(blocking(g).filter((r) => r.code === "EVIDENCE_REQUIRED").map((r) => r.objectIds), [["cap-enroll"]]);
+  assert.deepEqual(
+    blocking(g)
+      .filter((r) => r.code === "EVIDENCE_REQUIRED")
+      .map((r) => r.objectIds),
+    [["cap-enroll"]],
+  );
 });
 
 test("a base policy that exists but cannot be read is an error, never the defaults", () => {
   const { repo } = setup();
   mkdirSync(join(repo, ".github"), { recursive: true });
-  writeFileSync(join(repo, ".github/vcv-policy.json"), JSON.stringify({ format: "vcv-policy-1", observations: { contradiction: "block" } }) + " ".repeat(70 * 1024));
+  writeFileSync(
+    join(repo, ".github/vcv-policy.json"),
+    JSON.stringify({ format: "vcv-policy-1", observations: { contradiction: "block" } }) + " ".repeat(70 * 1024),
+  );
   git(repo, "add", "-A");
   git(repo, "commit", "-qm", "an oversized policy");
   const base = git(repo, "rev-parse", "HEAD");
@@ -411,11 +567,20 @@ test("a base policy that exists but cannot be read is an error, never the defaul
 
 test("observation references: a cited test must exist without any run, unchecked lines are never verified, cited files are guarded", () => {
   const { repo, base } = codeFirst();
-  const obs = (o: Record<string, unknown>) => ({ format: "vcv-observations-1", observations: [{ id: "obs-x", kind: "concern", statement: "s", resolution: "inspect", ...o }] });
-  const ghost = gate(repo, { base, observations: obs({ tests: [{ path: "server/src/ghost.test.ts", name: "Ghost > nonexistent" }] }) });
+  const obs = (o: Record<string, unknown>) => ({
+    format: "vcv-observations-1",
+    observations: [{ id: "obs-x", kind: "concern", statement: "s", resolution: "inspect", ...o }],
+  });
+  const ghost = gate(repo, {
+    base,
+    observations: obs({ tests: [{ path: "server/src/ghost.test.ts", name: "Ghost > nonexistent" }] }),
+  });
   assert.equal(ghost.observations[0]!.references, "invalid");
   assert.equal(ghost.observations[0]!.tests[0]!.check, "missing");
-  const renamed = gate(repo, { base, observations: obs({ tests: [{ path: SPEC, name: "EnrollmentService > no such case" }] }) });
+  const renamed = gate(repo, {
+    base,
+    observations: obs({ tests: [{ path: SPEC, name: "EnrollmentService > no such case" }] }),
+  });
   assert.equal(renamed.observations[0]!.references, "invalid");
 
   // Too large to check the lines: not-checked, never verified.
@@ -432,9 +597,19 @@ test("observation references: a cited test must exist without any run, unchecked
   appendFileSync(join(repo, ".gitignore"), "server/notes.txt\n");
   git(repo, "commit", "-qam", "ignore notes");
   let last = 0;
-  const count = preMergeGate(repo, { base, observations: obs({ locations: [{ path: "server/notes.txt", startLine: 15 }] }) }, host, { afterRead: () => void last++ });
+  const count = preMergeGate(
+    repo,
+    { base, observations: obs({ locations: [{ path: "server/notes.txt", startLine: 15 }] }) },
+    host,
+    { afterRead: () => void last++ },
+  );
   assert.ok(count.ok);
   let n = 0;
-  const cutMid = preMergeGate(repo, { base, observations: obs({ locations: [{ path: "server/notes.txt", startLine: 15 }] }) }, host, { afterRead: () => void (++n === last && writeFileSync(join(repo, "server/notes.txt"), "line\n")) });
+  const cutMid = preMergeGate(
+    repo,
+    { base, observations: obs({ locations: [{ path: "server/notes.txt", startLine: 15 }] }) },
+    host,
+    { afterRead: () => void (++n === last && writeFileSync(join(repo, "server/notes.txt"), "line\n")) },
+  );
   assert.equal(!cutMid.ok && cutMid.error.code, "STATE_CHANGED");
 });

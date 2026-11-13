@@ -14,7 +14,15 @@
 import { createHash } from "node:crypto";
 import { pathProblem } from "./locator.ts";
 
-export const JUNIT_LIMITS = { bytes: 16 * 1024 * 1024, depth: 32, elements: 250_000, cases: 20_000, attributes: 64, nameChars: 300, messageChars: 500 } as const;
+export const JUNIT_LIMITS = {
+  bytes: 16 * 1024 * 1024,
+  depth: 32,
+  elements: 250_000,
+  cases: 20_000,
+  attributes: 64,
+  nameChars: 300,
+  messageChars: 500,
+} as const;
 
 export type CaseStatus = "passed" | "failed" | "error" | "skipped";
 
@@ -41,7 +49,9 @@ export type JUnitReport = {
   duplicates: string[];
 };
 
-export type JUnitResult = { ok: true; report: JUnitReport } | { ok: false; code: "REPORT_INVALID" | "REPORT_INCONSISTENT" | "REPORT_TOO_LARGE" | "UNSAFE_PATH"; message: string };
+export type JUnitResult =
+  | { ok: true; report: JUnitReport }
+  | { ok: false; code: "REPORT_INVALID" | "REPORT_INCONSISTENT" | "REPORT_TOO_LARGE" | "UNSAFE_PATH"; message: string };
 
 type El = { name: string; attrs: Map<string, string>; children: El[]; text: string };
 
@@ -56,9 +66,15 @@ export const caseKey = (path: string, name: string) => sha(`${path}\0${name}`);
  * repository-relative POSIX path ("" or "." for the repository root; Vitest run in `server/` → "server").
  */
 export function parseJUnit(bytes: Uint8Array, root: string): JUnitResult {
-  if (bytes.byteLength > JUNIT_LIMITS.bytes) return { ok: false, code: "REPORT_TOO_LARGE", message: `the report is ${bytes.byteLength} bytes; at most ${JUNIT_LIMITS.bytes} are read` };
+  if (bytes.byteLength > JUNIT_LIMITS.bytes)
+    return {
+      ok: false,
+      code: "REPORT_TOO_LARGE",
+      message: `the report is ${bytes.byteLength} bytes; at most ${JUNIT_LIMITS.bytes} are read`,
+    };
   const base = root === "" || root === "." ? "" : root.replace(/\/+$/, "");
-  if (base && pathProblem(base)) return { ok: false, code: "UNSAFE_PATH", message: `report root "${root}" ${pathProblem(base)}` };
+  if (base && pathProblem(base))
+    return { ok: false, code: "UNSAFE_PATH", message: `report root "${root}" ${pathProblem(base)}` };
   let text: string;
   try {
     text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
@@ -69,9 +85,18 @@ export function parseJUnit(bytes: Uint8Array, root: string): JUnitResult {
   try {
     doc = parseXml(text);
   } catch (e) {
-    return { ok: false, code: "REPORT_INVALID", message: e instanceof XmlError ? e.message : "the report cannot be read as XML" };
+    return {
+      ok: false,
+      code: "REPORT_INVALID",
+      message: e instanceof XmlError ? e.message : "the report cannot be read as XML",
+    };
   }
-  if (doc.name !== "testsuites" && doc.name !== "testsuite") return { ok: false, code: "REPORT_INVALID", message: `the root element is <${cut(doc.name, 50)}>, not <testsuites> or <testsuite>` };
+  if (doc.name !== "testsuites" && doc.name !== "testsuite")
+    return {
+      ok: false,
+      code: "REPORT_INVALID",
+      message: `the root element is <${cut(doc.name, 50)}>, not <testsuites> or <testsuite>`,
+    };
 
   const cases: JUnitCase[] = [];
   const seen = new Map<string, number>();
@@ -94,7 +119,8 @@ export function parseJUnit(bytes: Uint8Array, root: string): JUnitResult {
       } else if (ch.name === "testcase") {
         const file = ch.attrs.get("file") ?? ch.attrs.get("classname");
         const name = ch.attrs.get("name");
-        if (!file || name === undefined || name === "") throw new XmlError("a <testcase> has no name or no classname/file");
+        if (!file || name === undefined || name === "")
+          throw new XmlError("a <testcase> has no name or no classname/file");
         // The runner's own path must already be a portable relative path: an absolute, drive, UNC,
         // "\\" or ".." path is refused as written, never normalized into a path it might alias.
         const raw = pathProblem(file);
@@ -103,7 +129,13 @@ export function parseJUnit(bytes: Uint8Array, root: string): JUnitResult {
         const pp = pathProblem(rel);
         if (pp) throw new XmlError(`test case path "${cut(rel, 200)}" ${pp}`);
         const kinds = ch.children.map((c) => c.name);
-        const status: CaseStatus = kinds.includes("error") ? "error" : kinds.includes("failure") ? "failed" : kinds.includes("skipped") ? "skipped" : "passed";
+        const status: CaseStatus = kinds.includes("error")
+          ? "error"
+          : kinds.includes("failure")
+            ? "failed"
+            : kinds.includes("skipped")
+              ? "skipped"
+              : "passed";
         const detail = ch.children.find((c) => c.name === (status === "error" ? "error" : "failure"));
         const message = detail ? (detail.attrs.get("message") ?? detail.text).trim() : "";
         if (cases.length >= JUNIT_LIMITS.cases) throw new XmlError(`more than ${JUNIT_LIMITS.cases} test cases`);
@@ -127,7 +159,8 @@ export function parseJUnit(bytes: Uint8Array, root: string): JUnitResult {
       const where = `suite "${cut(suite.attrs.get("name") ?? path.join(" / "), 120)}"`;
       const check = (attr: string, actual: number) => {
         const declared = count(suite, attr);
-        if (declared !== undefined && declared !== actual) problems.push(`${where} declares ${attr}="${declared}" but has ${actual}`);
+        if (declared !== undefined && declared !== actual)
+          problems.push(`${where} declares ${attr}="${declared}" but has ${actual}`);
       };
       check("tests", tally.tests);
       check("failures", tally.failed);
@@ -140,17 +173,34 @@ export function parseJUnit(bytes: Uint8Array, root: string): JUnitResult {
   try {
     total = walkSuite(doc, []);
     if (doc.name === "testsuites") {
-      for (const [attr, actual] of [["tests", total.tests], ["failures", total.failed], ["errors", total.errors], ["skipped", total.skipped]] as const) {
+      for (const [attr, actual] of [
+        ["tests", total.tests],
+        ["failures", total.failed],
+        ["errors", total.errors],
+        ["skipped", total.skipped],
+      ] as const) {
         const declared = count(doc, attr);
-        if (declared !== undefined && declared !== actual) problems.push(`the report declares ${attr}="${declared}" but has ${actual}`);
+        if (declared !== undefined && declared !== actual)
+          problems.push(`the report declares ${attr}="${declared}" but has ${actual}`);
       }
     }
   } catch (e) {
     if (e instanceof XmlError) return { ok: false, code: "REPORT_INVALID", message: e.message };
     throw e;
   }
-  if (problems.length) return { ok: false, code: "REPORT_INCONSISTENT", message: cut(`the report's declared counts do not match its test cases (truncated or edited?): ${problems.slice(0, 5).join("; ")}`, 1000) };
-  const duplicates = [...seen].filter(([, n]) => n > 1).map(([k]) => k).sort();
+  if (problems.length)
+    return {
+      ok: false,
+      code: "REPORT_INCONSISTENT",
+      message: cut(
+        `the report's declared counts do not match its test cases (truncated or edited?): ${problems.slice(0, 5).join("; ")}`,
+        1000,
+      ),
+    };
+  const duplicates = [...seen]
+    .filter(([, n]) => n > 1)
+    .map(([k]) => k)
+    .sort();
   return {
     ok: true,
     report: {
@@ -158,7 +208,13 @@ export function parseJUnit(bytes: Uint8Array, root: string): JUnitResult {
       sha256: createHash("sha256").update(bytes).digest("hex"),
       bytes: bytes.byteLength,
       cases,
-      summary: { tests: total.tests, passed: total.tests - total.failed - total.errors - total.skipped, failed: total.failed, errors: total.errors, skipped: total.skipped },
+      summary: {
+        tests: total.tests,
+        passed: total.tests - total.failed - total.errors - total.skipped,
+        failed: total.failed,
+        errors: total.errors,
+        skipped: total.skipped,
+      },
       duplicates,
     },
   };
@@ -174,7 +230,8 @@ function decode(raw: string, where: string): string {
     if (ref === undefined) throw new XmlError(`a bare "&" in ${where}`);
     if (ref[0] === "#") {
       const cp = ref[1] === "x" ? parseInt(ref.slice(2), 16) : parseInt(ref.slice(1), 10);
-      if (!(cp === 0x9 || cp === 0xa || cp === 0xd || (cp >= 0x20 && cp <= 0xd7ff) || (cp >= 0xe000 && cp <= 0x10ffff))) throw new XmlError(`character reference ${m} is not an XML character`);
+      if (!(cp === 0x9 || cp === 0xa || cp === 0xd || (cp >= 0x20 && cp <= 0xd7ff) || (cp >= 0xe000 && cp <= 0x10ffff)))
+        throw new XmlError(`character reference ${m} is not an XML character`);
       return String.fromCodePoint(cp);
     }
     const v = ENTITIES[ref];
@@ -230,7 +287,8 @@ function parseXml(src: string): El {
       if (src[i] !== ">") fail(`a malformed end tag </${cut(name, 40)}>`);
       i++;
       const open = stack.pop();
-      if (!open || open.name !== name) fail(`</${cut(name, 40)}> does not close ${open ? `<${cut(open.name, 40)}>` : "anything"}`);
+      if (!open || open.name !== name)
+        fail(`</${cut(name, 40)}> does not close ${open ? `<${cut(open.name, 40)}>` : "anything"}`);
     } else {
       NAME.lastIndex = i + 1;
       const m = NAME.exec(src);
@@ -275,7 +333,8 @@ function parseXml(src: string): El {
       }
     }
   }
-  if (stack.length) throw new XmlError(`the report ends inside <${cut(stack[stack.length - 1]!.name, 40)}> (truncated?)`);
+  if (stack.length)
+    throw new XmlError(`the report ends inside <${cut(stack[stack.length - 1]!.name, 40)}> (truncated?)`);
   if (!root) throw new XmlError("the report has no root element");
   return root;
 }

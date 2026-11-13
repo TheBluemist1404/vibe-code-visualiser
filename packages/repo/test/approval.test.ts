@@ -1,14 +1,35 @@
 // Trusted reviewer approval, attestations and the read-only integrity check (Issue #17, M3.2).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { createHash } from "node:crypto";
 import { dumpModel } from "../../ir/src/index.ts";
 import { FileStore, ModelEngine, branchSafeRevisionId, proposalDigest } from "../../core/src/index.ts";
 import type { HostContext, ProposedModelChange } from "../../core/src/index.ts";
-import { ApprovalError, addTrustedReviewer, checkIntegrity, createReviewerKey, loadTrust, projectStatus, reviewApprove, reviewFinalize, submitProposal } from "../src/index.ts";
+import {
+  ApprovalError,
+  addTrustedReviewer,
+  checkIntegrity,
+  createReviewerKey,
+  loadTrust,
+  projectStatus,
+  reviewApprove,
+  reviewFinalize,
+  submitProposal,
+} from "../src/index.ts";
 import type { IntegrityReport, ReviewApproveInput, TrustSource } from "../src/index.ts";
 import { baseline, git } from "./course-desk.ts";
 
@@ -31,7 +52,13 @@ function setup() {
 }
 
 const rev = (repo: string) => projectStatus(repo).model!.revision;
-const change = (repo: string, id: string, ops: ProposedModelChange["operations"] = [{ type: "setDescription", objectId: "mod-web", description: `edited by ${id}` }]): ProposedModelChange => ({
+const change = (
+  repo: string,
+  id: string,
+  ops: ProposedModelChange["operations"] = [
+    { type: "setDescription", objectId: "mod-web", description: `edited by ${id}` },
+  ],
+): ProposedModelChange => ({
   changeId: id,
   projectId: "prj-course-desk",
   expectedRevision: rev(repo),
@@ -46,11 +73,23 @@ function propose(repo: string, c: ProposedModelChange) {
 /** For integrity: main as a local ref (in CI the host provides it). */
 const MAIN: TrustSource = { kind: "git-ref", ref: "main" };
 /** For approval: main pinned by its full commit ID, as a reviewer copies it from the hosting service. */
-const pinned = (repo: string, ref = "main"): TrustSource => ({ kind: "git-ref", ref, pinnedCommit: git(repo, "rev-parse", ref) });
-const approve = (repo: string, id: string, digest: string, keyFile: string, trust: TrustSource = pinned(repo), extra: Partial<ReviewApproveInput> = {}) =>
-  reviewApprove(repo, { changeId: id, expectedDigest: digest, keyFile, trust, ...extra });
-const finalize = (repo: string, id: string, digest: string, keyFile: string, trust: TrustSource = pinned(repo)) => reviewFinalize(repo, { changeId: id, expectedDigest: digest, keyFile, trust });
-const throwsCode = (fn: () => unknown, code: string) => assert.throws(fn, (e: ApprovalError) => (assert.equal(e.code, code, e.message), true));
+const pinned = (repo: string, ref = "main"): TrustSource => ({
+  kind: "git-ref",
+  ref,
+  pinnedCommit: git(repo, "rev-parse", ref),
+});
+const approve = (
+  repo: string,
+  id: string,
+  digest: string,
+  keyFile: string,
+  trust: TrustSource = pinned(repo),
+  extra: Partial<ReviewApproveInput> = {},
+) => reviewApprove(repo, { changeId: id, expectedDigest: digest, keyFile, trust, ...extra });
+const finalize = (repo: string, id: string, digest: string, keyFile: string, trust: TrustSource = pinned(repo)) =>
+  reviewFinalize(repo, { changeId: id, expectedDigest: digest, keyFile, trust });
+const throwsCode = (fn: () => unknown, code: string) =>
+  assert.throws(fn, (e: ApprovalError) => (assert.equal(e.code, code, e.message), true));
 const codes = (r: IntegrityReport) => r.problems.map((p) => `${p.severity}:${p.code}`);
 const storeHash = (repo: string) => {
   const h = createHash("sha256");
@@ -78,14 +117,21 @@ test("golden path: agent proposes, a trusted reviewer approves the reviewed dige
   assert.equal(projectStatus(repo).model!.status, "draft", "approving a change does not approve the draft snapshot");
 
   const before = storeHash(repo);
-  const report = checkIntegrity(repo, { base: "main", trust: { kind: "git-ref", ref: "main" }, requireAttestation: true });
+  const report = checkIntegrity(repo, {
+    base: "main",
+    trust: { kind: "git-ref", ref: "main" },
+    requireAttestation: true,
+  });
   assert.equal(storeHash(repo), before, "the integrity check writes nothing");
   assert.equal(report.ok, true, JSON.stringify(report.problems));
   assert.deepEqual(codes(report), []);
-  assert.deepEqual(report.revisions.map((c) => [c.revision, c.derivation, c.approval.state, c.introduced]), [
-    ["rev-1", "initial", "not-applicable", false],
-    [next, "verified", "attested", true],
-  ]);
+  assert.deepEqual(
+    report.revisions.map((c) => [c.revision, c.derivation, c.approval.state, c.introduced]),
+    [
+      ["rev-1", "initial", "not-applicable", false],
+      [next, "verified", "attested", true],
+    ],
+  );
   assert.ok(report.limits.some((l) => /does not prove which person/.test(l)));
 
   git(repo, "add", "-A");
@@ -100,8 +146,14 @@ test("golden path: agent proposes, a trusted reviewer approves the reviewed dige
   assert.equal(rev(repo), next);
   // On main itself, main is the checked-out branch, so it cannot anchor trust for a strict check;
   // a ref the checkout does not control (here the feature branch's parent commit) can.
-  assert.ok(codes(checkIntegrity(repo, { trust: MAIN, requireAttestation: true })).includes("error:TRUST_FROM_CHECKOUT"));
-  assert.equal(checkIntegrity(repo, { trust: { kind: "git-ref", ref: "feature~1" }, requireAttestation: true }).ok, true, "trust from the commit before the merge");
+  assert.ok(
+    codes(checkIntegrity(repo, { trust: MAIN, requireAttestation: true })).includes("error:TRUST_FROM_CHECKOUT"),
+  );
+  assert.equal(
+    checkIntegrity(repo, { trust: { kind: "git-ref", ref: "feature~1" }, requireAttestation: true }).ok,
+    true,
+    "trust from the commit before the merge",
+  );
 });
 
 test("the reviewer step refuses: a wrong digest, an untrusted key, self-approval, a stale proposal, a replay and an unknown change; none moves HEAD wrongly", () => {
@@ -121,7 +173,10 @@ test("the reviewer step refuses: a wrong digest, an untrusted key, self-approval
 
   // A key that is not in the committed trust list.
   const stranger = keyFor("agent:coder");
-  assert.throws(() => approve(repo, "chg-a", digest, stranger.file), (e: ApprovalError) => e.code === "UNTRUSTED_KEY");
+  assert.throws(
+    () => approve(repo, "chg-a", digest, stranger.file),
+    (e: ApprovalError) => e.code === "UNTRUSTED_KEY",
+  );
 
   // A trusted reviewer whose principal is the proposer cannot approve their own change.
   const self = keyFor("agent:coder");
@@ -135,12 +190,28 @@ test("the reviewer step refuses: a wrong digest, an untrusted key, self-approval
   assert.equal(rev(repo), "rev-1");
 
   assert.equal(approve(repo, "chg-a", digest, hoang.file).outcome.status, "applied");
-  assert.equal(approve(repo, "chg-a", digest, hoang.file).outcome.diagnostics[0]!.code, "NOT_PENDING", "a replayed approval is refused");
-  const stale = approve(repo, "chg-b", proposalDigest(JSON.parse(readFileSync(join(repo, ".vcv/changes/chg-b.json"), "utf8")).change), hoang.file);
+  assert.equal(
+    approve(repo, "chg-a", digest, hoang.file).outcome.diagnostics[0]!.code,
+    "NOT_PENDING",
+    "a replayed approval is refused",
+  );
+  const stale = approve(
+    repo,
+    "chg-b",
+    proposalDigest(JSON.parse(readFileSync(join(repo, ".vcv/changes/chg-b.json"), "utf8")).change),
+    hoang.file,
+  );
   assert.equal(stale.outcome.status, "rejected");
-  assert.equal(stale.outcome.diagnostics[0]!.code, "STALE_REVISION", "approval is rechecked against the current revision");
+  assert.equal(
+    stale.outcome.diagnostics[0]!.code,
+    "STALE_REVISION",
+    "approval is rechecked against the current revision",
+  );
   assert.equal(approve(repo, "chg-nope", digest, hoang.file).outcome.diagnostics[0]!.code, "UNKNOWN_CHANGE");
-  assert.throws(() => approve(repo, "chg-a", "abc", hoang.file), (e: ApprovalError) => e.code === "INVALID_DIGEST");
+  assert.throws(
+    () => approve(repo, "chg-a", "abc", hoang.file),
+    (e: ApprovalError) => e.code === "INVALID_DIGEST",
+  );
 });
 
 test("an agent that commits its own key on the feature branch cannot anchor trust there: default-free review refuses, strict integrity rejects self-controlled trust", () => {
@@ -163,7 +234,12 @@ test("an agent that commits its own key on the feature branch cannot anchor trus
   const inTree = join(repo, ".vcv/reviewers.json");
   const link = join(mkdtempSync(join(tmpdir(), "vcv-link-")), "store");
   symlinkSync(join(repo, ".vcv"), link);
-  for (const path of [inTree, relative(process.cwd(), inTree), join(repo, ".vcv/../.vcv/reviewers.json"), join(link, "reviewers.json")]) {
+  for (const path of [
+    inTree,
+    relative(process.cwd(), inTree),
+    join(repo, ".vcv/../.vcv/reviewers.json"),
+    join(link, "reviewers.json"),
+  ]) {
     const t = loadTrust(repo, { kind: "file", path });
     assert.equal(t.protectedFromCheckout, false, path);
     throwsCode(() => approve(repo, "chg-a", digest, own.file, { kind: "file", path }), "UNPROTECTED_TRUST");
@@ -180,11 +256,24 @@ test("an agent that commits its own key on the feature branch cannot anchor trus
   }
   // A pin is checked against what the ref resolves to: a moved ref cannot stand in for the pinned base.
   const mainSha = git(repo, "rev-parse", "main");
-  throwsCode(() => approve(repo, "chg-a", digest, own.file, { kind: "git-ref", ref: "origin/main", pinnedCommit: mainSha }), "TRUST_PIN_MISMATCH");
-  throwsCode(() => approve(repo, "chg-a", digest, own.file, { kind: "git-ref", ref: "agent-trust", pinnedCommit: mainSha }), "TRUST_PIN_MISMATCH");
-  throwsCode(() => approve(repo, "chg-a", digest, own.file, { kind: "git-ref", ref: "main", pinnedCommit: mainSha.slice(0, 12) }), "INVALID_PIN");
+  throwsCode(
+    () => approve(repo, "chg-a", digest, own.file, { kind: "git-ref", ref: "origin/main", pinnedCommit: mainSha }),
+    "TRUST_PIN_MISMATCH",
+  );
+  throwsCode(
+    () => approve(repo, "chg-a", digest, own.file, { kind: "git-ref", ref: "agent-trust", pinnedCommit: mainSha }),
+    "TRUST_PIN_MISMATCH",
+  );
+  throwsCode(
+    () =>
+      approve(repo, "chg-a", digest, own.file, { kind: "git-ref", ref: "main", pinnedCommit: mainSha.slice(0, 12) }),
+    "INVALID_PIN",
+  );
   // Pinned to the real base (by ID, whatever local name is used), the agent's key is simply not trusted.
-  throwsCode(() => approve(repo, "chg-a", digest, own.file, { kind: "git-ref", ref: mainSha, pinnedCommit: mainSha }), "UNTRUSTED_KEY");
+  throwsCode(
+    () => approve(repo, "chg-a", digest, own.file, { kind: "git-ref", ref: mainSha, pinnedCommit: mainSha }),
+    "UNTRUSTED_KEY",
+  );
   assert.equal(rev(repo), "rev-1", "nothing was applied");
   assert.equal(JSON.parse(readFileSync(join(repo, ".vcv/changes/chg-a.json"), "utf8")).status, "pending");
   // A file outside the checkout is an external anchor (its integrity is the caller's).
@@ -193,15 +282,25 @@ test("an agent that commits its own key on the feature branch cannot anchor trus
   assert.equal(loadTrust(repo, { kind: "file", path: outside }).authority, "external-file");
   throwsCode(() => approve(repo, "chg-a", digest, own.file, { kind: "file", path: outside }), "UNTRUSTED_KEY");
   assert.equal(loadTrust(repo, MAIN).authority, "local-ref");
-  assert.match(loadTrust(repo, MAIN).anchor, /local branch main at [0-9a-f]{12}: a local ref, not pinned; anyone with a shell here can create or move it/);
+  assert.match(
+    loadTrust(repo, MAIN).anchor,
+    /local branch main at [0-9a-f]{12}: a local ref, not pinned; anyone with a shell here can create or move it/,
+  );
   assert.equal(loadTrust(repo, pinned(repo)).authority, "pinned-commit");
 
   // Explicit unsafe development mode: applied and signed, but not a trusted approval.
-  assert.equal(approve(repo, "chg-a", digest, own.file, { kind: "working-tree" }, { allowUnprotectedTrust: true }).outcome.status, "applied");
+  assert.equal(
+    approve(repo, "chg-a", digest, own.file, { kind: "working-tree" }, { allowUnprotectedTrust: true }).outcome.status,
+    "applied",
+  );
   const lax = checkIntegrity(repo, { trust: { kind: "working-tree" } });
   assert.equal(lax.revisions[1]!.approval.state, "attested");
   assert.ok(codes(lax).includes("warning:TRUST_FROM_CHECKOUT"));
-  for (const trust of [{ kind: "working-tree" }, { kind: "git-ref", ref: "HEAD" }, { kind: "file", path: inTree }] as TrustSource[]) {
+  for (const trust of [
+    { kind: "working-tree" },
+    { kind: "git-ref", ref: "HEAD" },
+    { kind: "file", path: inTree },
+  ] as TrustSource[]) {
     const strict = checkIntegrity(repo, { base: "main", trust, requireAttestation: true });
     assert.equal(strict.ok, false, JSON.stringify(trust));
     assert.ok(codes(strict).includes("error:TRUST_FROM_CHECKOUT"), JSON.stringify(codes(strict)));
@@ -240,13 +339,20 @@ test("an attacker-chosen pin with an attacker-created tag: the local approval is
   // Without a base, the self-chosen anchor is internally consistent, and the report says what that is worth.
   const noBase = checkIntegrity(repo, { trust: anchor, requireAttestation: true });
   assert.equal(noBase.revisions[1]!.approval.state, "attested");
-  assert.match(noBase.authorization, /^caller-asserted: ok means consistent and attested under the trust anchor given here; it authorizes a change only when that anchor .* is supplied by the host/);
+  assert.match(
+    noBase.authorization,
+    /^caller-asserted: ok means consistent and attested under the trust anchor given here; it authorizes a change only when that anchor .* is supplied by the host/,
+  );
   // The host gate (base and trust from the protected branch) rejects the forged key.
   const gate = checkIntegrity(repo, { base: "main", trust: MAIN, requireAttestation: true });
   assert.equal(gate.ok, false);
   assert.equal(gate.revisions[1]!.approval.state, "untrusted-key");
   // And a trust ref that is an ancestor of the base is accepted as coming from the base.
-  assert.ok(!codes(checkIntegrity(repo, { base: "main", trust: { kind: "git-ref", ref: "main~1" } })).some((c) => c.endsWith("TRUST_NOT_FROM_BASE")));
+  assert.ok(
+    !codes(checkIntegrity(repo, { base: "main", trust: { kind: "git-ref", ref: "main~1" } })).some((c) =>
+      c.endsWith("TRUST_NOT_FROM_BASE"),
+    ),
+  );
 });
 
 test("the attestation destination is checked before anything is committed, and a failed write after the commit is recoverable by the approver only", () => {
@@ -281,20 +387,35 @@ test("the attestation destination is checked before anything is committed, and a
     git(repo, "merge", "-q", "main");
     const digest = propose(repo, change(repo, "chg-a"));
     assert.throws(
-      () => approve(repo, "chg-a", digest, hoang.file, pinned(repo), { afterCommit: () => { throw new Error("simulated crash"); } }),
-      (e: ApprovalError) => e.code === "ATTESTATION_NOT_WRITTEN" && /simulated crash/.test(e.message) && /vcv review finalize .* chg-a --digest [0-9a-f]{64} --key <key> --trust-commit/.test(e.message),
+      () =>
+        approve(repo, "chg-a", digest, hoang.file, pinned(repo), {
+          afterCommit: () => {
+            throw new Error("simulated crash");
+          },
+        }),
+      (e: ApprovalError) =>
+        e.code === "ATTESTATION_NOT_WRITTEN" &&
+        /simulated crash/.test(e.message) &&
+        /vcv review finalize .* chg-a --digest [0-9a-f]{64} --key <key> --trust-commit/.test(e.message),
     );
     const applied = rev(repo);
     assert.notEqual(applied, "rev-1", "the model commit happened");
     assert.equal(existsSync(join(repo, ".vcv/approvals/chg-a.json")), false);
-    assert.equal(approve(repo, "chg-a", digest, hoang.file).outcome.diagnostics[0]!.code, "NOT_PENDING", "approval cannot be repeated");
+    assert.equal(
+      approve(repo, "chg-a", digest, hoang.file).outcome.diagnostics[0]!.code,
+      "NOT_PENDING",
+      "approval cannot be repeated",
+    );
     const blocked = checkIntegrity(repo, { base: "main", trust: MAIN, requireAttestation: true });
     assert.ok(codes(blocked).includes("error:APPROVAL_NOT_ATTESTED"));
 
     // Recovery: only the recorded approver, with a trusted key, for the reviewed digest.
     throwsCode(() => finalize(repo, "chg-a", digest, lan.file), "NOT_APPROVER");
     throwsCode(() => finalize(repo, "chg-a", "0".repeat(64), hoang.file), "DIGEST_MISMATCH");
-    throwsCode(() => finalize(repo, "chg-a", digest, hoang.file, { kind: "git-ref", ref: "HEAD" }), "UNPROTECTED_TRUST");
+    throwsCode(
+      () => finalize(repo, "chg-a", digest, hoang.file, { kind: "git-ref", ref: "HEAD" }),
+      "UNPROTECTED_TRUST",
+    );
     throwsCode(() => finalize(repo, "chg-a", digest, hoang.file, MAIN), "UNPROTECTED_TRUST");
     throwsCode(() => finalize(repo, "chg-a", digest, keyFor("user:hoang").file), "UNTRUSTED_KEY");
     throwsCode(() => finalize(repo, "chg-nope", digest, hoang.file), "UNKNOWN_CHANGE");
@@ -309,7 +430,10 @@ test("the attestation destination is checked before anything is committed, and a
     const file = readFileSync(join(repo, ".vcv/approvals/chg-a.json"), "utf8");
     assert.equal(finalize(repo, "chg-a", digest, hoang.file).attestation!.alreadyPresent, true);
     assert.equal(readFileSync(join(repo, ".vcv/approvals/chg-a.json"), "utf8"), file);
-    writeFileSync(join(repo, ".vcv/approvals/chg-a.json"), file.replace(/"signedAt": "[^"]+"/, '"signedAt": "2000-01-01T00:00:00.000Z"'));
+    writeFileSync(
+      join(repo, ".vcv/approvals/chg-a.json"),
+      file.replace(/"signedAt": "[^"]+"/, '"signedAt": "2000-01-01T00:00:00.000Z"'),
+    );
     throwsCode(() => finalize(repo, "chg-a", digest, hoang.file), "ATTESTATION_EXISTS");
   }
   // finalize never applies a pending change.
@@ -352,14 +476,21 @@ test("a branch cannot drop or rewrite the base's approval evidence: removed or e
 
 test("a direct apply or developer approval has unknown provenance: a warning by default, an error with --require-attestation; never 'attested'", () => {
   const { repo } = setup();
-  const out = new ModelEngine(new FileStore(join(repo, ".vcv"))).propose(change(repo, "chg-direct"), { principalId: "user:dev", permissions: ["model:propose", "model:apply"] });
+  const out = new ModelEngine(new FileStore(join(repo, ".vcv"))).propose(change(repo, "chg-direct"), {
+    principalId: "user:dev",
+    permissions: ["model:propose", "model:apply"],
+  });
   assert.equal(out.status, "applied");
   const loose = checkIntegrity(repo, { base: "main", trust: { kind: "git-ref", ref: "main" } });
   assert.equal(loose.ok, true);
   assert.equal(loose.revisions[1]!.derivation, "verified", "the revision is still operation-derived");
   assert.equal(loose.revisions[1]!.approval.state, "missing");
   assert.ok(codes(loose).includes("warning:APPROVAL_NOT_ATTESTED"));
-  const strict = checkIntegrity(repo, { base: "main", trust: { kind: "git-ref", ref: "main" }, requireAttestation: true });
+  const strict = checkIntegrity(repo, {
+    base: "main",
+    trust: { kind: "git-ref", ref: "main" },
+    requireAttestation: true,
+  });
   assert.equal(strict.ok, false);
   assert.ok(codes(strict).includes("error:APPROVAL_NOT_ATTESTED"));
   assert.equal(checkIntegrity(repo).revisions[1]!.approval.state, "missing");
@@ -376,7 +507,10 @@ test("hand-made or edited history fails integrity: an unexplained revision, a fo
     m.project.modelRevision = id;
     writeFileSync(join(store, "revisions", `${id}.yaml`), dumpModel(m));
     const head = JSON.parse(readFileSync(join(store, "HEAD"), "utf8"));
-    writeFileSync(join(store, "HEAD"), JSON.stringify({ ...head, revision: id, history: [...head.history, id] }, null, 2));
+    writeFileSync(
+      join(store, "HEAD"),
+      JSON.stringify({ ...head, revision: id, history: [...head.history, id] }, null, 2),
+    );
     assert.equal(projectStatus(repo).state, "ready", "the store itself is well-formed");
     const r = checkIntegrity(repo, { base: "main" });
     assert.equal(r.ok, false);

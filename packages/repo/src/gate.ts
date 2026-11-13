@@ -24,7 +24,16 @@
 // The gate runs no tests and executes nothing from the candidate. One observation: the candidate's
 // identity is read before anything else and again before answering (STATE_CHANGED).
 import { createHash } from "node:crypto";
-import { closeSync, constants as fsConstants, fstatSync, lstatSync, openSync, readSync, readdirSync, readlinkSync } from "node:fs";
+import {
+  closeSync,
+  constants as fsConstants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  readdirSync,
+  readlinkSync,
+} from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { buildIndex } from "@vcv/ir";
@@ -33,7 +42,16 @@ import { canonicalJson } from "@vcv/core";
 import { criteriaEvidence } from "./criteria.ts";
 import type { CriteriaReport, CriterionEvidence, RunSummary } from "./criteria.ts";
 import { MAX_CLAIM_BYTES } from "./bindings.ts";
-import { currentBranchRef, entryAtCommit, fileAtCommit, filesAtCommit, findWorkTreeRoot, headCommit, mergeBase, resolveCommit } from "./git.ts";
+import {
+  currentBranchRef,
+  entryAtCommit,
+  fileAtCommit,
+  filesAtCommit,
+  findWorkTreeRoot,
+  headCommit,
+  mergeBase,
+  resolveCommit,
+} from "./git.ts";
 import { redact } from "./handoff.ts";
 import { caseKey } from "./junit.ts";
 import { pathProblem, resolveInside } from "./locator.ts";
@@ -73,7 +91,11 @@ export const GATE_LIMITS = {
 
 /** The store walk's bounds; GATE_LIMITS by default, lower ones only make the gate refuse sooner. */
 export type StoreBudget = { entries: number; depth: number; bytes: number };
-const DEFAULT_STORE_BUDGET: StoreBudget = { entries: GATE_LIMITS.storeEntries, depth: GATE_LIMITS.storeDepth, bytes: GATE_LIMITS.storeBytes };
+const DEFAULT_STORE_BUDGET: StoreBudget = {
+  entries: GATE_LIMITS.storeEntries,
+  depth: GATE_LIMITS.storeDepth,
+  bytes: GATE_LIMITS.storeBytes,
+};
 /** Options for tests and hosts; each budget is clamped to GATE_LIMITS (a host can only lower it). */
 export type GateOptions = { storeBudget?: Partial<StoreBudget> };
 const budgetOf = (o: GateOptions): StoreBudget => ({
@@ -92,9 +114,23 @@ const requiredLevel = z.enum(["block", "warn"]);
  * mandatory is approved intent in the model, changed only through an M3 proposal and a separate
  * human approval. Every outcome of a required criterion other than a host-observed pass blocks.
  */
-export const REQUIRED_EVIDENCE = { failed: "block", stale: "block", missing: "block", unknown: "block", unverified: "block", claimed: "block" } as const;
+export const REQUIRED_EVIDENCE = {
+  failed: "block",
+  stale: "block",
+  missing: "block",
+  unknown: "block",
+  unverified: "block",
+  claimed: "block",
+} as const;
 const optionalEvidence = z
-  .object({ failed: level.default("warn"), stale: level.default("warn"), missing: level.default("warn"), unknown: level.default("warn"), unverified: level.default("warn"), claimed: level.default("warn") })
+  .object({
+    failed: level.default("warn"),
+    stale: level.default("warn"),
+    missing: level.default("warn"),
+    unknown: level.default("warn"),
+    unverified: level.default("warn"),
+    claimed: level.default("warn"),
+  })
   .strict()
   .prefault({});
 
@@ -106,7 +142,10 @@ export const gatePolicySchema = z
     /** Checked contradictions between claims and the approved model (CLAIM_ON_MISSING_OBJECT). */
     structural: requiredLevel.default("block"),
     /** Claim upkeep: stale, missing or ambiguous locators, removed or invalid claims. related: about something the candidate changed. */
-    bindings: z.object({ related: level.default("warn"), unrelated: level.default("warn") }).strict().prefault({}),
+    bindings: z
+      .object({ related: level.default("warn"), unrelated: level.default("warn") })
+      .strict()
+      .prefault({}),
     /** An object the candidate added or changed in the model has no claim (OBJECT_UNBOUND). */
     coverage: level.default("warn"),
     /** What VCV could not check: unmapped changed files, unchecked selectors, cut lists. */
@@ -123,7 +162,11 @@ export const gatePolicySchema = z
     noCriteria: level.default("warn"),
     /** Agent-authored observations: always claims. */
     observations: z
-      .object({ contradiction: level.default("warn"), concern: level.default("warn"), invalidReferences: level.default("warn") })
+      .object({
+        contradiction: level.default("warn"),
+        concern: level.default("warn"),
+        invalidReferences: level.default("warn"),
+      })
       .strict()
       .prefault({}),
     /** The candidate edits the policy the gate reads from the base: it applies only after the merge. */
@@ -159,11 +202,22 @@ export const observationsSchema = z
             objects: z.array(z.string().min(1).max(256)).max(GATE_LIMITS.refsPerObservation).default([]),
             /** Concrete source locations. A contradiction needs at least one. */
             locations: z
-              .array(z.object({ path: portablePath, startLine: z.number().int().min(1).optional(), endLine: z.number().int().min(1).optional() }).strict())
+              .array(
+                z
+                  .object({
+                    path: portablePath,
+                    startLine: z.number().int().min(1).optional(),
+                    endLine: z.number().int().min(1).optional(),
+                  })
+                  .strict(),
+              )
               .max(GATE_LIMITS.refsPerObservation)
               .default([]),
             /** Test cases that support it, by file and full title (as in a `#test:` locator). */
-            tests: z.array(z.object({ path: portablePath, name: z.string().min(1).max(1000) }).strict()).max(GATE_LIMITS.refsPerObservation).default([]),
+            tests: z
+              .array(z.object({ path: portablePath, name: z.string().min(1).max(1000) }).strict())
+              .max(GATE_LIMITS.refsPerObservation)
+              .default([]),
             /** What the agent proposes: fix the code, submit a model proposal (M3), or have a person inspect. */
             resolution: z.enum(["fix-code", "submit-model-proposal", "inspect", "none"]),
             author: z.string().min(1).max(100).optional(),
@@ -183,8 +237,20 @@ export type VerifiedObservation = {
   resolution: "fix-code" | "submit-model-proposal" | "inspect" | "none";
   author: string | null;
   objects: { id: string; exists: boolean; kind: string | null }[];
-  locations: { path: string; startLine?: number; endLine?: number; check: "ok" | "missing" | "unsafe" | "line-out-of-range" | "not-checked"; lines: number | null }[];
-  tests: { path: string; name: string; check: "ok" | "missing" | "ambiguous" | "unsafe" | "not-checked"; mapped: boolean; result: "passed" | "failed" | "error" | "skipped" | "not-run" | "ambiguous" | null }[];
+  locations: {
+    path: string;
+    startLine?: number;
+    endLine?: number;
+    check: "ok" | "missing" | "unsafe" | "line-out-of-range" | "not-checked";
+    lines: number | null;
+  }[];
+  tests: {
+    path: string;
+    name: string;
+    check: "ok" | "missing" | "ambiguous" | "unsafe" | "not-checked";
+    mapped: boolean;
+    result: "passed" | "failed" | "error" | "skipped" | "not-run" | "ambiguous" | null;
+  }[];
   /**
    * verified: every reference was checked and holds; invalid: some do not hold; unsupported: a
    * contradiction without a source location; not-checked: some reference could not be checked.
@@ -221,14 +287,25 @@ export type GateReport = {
   headline: string;
   base: { commit: string; mergeBase: string; containedInCandidate: boolean; modelRevision: string | null };
   candidate: { commit: string; branch: string | null; dirty: boolean; modelRevision: string; identityDigest: string };
-  change: { kind: "code-first" | "model-first" | "model-and-code" | "no-change"; lineage: Reconciliation["model"]["lineage"]; changedFiles: number; introducedRevisions: number };
+  change: {
+    kind: "code-first" | "model-first" | "model-and-code" | "no-change";
+    lineage: Reconciliation["model"]["lineage"];
+    changedFiles: number;
+    introducedRevisions: number;
+  };
   policy: { source: string; digest: string; changedByCandidate: boolean; effective: GatePolicy };
   reasons: GateReason[];
   reasonsTotal: number;
   reasonsTruncated: boolean;
   counts: { block: number; warn: number };
   criteria: {
-    items: { id: Id; verification: "required" | "optional"; result: CriterionEvidence["result"]; observedBy: CriterionEvidence["resultObservedBy"]; verifies: Id[] }[];
+    items: {
+      id: Id;
+      verification: "required" | "optional";
+      result: CriterionEvidence["result"];
+      observedBy: CriterionEvidence["resultObservedBy"];
+      verifies: Id[];
+    }[];
     total: number;
     truncated: boolean;
     results: CriteriaReport["results"];
@@ -237,7 +314,11 @@ export type GateReport = {
   observations: VerifiedObservation[];
   observationsTruncated: boolean;
   /** Null when the candidate's model could not be loaded, so nothing was reconciled. */
-  reconciliation: { summary: Reconciliation["summary"]; integrity: { ok: boolean; authorization: string }; findingsTotal: number } | null;
+  reconciliation: {
+    summary: Reconciliation["summary"];
+    integrity: { ok: boolean; authorization: string };
+    findingsTotal: number;
+  } | null;
   notes: string[];
   budget: { limit: number; bytes: number; shrunk: boolean };
   /** Always false: VCV checked history, pointers, fingerprints and test results, never what the code does. */
@@ -282,18 +363,38 @@ export type GateRequest = {
 const cut = (s: string, n: number = GATE_LIMITS.messageChars) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 /** Decide whether the candidate containing `path` may merge into `base`. Read-only; runs nothing. */
-export function preMergeGate(path: string, req: GateRequest, host: TestRunHost, hooks: ProposalHooks = {}, options: GateOptions = {}): ProposalResult<GateReport> {
+export function preMergeGate(
+  path: string,
+  req: GateRequest,
+  host: TestRunHost,
+  hooks: ProposalHooks = {},
+  options: GateOptions = {},
+): ProposalResult<GateReport> {
   const budget = budgetOf(options);
-  const bad = (message: string): ProposalResult<GateReport> => ({ ok: false, error: { code: "INVALID_REQUEST", message } });
-  if (typeof req?.base !== "string" || !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(req.base)) return bad("base must be the protected base's full commit ID, as the host supplies it");
-  if (req.policy !== undefined && req.policyAtBase !== undefined) return bad("give either policy or policyAtBase, not both");
-  if (req.policyAtBase !== undefined && (typeof req.policyAtBase !== "string" || pathProblem(req.policyAtBase))) return bad("policyAtBase must be a portable repository-relative path");
+  const bad = (message: string): ProposalResult<GateReport> => ({
+    ok: false,
+    error: { code: "INVALID_REQUEST", message },
+  });
+  if (typeof req?.base !== "string" || !/^([0-9a-f]{40}|[0-9a-f]{64})$/.test(req.base))
+    return bad("base must be the protected base's full commit ID, as the host supplies it");
+  if (req.policy !== undefined && req.policyAtBase !== undefined)
+    return bad("give either policy or policyAtBase, not both");
+  if (req.policyAtBase !== undefined && (typeof req.policyAtBase !== "string" || pathProblem(req.policyAtBase)))
+    return bad("policyAtBase must be a portable repository-relative path");
   if ((req.junit?.length ?? 0) + (req.runs?.length ?? 0) > 10) return bad("at most 10 test runs");
 
   let observations: z.infer<typeof observationsSchema> | null = null;
   if (req.observations !== undefined) {
     const o = observationsSchema.safeParse(req.observations);
-    if (!o.success) return { ok: false, error: { code: "INVALID_REQUEST", message: "observations do not match vcv-observations-1", details: o.error.issues.slice(0, 20).map((i) => ({ path: i.path.join("."), message: i.message })) } };
+    if (!o.success)
+      return {
+        ok: false,
+        error: {
+          code: "INVALID_REQUEST",
+          message: "observations do not match vcv-observations-1",
+          details: o.error.issues.slice(0, 20).map((i) => ({ path: i.path.join("."), message: i.message })),
+        },
+      };
     const ids = o.data.observations.map((x) => x.id);
     if (new Set(ids).size !== ids.length) return bad("observation IDs must be unique");
     observations = o.data;
@@ -312,12 +413,25 @@ export function preMergeGate(path: string, req: GateRequest, host: TestRunHost, 
     return first;
   }
   const root = first.data.root;
-  if (!resolveCommit(root, req.base)) return { ok: false, error: { code: "UNKNOWN_COMMIT", message: `${req.base} is not a commit in this repository (fetch the base first)` } };
+  if (!resolveCommit(root, req.base))
+    return {
+      ok: false,
+      error: {
+        code: "UNKNOWN_COMMIT",
+        message: `${req.base} is not a commit in this repository (fetch the base first)`,
+      },
+    };
   const moved = (phase: string): ProposalResult<GateReport> | null => {
     const now = snapshotNow(path, cited, hooks, budget);
     if (now.ok && now.data.key === first.data.key) return null;
     if (!now.ok && now.error.code === "SOURCE_IDENTITY_UNAVAILABLE") return now;
-    return { ok: false, error: { code: "STATE_CHANGED", message: `the candidate changed while the gate was reading it (${phase}: source, claims, model, approvals or cited files); run the gate again` } };
+    return {
+      ok: false,
+      error: {
+        code: "STATE_CHANGED",
+        message: `the candidate changed while the gate was reading it (${phase}: source, claims, model, approvals or cited files); run the gate again`,
+      },
+    };
   };
 
   // 2. The policy: the host's file, or the base commit's bytes. Never the candidate's working tree.
@@ -327,9 +441,15 @@ export function preMergeGate(path: string, req: GateRequest, host: TestRunHost, 
   // 3. History, structure, bindings: M4.1, pinned to the base, attestation required. The policy is
   //    applied to every finding, before the report's lists are cut.
   let allFindings: ReconcileFinding[] | null = null;
-  const rec = reconcile(path, { base: req.base, trust: { kind: "git-ref", ref: req.base, pinnedCommit: req.base }, requireAttestation: true }, hooks, (all) => (allFindings = all));
+  const rec = reconcile(
+    path,
+    { base: req.base, trust: { kind: "git-ref", ref: req.base, pinnedCommit: req.base }, requireAttestation: true },
+    hooks,
+    (all) => (allFindings = all),
+  );
   if (!rec.ok) return { ok: false, ...(rec.context ? { context: rec.context } : {}), error: rec.error };
-  if (!allFindings) return { ok: false, error: { code: "STORE_ERROR", message: "the reconciliation produced no findings list" } };
+  if (!allFindings)
+    return { ok: false, error: { code: "STORE_ERROR", message: "the reconciliation produced no findings list" } };
   const afterReconcile = moved("after the history and claims were checked");
   if (afterReconcile) return afterReconcile;
   const baseContext = baseClaimContext(root, rec.data);
@@ -341,8 +461,19 @@ export function preMergeGate(path: string, req: GateRequest, host: TestRunHost, 
   const claimHost: TestRunHost = { principalId: host.principalId, permissions: [] };
   for (const [i, j] of (req.junit ?? []).entries()) {
     const bound = typeof j.before === "string";
-    const c = captureTestRun(path, j.report, { root: j.root, runner: j.runner, invocation: j.invocation, ...(bound ? { before: j.before } : {}) }, bound ? host : claimHost, hooks);
-    if (!c.ok) return { ok: false, ...(c.context ? { context: c.context } : {}), error: { ...c.error, message: `report ${i}: ${c.error.message}` } };
+    const c = captureTestRun(
+      path,
+      j.report,
+      { root: j.root, runner: j.runner, invocation: j.invocation, ...(bound ? { before: j.before } : {}) },
+      bound ? host : claimHost,
+      hooks,
+    );
+    if (!c.ok)
+      return {
+        ok: false,
+        ...(c.context ? { context: c.context } : {}),
+        error: { ...c.error, message: `report ${i}: ${c.error.message}` },
+      };
     captured.push(c.data);
   }
   const runs: unknown[] = [...captured, ...(req.runs ?? [])];
@@ -356,17 +487,32 @@ export function preMergeGate(path: string, req: GateRequest, host: TestRunHost, 
   // 6. Agent observations, checked against this candidate; then every input again.
   return observed(path, hooks, (obs) => {
     const index = buildIndex(obs.model);
-    const verified = (observations?.observations ?? []).map((o) => verifyObservation(o, obs.status.root, index, crit.data, runs as TestRunRecord[]));
+    const verified = (observations?.observations ?? []).map((o) =>
+      verifyObservation(o, obs.status.root, index, crit.data, runs as TestRunRecord[]),
+    );
     const pending = obs.records.flatMap((r) => (r.record?.status === "pending" ? [r.changeId] : [])).sort();
     const report = decide(rec.data, allFindings!, crit.data, verified, pol, first.data.identity, baseContext, pending);
     const bounded = fitBudget(redact(report, root));
-    if (!bounded) return { ok: false, error: { code: "REPORT_TOO_LARGE", message: `the gate report exceeds ${GATE_LIMITS.bytes} bytes even with every list cut` } } as ProposalResult<GateReport>;
-    return finish(obs, hooks, bounded, { key: first.data.key, again: () => snapshotKey(obs, cited, budget) ?? "incomplete" });
+    if (!bounded)
+      return {
+        ok: false,
+        error: {
+          code: "REPORT_TOO_LARGE",
+          message: `the gate report exceeds ${GATE_LIMITS.bytes} bytes even with every list cut`,
+        },
+      } as ProposalResult<GateReport>;
+    return finish(obs, hooks, bounded, {
+      key: first.data.key,
+      again: () => snapshotKey(obs, cited, budget) ?? "incomplete",
+    });
   });
 }
 
 /** Repository paths whose bytes the decision depends on beyond the candidate identity. */
-function citedPaths(observations: z.infer<typeof observationsSchema> | null, policyAtBase: string | undefined): string[] {
+function citedPaths(
+  observations: z.infer<typeof observationsSchema> | null,
+  policyAtBase: string | undefined,
+): string[] {
   const out = new Set<string>();
   for (const o of observations?.observations ?? []) {
     for (const l of o.locations) if (!pathProblem(l.path)) out.add(l.path);
@@ -376,7 +522,12 @@ function citedPaths(observations: z.infer<typeof observationsSchema> | null, pol
   return [...out].sort();
 }
 
-function snapshotNow(path: string, cited: string[], hooks: ProposalHooks, budget: StoreBudget): ProposalResult<{ key: string; identity: string; root: string }> {
+function snapshotNow(
+  path: string,
+  cited: string[],
+  hooks: ProposalHooks,
+  budget: StoreBudget,
+): ProposalResult<{ key: string; identity: string; root: string }> {
   return observed(path, hooks, (obs) => {
     const key = snapshotKey(obs, cited, budget);
     if (key === null) {
@@ -388,7 +539,12 @@ function snapshotNow(path: string, cited: string[], hooks: ProposalHooks, budget
         },
       };
     }
-    return finish(obs, hooks, { key, identity: identityDigest(candidateIdentityOf(obs).candidate), root: obs.status.root }, { key, again: () => snapshotKey(obs, cited, budget) ?? "incomplete" });
+    return finish(
+      obs,
+      hooks,
+      { key, identity: identityDigest(candidateIdentityOf(obs).candidate), root: obs.status.root },
+      { key, again: () => snapshotKey(obs, cited, budget) ?? "incomplete" },
+    );
   });
 }
 
@@ -400,7 +556,11 @@ function snapshotNow(path: string, cited: string[], hooks: ProposalHooks, budget
 function snapshotKey(obs: Observation, cited: string[], budget: StoreBudget): string | null {
   const store = storeDigest(obs.status.storeDir, budget);
   if (store === null) return null;
-  return canonicalJson([identityDigest(candidateIdentityOf(obs).candidate), store, worktreeState(obs.status.root, cited).digest]);
+  return canonicalJson([
+    identityDigest(candidateIdentityOf(obs).candidate),
+    store,
+    worktreeState(obs.status.root, cited).digest,
+  ]);
 }
 
 /**
@@ -477,7 +637,9 @@ function baseClaimContext(root: string, rec: Reconciliation): BaseContext {
   let complete = !rec.source.truncated;
   let problem: string | null = rec.source.truncated ? "the changed-file list was cut" : null;
   const files = filesAtCommit(root, mb, dir);
-  const touchedIds = new Set(rec.bindings.items.filter((b) => b.atBase === "removed" || b.atBase === "reasserted").map((b) => b.bindingId));
+  const touchedIds = new Set(
+    rec.bindings.items.filter((b) => b.atBase === "removed" || b.atBase === "reasserted").map((b) => b.bindingId),
+  );
   if (rec.bindings.truncated) {
     complete = false;
     problem = "the claim list was cut";
@@ -506,20 +668,44 @@ function notReady(path: string, req: GateRequest, message: string): ProposalResu
   const root = findWorkTreeRoot(path);
   const commit = root ? headCommit(root) : null;
   if (!root || !commit) return { ok: false, error: { code: "PROJECT_NOT_READY", message } };
-  if (!resolveCommit(root, req.base)) return { ok: false, error: { code: "UNKNOWN_COMMIT", message: `${req.base} is not a commit in this repository (fetch the base first)` } };
+  if (!resolveCommit(root, req.base))
+    return {
+      ok: false,
+      error: {
+        code: "UNKNOWN_COMMIT",
+        message: `${req.base} is not a commit in this repository (fetch the base first)`,
+      },
+    };
   const pol = policyOf(root, req);
   if ("error" in pol) return { ok: false, error: pol.error };
   const mb = mergeBase(root, req.base, commit);
-  const reason: GateReason = { severity: "block", code: "PROJECT_NOT_READY", rule: "integrity", basis: "checked", message: cut(message) };
+  const reason: GateReason = {
+    severity: "block",
+    code: "PROJECT_NOT_READY",
+    rule: "integrity",
+    basis: "checked",
+    message: cut(message),
+  };
   const empty = { passed: 0, failed: 0, stale: 0, missing: 0, unknown: 0, unverified: 0 };
   const report: GateReport = {
     format: "vcv-gate-1",
     decision: "block",
     headline: "blocked: the candidate's model cannot be loaded (PROJECT_NOT_READY)",
     base: { commit: req.base, mergeBase: mb ?? req.base, containedInCandidate: mb === req.base, modelRevision: null },
-    candidate: { commit, branch: currentBranchRef(root), dirty: false, modelRevision: "unknown", identityDigest: "unknown" },
+    candidate: {
+      commit,
+      branch: currentBranchRef(root),
+      dirty: false,
+      modelRevision: "unknown",
+      identityDigest: "unknown",
+    },
     change: { kind: "no-change", lineage: "rewritten", changedFiles: 0, introducedRevisions: 0 },
-    policy: { source: pol.source, digest: pol.digest, changedByCandidate: pol.changedByCandidate, effective: pol.policy },
+    policy: {
+      source: pol.source,
+      digest: pol.digest,
+      changedByCandidate: pol.changedByCandidate,
+      effective: pol.policy,
+    },
     reasons: [reason],
     reasonsTotal: 1,
     reasonsTruncated: false,
@@ -534,34 +720,69 @@ function notReady(path: string, req: GateRequest, message: string): ProposalResu
     implementationChecked: false,
     limits: LIMITS,
   };
-  const context = { projectId: "unknown", modelRevision: "unknown", snapshotStatus: "not-ready", source: "model-proposals" as const, implementationChecked: false as const, observed: { commit, branch: currentBranchRef(root), dirty: null } };
+  const context = {
+    projectId: "unknown",
+    modelRevision: "unknown",
+    snapshotStatus: "not-ready",
+    source: "model-proposals" as const,
+    implementationChecked: false as const,
+    observed: { commit, branch: currentBranchRef(root), dirty: null },
+  };
   return { ok: true, context, data: fitBudget(redact(report, root))! };
 }
-
 
 type ResolvedPolicy = { policy: GatePolicy; source: string; digest: string; changedByCandidate: boolean };
 
 function policyOf(root: string, req: GateRequest): ResolvedPolicy | { error: ProposalError } {
   const parse = (value: unknown, source: string): ResolvedPolicy | { error: ProposalError } => {
     const p = gatePolicySchema.safeParse(value);
-    if (!p.success) return { error: { code: "POLICY_INVALID", message: `the policy from ${source} does not match vcv-policy-1`, details: p.error.issues.slice(0, 20).map((i) => ({ path: i.path.join("."), message: i.message })) } };
+    if (!p.success)
+      return {
+        error: {
+          code: "POLICY_INVALID",
+          message: `the policy from ${source} does not match vcv-policy-1`,
+          details: p.error.issues.slice(0, 20).map((i) => ({ path: i.path.join("."), message: i.message })),
+        },
+      };
     return { policy: p.data, source, digest: sha256(canonicalJson(p.data)), changedByCandidate: false };
   };
   if (req.policy !== undefined) return parse(req.policy, "the host");
-  if (req.policyAtBase === undefined) return { policy: DEFAULT_POLICY, source: "default", digest: sha256(canonicalJson(DEFAULT_POLICY)), changedByCandidate: false };
+  if (req.policyAtBase === undefined)
+    return {
+      policy: DEFAULT_POLICY,
+      source: "default",
+      digest: sha256(canonicalJson(DEFAULT_POLICY)),
+      changedByCandidate: false,
+    };
   const rel = req.policyAtBase;
   // Only real absence means "no policy": an oversized, non-file or unreadable entry is an error,
   // never a silent fallback to the defaults.
   const entry = entryAtCommit(root, req.base, rel);
-  if (entry === null) return { error: { code: "POLICY_INVALID", message: `${rel} at the base cannot be read from Git` } };
-  if (entry.kind === "other") return { error: { code: "POLICY_INVALID", message: `${rel} at the base is not a regular file (mode ${entry.mode})` } };
-  if (entry.kind === "blob" && entry.size > GATE_LIMITS.policyBytes) return { error: { code: "POLICY_INVALID", message: `${rel} at the base is ${entry.size} bytes, more than the ${GATE_LIMITS.policyBytes} read` } };
+  if (entry === null)
+    return { error: { code: "POLICY_INVALID", message: `${rel} at the base cannot be read from Git` } };
+  if (entry.kind === "other")
+    return {
+      error: { code: "POLICY_INVALID", message: `${rel} at the base is not a regular file (mode ${entry.mode})` },
+    };
+  if (entry.kind === "blob" && entry.size > GATE_LIMITS.policyBytes)
+    return {
+      error: {
+        code: "POLICY_INVALID",
+        message: `${rel} at the base is ${entry.size} bytes, more than the ${GATE_LIMITS.policyBytes} read`,
+      },
+    };
   const atBase = entry.kind === "blob" ? fileAtCommit(root, req.base, rel, GATE_LIMITS.policyBytes) : null;
-  if (entry.kind === "blob" && atBase === null) return { error: { code: "POLICY_INVALID", message: `${rel} at the base cannot be read from Git` } };
+  if (entry.kind === "blob" && atBase === null)
+    return { error: { code: "POLICY_INVALID", message: `${rel} at the base cannot be read from Git` } };
   const now = readCandidate(root, rel);
   const changed = now === "unreadable" || (atBase === null ? now !== null : now === null || !atBase.equals(now));
   if (atBase === null) {
-    return { policy: DEFAULT_POLICY, source: `default (no ${rel} at the base)`, digest: sha256(canonicalJson(DEFAULT_POLICY)), changedByCandidate: changed };
+    return {
+      policy: DEFAULT_POLICY,
+      source: `default (no ${rel} at the base)`,
+      digest: sha256(canonicalJson(DEFAULT_POLICY)),
+      changedByCandidate: changed,
+    };
   }
   let json: unknown;
   try {
@@ -601,7 +822,12 @@ function boundedRead(abs: string, max: number): Buffer | null {
   }
 }
 
-function criteriaAll(path: string, runs: unknown[], coverage: GateRequest["coverage"], hooks: ProposalHooks): ProposalResult<CriteriaReport> {
+function criteriaAll(
+  path: string,
+  runs: unknown[],
+  coverage: GateRequest["coverage"],
+  hooks: ProposalHooks,
+): ProposalResult<CriteriaReport> {
   const input = { ...(runs.length ? { runs } : {}), ...(coverage ? { coverage } : {}) };
   const all = criteriaEvidence(path, input, hooks);
   if (!all.ok || !all.data.truncated) return all;
@@ -614,7 +840,11 @@ function criteriaAll(path: string, runs: unknown[], coverage: GateRequest["cover
   for (let i = 0; i < rest.length; i += GATE_LIMITS.criteriaBatch) {
     const part = criteriaEvidence(path, { ...input, ids: rest.slice(i, i + GATE_LIMITS.criteriaBatch) }, hooks);
     if (!part.ok) return part;
-    if (part.data.truncated) return { ok: false, error: { code: "REPORT_TOO_LARGE", message: "a batch of criteria does not fit the criteria report" } };
+    if (part.data.truncated)
+      return {
+        ok: false,
+        error: { code: "REPORT_TOO_LARGE", message: "a batch of criteria does not fit the criteria report" },
+      };
     more.push(...part.data.criteria);
   }
   const criteria = [...all.data.criteria, ...more].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
@@ -625,7 +855,13 @@ function allCriterionIds(path: string, hooks: ProposalHooks): ProposalResult<Id[
   return observed(path, hooks, (obs) => finish(obs, hooks, (obs.model.criteria ?? []).map((c) => c.id).sort()));
 }
 
-function verifyObservation(o: z.infer<typeof observationsSchema>["observations"][number], root: string, index: ReturnType<typeof buildIndex>, crit: CriteriaReport, runs: TestRunRecord[]): VerifiedObservation {
+function verifyObservation(
+  o: z.infer<typeof observationsSchema>["observations"][number],
+  root: string,
+  index: ReturnType<typeof buildIndex>,
+  crit: CriteriaReport,
+  runs: TestRunRecord[],
+): VerifiedObservation {
   const problems: string[] = [];
   /** References VCV could not check: never called verified. */
   const unchecked: string[] = [];
@@ -635,7 +871,13 @@ function verifyObservation(o: z.infer<typeof observationsSchema>["observations"]
     return { id, exists: !!hit, kind: hit?.kind ?? null };
   });
   const locations = o.locations.map((l) => {
-    const out: VerifiedObservation["locations"][number] = { path: l.path, ...(l.startLine ? { startLine: l.startLine } : {}), ...(l.endLine ? { endLine: l.endLine } : {}), check: "ok", lines: null };
+    const out: VerifiedObservation["locations"][number] = {
+      path: l.path,
+      ...(l.startLine ? { startLine: l.startLine } : {}),
+      ...(l.endLine ? { endLine: l.endLine } : {}),
+      check: "ok",
+      lines: null,
+    };
     if (pathProblem(l.path)) {
       problems.push(`${cut(l.path, 200)} is not a portable repository path`);
       return { ...out, check: "unsafe" as const };
@@ -652,7 +894,8 @@ function verifyObservation(o: z.infer<typeof observationsSchema>["observations"]
       const text = bytes.toString("utf8");
       const lines = text.length === 0 ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
       const last = Math.max(l.startLine ?? 0, l.endLine ?? 0);
-      const inRange = last <= lines && (l.startLine === undefined || l.endLine === undefined || l.startLine <= l.endLine);
+      const inRange =
+        last <= lines && (l.startLine === undefined || l.endLine === undefined || l.startLine <= l.endLine);
       if (!inRange) problems.push(`${cut(l.path, 200)} has ${lines} lines; the cited range is not in it`);
       return { ...out, lines, check: inRange ? ("ok" as const) : ("line-out-of-range" as const) };
     } catch {
@@ -663,19 +906,45 @@ function verifyObservation(o: z.infer<typeof observationsSchema>["observations"]
   const fresh = new Set(crit.runs.filter((r) => r.fresh).map((r) => r.index));
   const tests = o.tests.map((t) => {
     // The cited test case must exist in the candidate, whether or not any run is available.
-    const res = pathProblem(t.path) ? null : resolveLocator(root, { path: t.path, selector: { kind: "test", name: t.name } });
-    const check: VerifiedObservation["tests"][number]["check"] = !res ? "unsafe" : res.state === "resolved" ? "ok" : res.state === "ambiguous" ? "ambiguous" : res.state === "missing" ? "missing" : "not-checked";
+    const res = pathProblem(t.path)
+      ? null
+      : resolveLocator(root, { path: t.path, selector: { kind: "test", name: t.name } });
+    const check: VerifiedObservation["tests"][number]["check"] = !res
+      ? "unsafe"
+      : res.state === "resolved"
+        ? "ok"
+        : res.state === "ambiguous"
+          ? "ambiguous"
+          : res.state === "missing"
+            ? "missing"
+            : "not-checked";
     if (check === "unsafe") problems.push(`${cut(t.path, 200)} is not a portable repository path`);
-    else if (check === "missing" || check === "ambiguous") problems.push(`test case "${cut(t.name, 200)}" in ${cut(t.path, 200)}: ${cut(res!.detail, 300)}`);
-    else if (check === "not-checked") unchecked.push(`test case "${cut(t.name, 200)}" in ${cut(t.path, 200)}: ${cut(res!.detail, 300)}`);
+    else if (check === "missing" || check === "ambiguous")
+      problems.push(`test case "${cut(t.name, 200)}" in ${cut(t.path, 200)}: ${cut(res!.detail, 300)}`);
+    else if (check === "not-checked")
+      unchecked.push(`test case "${cut(t.name, 200)}" in ${cut(t.path, 200)}: ${cut(res!.detail, 300)}`);
     const k = caseKey(t.path, t.name);
-    const statuses = runs.flatMap((r, i) => (fresh.has(i) ? r.cases.filter((c) => c.key === k).map((c) => c.status) : []));
+    const statuses = runs.flatMap((r, i) =>
+      fresh.has(i) ? r.cases.filter((c) => c.key === k).map((c) => c.status) : [],
+    );
     const anyFresh = fresh.size > 0;
-    const result = statuses.length > 1 ? ("ambiguous" as const) : statuses.length === 1 ? statuses[0]! : anyFresh ? ("not-run" as const) : null;
-    if (anyFresh && !statuses.length) problems.push(`test case "${cut(t.name, 200)}" in ${cut(t.path, 200)} is in no fresh run`);
+    const result =
+      statuses.length > 1
+        ? ("ambiguous" as const)
+        : statuses.length === 1
+          ? statuses[0]!
+          : anyFresh
+            ? ("not-run" as const)
+            : null;
+    if (anyFresh && !statuses.length)
+      problems.push(`test case "${cut(t.name, 200)}" in ${cut(t.path, 200)} is in no fresh run`);
     return { path: t.path, name: cut(t.name, 300), check, mapped: mapped.has(`${t.path}\0${t.name}`), result };
   });
-  for (const l of locations) if (l.check === "not-checked") unchecked.push(`${cut(l.path, 200)}: the cited lines could not be checked (unreadable or larger than ${GATE_LIMITS.lineCheckBytes} bytes)`);
+  for (const l of locations)
+    if (l.check === "not-checked")
+      unchecked.push(
+        `${cut(l.path, 200)}: the cited lines could not be checked (unreadable or larger than ${GATE_LIMITS.lineCheckBytes} bytes)`,
+      );
   const invalid = problems.length > 0;
   const unsupported = o.kind === "contradiction" && o.locations.length === 0;
   if (unsupported) problems.push("a contradiction must cite at least one source location");
@@ -696,9 +965,25 @@ function verifyObservation(o: z.infer<typeof observationsSchema>["observations"]
 
 // ---- the decision -------------------------------------------------------------------------------
 
-const BINDING_CODES = new Set(["CLAIM_STALE", "LOCATOR_MISSING", "LOCATOR_AMBIGUOUS", "CLAIM_INVALID", "CLAIM_REMOVED", "CLAIM_DISPUTED"]);
+const BINDING_CODES = new Set([
+  "CLAIM_STALE",
+  "LOCATOR_MISSING",
+  "LOCATOR_AMBIGUOUS",
+  "CLAIM_INVALID",
+  "CLAIM_REMOVED",
+  "CLAIM_DISPUTED",
+]);
 
-function decide(rec: Reconciliation, findings: ReconcileFinding[], crit: CriteriaReport, observations: VerifiedObservation[], pol: ResolvedPolicy, digest: string, baseContext: BaseContext, pending: string[] = []): GateReport {
+function decide(
+  rec: Reconciliation,
+  findings: ReconcileFinding[],
+  crit: CriteriaReport,
+  observations: VerifiedObservation[],
+  pol: ResolvedPolicy,
+  digest: string,
+  baseContext: BaseContext,
+  pending: string[] = [],
+): GateReport {
   const p = pol.policy;
   const reasons: GateReason[] = [];
   const add = (severity: GateSeverity | "off", r: Omit<GateReason, "severity">) => {
@@ -706,11 +991,22 @@ function decide(rec: Reconciliation, findings: ReconcileFinding[], crit: Criteri
   };
 
   // Integrity: fixed. Invalid or unattested history never merges.
-  for (const e of rec.model.integrity.errors) add("block", { code: e.code, rule: "integrity", basis: "checked", message: e.message });
+  for (const e of rec.model.integrity.errors)
+    add("block", { code: e.code, rule: "integrity", basis: "checked", message: e.message });
   if (!rec.model.integrity.ok && rec.model.integrity.errors.length === 0) {
-    add("block", { code: "INTEGRITY_FAILED", rule: "integrity", basis: "checked", message: "the model history is not consistent and attested under the base's trust list" });
+    add("block", {
+      code: "INTEGRITY_FAILED",
+      rule: "integrity",
+      basis: "checked",
+      message: "the model history is not consistent and attested under the base's trust list",
+    });
   } else if (rec.model.integrity.errorsTotal > rec.model.integrity.errors.length) {
-    add("block", { code: "INTEGRITY_FAILED", rule: "integrity", basis: "checked", message: `${rec.model.integrity.errorsTotal - rec.model.integrity.errors.length} more integrity errors (list cut)` });
+    add("block", {
+      code: "INTEGRITY_FAILED",
+      rule: "integrity",
+      basis: "checked",
+      message: `${rec.model.integrity.errorsTotal - rec.model.integrity.errors.length} more integrity errors (list cut)`,
+    });
   }
 
   // Reconciliation findings: every one of them, before the report's lists are cut, so adding
@@ -718,36 +1014,91 @@ function decide(rec: Reconciliation, findings: ReconcileFinding[], crit: Criteri
   for (const f of findings) {
     const base = findingReason(f);
     if (f.category === "structural") add(p.structural, { ...base, rule: "structural" });
-    else if (f.category === "binding" && BINDING_CODES.has(f.code)) add(f.related ? p.bindings.related : p.bindings.unrelated, { ...base, rule: f.related ? "bindings.related" : "bindings.unrelated" });
+    else if (f.category === "binding" && BINDING_CODES.has(f.code))
+      add(f.related ? p.bindings.related : p.bindings.unrelated, {
+        ...base,
+        rule: f.related ? "bindings.related" : "bindings.unrelated",
+      });
     else if (f.category === "coverage") add(p.coverage, { ...base, rule: "coverage" });
     else if (f.category === "unsupported") add(p.unsupported, { ...base, rule: "unsupported" });
     else if (f.code === "BASE_NOT_CONTAINED") add(p.baseNotContained, { ...base, rule: "baseNotContained" });
   }
   if (!rec.bindings.available) {
-    add("block", { code: "BINDINGS_UNAVAILABLE", rule: "integrity", basis: "not-checked", message: `the claim store cannot be read${rec.bindings.problem ? `: ${rec.bindings.problem}` : ""}; no claim or mapping can be assessed` });
+    add("block", {
+      code: "BINDINGS_UNAVAILABLE",
+      rule: "integrity",
+      basis: "not-checked",
+      message: `the claim store cannot be read${rec.bindings.problem ? `: ${rec.bindings.problem}` : ""}; no claim or mapping can be assessed`,
+    });
   }
 
   // Criteria.
   const criteria = crit.criteria;
-  if (crit.counts.criteria === 0) add(p.noCriteria, { code: "NO_CRITERIA", rule: "noCriteria", basis: "observed", message: "the approved model has no acceptance criteria, so test evidence gates nothing" });
-  if (crit.truncated) add("block", { code: "CRITERIA_NOT_ALL_ASSESSED", rule: "integrity", basis: "not-checked", message: `${crit.total - criteria.length} criteria could not be assessed within the report limits` });
+  if (crit.counts.criteria === 0)
+    add(p.noCriteria, {
+      code: "NO_CRITERIA",
+      rule: "noCriteria",
+      basis: "observed",
+      message: "the approved model has no acceptance criteria, so test evidence gates nothing",
+    });
+  if (crit.truncated)
+    add("block", {
+      code: "CRITERIA_NOT_ALL_ASSESSED",
+      rule: "integrity",
+      basis: "not-checked",
+      message: `${crit.total - criteria.length} criteria could not be assessed within the report limits`,
+    });
   for (const c of criteria) {
     const set = c.verification === "required" ? REQUIRED_EVIDENCE : p.optional;
     const prefix = c.verification;
     if (c.result === "passed") {
-      if (c.resultObservedBy !== "host") add(set.claimed, { code: "RESULT_CLAIMED", rule: `${prefix}.claimed`, basis: "claim", criterionId: c.id, objectIds: c.verifies, message: `${c.id} (${prefix}) passed only in runs that were not captured here: a claim, not host-observed evidence` });
+      if (c.resultObservedBy !== "host")
+        add(set.claimed, {
+          code: "RESULT_CLAIMED",
+          rule: `${prefix}.claimed`,
+          basis: "claim",
+          criterionId: c.id,
+          objectIds: c.verifies,
+          message: `${c.id} (${prefix}) passed only in runs that were not captured here: a claim, not host-observed evidence`,
+        });
       continue;
     }
-    const tests = c.problems.filter((x) => x.code === "TEST_FAILED" || x.code === "TEST_ERRORED" || x.code === "TEST_SKIPPED" || x.code === "TEST_NOT_RUN" || x.code === "RESULT_AMBIGUOUS" || x.code === "RESULT_STALE");
+    const tests = c.problems.filter(
+      (x) =>
+        x.code === "TEST_FAILED" ||
+        x.code === "TEST_ERRORED" ||
+        x.code === "TEST_SKIPPED" ||
+        x.code === "TEST_NOT_RUN" ||
+        x.code === "RESULT_AMBIGUOUS" ||
+        x.code === "RESULT_STALE",
+    );
     const failing = c.mappings.filter((m) => m.result && m.result.status !== "passed" && m.test);
     const head = `${c.id} (${prefix}) is ${c.result}`;
-    const detail = tests.length ? tests.map((t) => t.message).join("; ") : c.problems.map((x) => x.message).join("; ") || "no runs were supplied";
+    const detail = tests.length
+      ? tests.map((t) => t.message).join("; ")
+      : c.problems.map((x) => x.message).join("; ") || "no runs were supplied";
     if (failing.length) {
       for (const m of failing) {
-        add(set[c.result], { code: codeFor(c.result, m.result!.status), rule: `${prefix}.${c.result}`, basis: "checked", criterionId: c.id, objectIds: c.verifies, test: { path: m.test!.path, name: m.test!.name }, bindingId: m.bindingId, message: `${head}: "${m.test!.name}" in ${m.test!.path} ${m.result!.status}${m.result!.message ? `: ${m.result!.message}` : ""}` });
+        add(set[c.result], {
+          code: codeFor(c.result, m.result!.status),
+          rule: `${prefix}.${c.result}`,
+          basis: "checked",
+          criterionId: c.id,
+          objectIds: c.verifies,
+          test: { path: m.test!.path, name: m.test!.name },
+          bindingId: m.bindingId,
+          message: `${head}: "${m.test!.name}" in ${m.test!.path} ${m.result!.status}${m.result!.message ? `: ${m.result!.message}` : ""}`,
+        });
       }
     } else {
-      add(set[c.result], { code: codeFor(c.result, null), rule: `${prefix}.${c.result}`, basis: c.result === "unknown" ? "not-checked" : "checked", criterionId: c.id, objectIds: c.verifies, message: `${head}: ${detail}` });
+      add(set[c.result], {
+        code: codeFor(c.result, null),
+        rule: `${prefix}.${c.result}`,
+        basis: c.result === "unknown" ? "not-checked" : "checked",
+        criterionId: c.id,
+        objectIds: c.verifies,
+        message: `${head}: ${detail}`,
+      });
     }
   }
 
@@ -756,11 +1107,31 @@ function decide(rec: Reconciliation, findings: ReconcileFinding[], crit: Criteri
   for (const b of rec.bindings.items) {
     if (b.relation !== "tests" || !b.modelObjectId || !criterionIds.has(b.modelObjectId)) continue;
     if (b.atBase === "unchanged" && !b.boundFileChanged) continue;
-    const what = b.atBase === "removed" ? "was removed" : b.atBase === "added" ? "was added" : b.atBase === "reasserted" ? "was reasserted" : "is unchanged, but its test file changed";
-    add(p.mappingChanged, { code: "MAPPING_CHANGED", rule: "mappingChanged", basis: "observed", criterionId: b.modelObjectId, objectIds: [b.modelObjectId], bindingId: b.bindingId, message: `the mapping ${b.bindingId} of ${b.modelObjectId} (${b.locator ?? "?"}) ${what} in this candidate; mappings change without approval, so check the test still checks the criterion` });
+    const what =
+      b.atBase === "removed"
+        ? "was removed"
+        : b.atBase === "added"
+          ? "was added"
+          : b.atBase === "reasserted"
+            ? "was reasserted"
+            : "is unchanged, but its test file changed";
+    add(p.mappingChanged, {
+      code: "MAPPING_CHANGED",
+      rule: "mappingChanged",
+      basis: "observed",
+      criterionId: b.modelObjectId,
+      objectIds: [b.modelObjectId],
+      bindingId: b.bindingId,
+      message: `the mapping ${b.bindingId} of ${b.modelObjectId} (${b.locator ?? "?"}) ${what} in this candidate; mappings change without approval, so check the test still checks the criterion`,
+    });
   }
   if (rec.bindings.truncated && p.mappingChanged !== "off") {
-    add(p.mappingChanged, { code: "MAPPING_CHANGED", rule: "mappingChanged", basis: "not-checked", message: `the claim list was cut at ${rec.bindings.items.length} of ${rec.bindings.total}; mappings beyond it may have changed` });
+    add(p.mappingChanged, {
+      code: "MAPPING_CHANGED",
+      rule: "mappingChanged",
+      basis: "not-checked",
+      message: `the claim list was cut at ${rec.bindings.items.length} of ${rec.bindings.total}; mappings beyond it may have changed`,
+    });
   }
 
   // Objects the policy says need evidence whenever a change touches them.
@@ -784,7 +1155,18 @@ function decide(rec: Reconciliation, findings: ReconcileFinding[], crit: Criteri
   // Agent observations: claims, checked for what they cite.
   for (const o of observations) {
     if (o.references !== "verified") {
-      add(p.observations.invalidReferences, { code: o.references === "unsupported" ? "OBSERVATION_WITHOUT_LOCATION" : o.references === "not-checked" ? "OBSERVATION_REFERENCES_NOT_CHECKED" : "OBSERVATION_REFERENCES_INVALID", rule: "observations.invalidReferences", basis: "claim", observationId: o.id, message: `${o.id}: ${o.problems.join("; ")}` });
+      add(p.observations.invalidReferences, {
+        code:
+          o.references === "unsupported"
+            ? "OBSERVATION_WITHOUT_LOCATION"
+            : o.references === "not-checked"
+              ? "OBSERVATION_REFERENCES_NOT_CHECKED"
+              : "OBSERVATION_REFERENCES_INVALID",
+        rule: "observations.invalidReferences",
+        basis: "claim",
+        observationId: o.id,
+        message: `${o.id}: ${o.problems.join("; ")}`,
+      });
     }
     if (o.kind === "note") continue;
     add(p.observations[o.kind], {
@@ -801,35 +1183,84 @@ function decide(rec: Reconciliation, findings: ReconcileFinding[], crit: Criteri
   // A proposal the candidate carries but nobody has approved: the approved model (and so this
   // check) does not include it. Shown so the reviewer knows an intent change is waiting on M3.
   for (const id of pending.slice(0, GATE_LIMITS.reasons)) {
-    add("warn", { code: "PROPOSAL_PENDING", rule: "integrity", basis: "observed", message: `the candidate carries the pending proposal ${id}; it is not part of the approved model this check used. If the code depends on it, a separate reviewer approves it through M3 (vcv review approve)` });
+    add("warn", {
+      code: "PROPOSAL_PENDING",
+      rule: "integrity",
+      basis: "observed",
+      message: `the candidate carries the pending proposal ${id}; it is not part of the approved model this check used. If the code depends on it, a separate reviewer approves it through M3 (vcv review approve)`,
+    });
   }
-  if (pol.changedByCandidate) add(p.policyChanged, { code: "POLICY_CHANGED", rule: "policyChanged", basis: "observed", message: `the candidate changes the gate policy (${pol.source}); this check used the base's, and the change applies only after the merge` });
+  if (pol.changedByCandidate)
+    add(p.policyChanged, {
+      code: "POLICY_CHANGED",
+      rule: "policyChanged",
+      basis: "observed",
+      message: `the candidate changes the gate policy (${pol.source}); this check used the base's, and the change applies only after the merge`,
+    });
 
   const order = { block: 0, warn: 1 };
   reasons.sort((a, b) => order[a.severity] - order[b.severity]);
-  const counts = { block: reasons.filter((r) => r.severity === "block").length, warn: reasons.filter((r) => r.severity === "warn").length };
+  const counts = {
+    block: reasons.filter((r) => r.severity === "block").length,
+    warn: reasons.filter((r) => r.severity === "warn").length,
+  };
   const decision: GateDecision = counts.block ? "block" : counts.warn ? "warn" : "pass";
   const required = crit.results.required;
   const reqTotal = Object.values(required).reduce((a, b) => a + b, 0);
   const headline =
     decision === "block"
-      ? `blocked: ${counts.block} blocking reason${counts.block === 1 ? "" : "s"} (${reasons.filter((r) => r.severity === "block").slice(0, 3).map((r) => r.criterionId ?? r.code).join(", ")}${counts.block > 3 ? ", …" : ""})`
+      ? `blocked: ${counts.block} blocking reason${counts.block === 1 ? "" : "s"} (${reasons
+          .filter((r) => r.severity === "block")
+          .slice(0, 3)
+          .map((r) => r.criterionId ?? r.code)
+          .join(", ")}${counts.block > 3 ? ", …" : ""})`
       : `${decision === "pass" ? "passed" : `passed with ${counts.warn} warning${counts.warn === 1 ? "" : "s"}`}: ${required.passed}/${reqTotal} required criteria passed, host-observed`;
-  const kind = rec.model.introducedTotal > 0 ? (rec.summary.changedFiles > countModelFiles(rec) ? "model-and-code" : "model-first") : rec.summary.changedFiles > 0 ? "code-first" : "no-change";
+  const kind =
+    rec.model.introducedTotal > 0
+      ? rec.summary.changedFiles > countModelFiles(rec)
+        ? "model-and-code"
+        : "model-first"
+      : rec.summary.changedFiles > 0
+        ? "code-first"
+        : "no-change";
   return {
     format: "vcv-gate-1",
     decision,
     headline,
-    base: { commit: rec.base.commit, mergeBase: rec.base.mergeBase, containedInCandidate: rec.base.containedInCandidate, modelRevision: rec.base.modelRevision },
-    candidate: { commit: rec.candidate.commit, branch: rec.candidate.branch, dirty: rec.candidate.dirty, modelRevision: rec.candidate.modelRevision, identityDigest: digest },
-    change: { kind, lineage: rec.model.lineage, changedFiles: rec.summary.changedFiles, introducedRevisions: rec.model.introducedTotal },
+    base: {
+      commit: rec.base.commit,
+      mergeBase: rec.base.mergeBase,
+      containedInCandidate: rec.base.containedInCandidate,
+      modelRevision: rec.base.modelRevision,
+    },
+    candidate: {
+      commit: rec.candidate.commit,
+      branch: rec.candidate.branch,
+      dirty: rec.candidate.dirty,
+      modelRevision: rec.candidate.modelRevision,
+      identityDigest: digest,
+    },
+    change: {
+      kind,
+      lineage: rec.model.lineage,
+      changedFiles: rec.summary.changedFiles,
+      introducedRevisions: rec.model.introducedTotal,
+    },
     policy: { source: pol.source, digest: pol.digest, changedByCandidate: pol.changedByCandidate, effective: p },
     reasons: reasons.slice(0, GATE_LIMITS.reasons),
     reasonsTotal: reasons.length,
     reasonsTruncated: reasons.length > GATE_LIMITS.reasons,
     counts,
     criteria: {
-      items: criteria.slice(0, GATE_LIMITS.criteria).map((c) => ({ id: c.id, verification: c.verification, result: c.result, observedBy: c.resultObservedBy, verifies: c.verifies })),
+      items: criteria
+        .slice(0, GATE_LIMITS.criteria)
+        .map((c) => ({
+          id: c.id,
+          verification: c.verification,
+          result: c.result,
+          observedBy: c.resultObservedBy,
+          verifies: c.verifies,
+        })),
       total: crit.total,
       truncated: criteria.length > GATE_LIMITS.criteria || crit.truncated,
       results: crit.results,
@@ -837,7 +1268,11 @@ function decide(rec: Reconciliation, findings: ReconcileFinding[], crit: Criteri
     runs: crit.runs,
     observations,
     observationsTruncated: false,
-    reconciliation: { summary: rec.summary, integrity: { ok: rec.model.integrity.ok, authorization: rec.model.integrity.authorization }, findingsTotal: rec.findingsTotal },
+    reconciliation: {
+      summary: rec.summary,
+      integrity: { ok: rec.model.integrity.ok, authorization: rec.model.integrity.authorization },
+      findingsTotal: rec.findingsTotal,
+    },
     notes: crit.notes.map((n) => `${n.code}: ${n.message}`),
     budget: { limit: GATE_LIMITS.bytes, bytes: 0, shrunk: false },
     implementationChecked: false,
@@ -863,7 +1298,14 @@ function codeFor(result: CriterionEvidence["result"], status: string | null): st
   if (status === "not-run") return "TEST_NOT_RUN";
   if (status === "ambiguous") return "RESULT_AMBIGUOUS";
   if (status === "stale") return "RESULT_STALE";
-  return { failed: "CRITERION_FAILED", stale: "CRITERION_STALE", missing: "CRITERION_MISSING", unknown: "CRITERION_UNKNOWN", unverified: "CRITERION_UNVERIFIED", passed: "CRITERION_PASSED" }[result];
+  return {
+    failed: "CRITERION_FAILED",
+    stale: "CRITERION_STALE",
+    missing: "CRITERION_MISSING",
+    unknown: "CRITERION_UNKNOWN",
+    unverified: "CRITERION_UNVERIFIED",
+    passed: "CRITERION_PASSED",
+  }[result];
 }
 
 /** Objects the change touches: the model delta and its impact, and the source impact's declared context. */
@@ -880,10 +1322,23 @@ function touchedObjects(rec: Reconciliation, baseContext: BaseContext): { ids: S
   }
   const s = rec.sourceImpact;
   if (s) {
-    for (const x of [...s.seeds.map((v) => v.objectId), ...s.modules.map((v) => v.id), ...s.contracts.map((v) => v.id), ...s.rules.map((v) => v.id), ...s.candidates.map((v) => v.id)]) ids.add(x);
+    for (const x of [
+      ...s.seeds.map((v) => v.objectId),
+      ...s.modules.map((v) => v.id),
+      ...s.contracts.map((v) => v.id),
+      ...s.rules.map((v) => v.id),
+      ...s.candidates.map((v) => v.id),
+    ])
+      ids.add(x);
   }
   // A cut list may hide a touched object: then every required-evidence object counts as touched.
-  const all = !baseContext.complete || rec.model.delta.truncated || !!imp?.truncated || !!s?.truncated || s?.seedsTotal !== undefined && s.seedsTotal > s.seeds.length || (!rec.bindings.available && rec.summary.changedFiles > 0);
+  const all =
+    !baseContext.complete ||
+    rec.model.delta.truncated ||
+    !!imp?.truncated ||
+    !!s?.truncated ||
+    (s?.seedsTotal !== undefined && s.seedsTotal > s.seeds.length) ||
+    (!rec.bindings.available && rec.summary.changedFiles > 0);
   return { ids, all };
 }
 
@@ -897,8 +1352,14 @@ function fitBudget(r: GateReport): GateReport | null {
   while (n > GATE_LIMITS.bytes) {
     const lists = [
       { len: r.reasons.length, cut: (k: number) => ((r.reasons = r.reasons.slice(0, k)), (r.reasonsTruncated = true)) },
-      { len: r.criteria.items.length, cut: (k: number) => ((r.criteria.items = r.criteria.items.slice(0, k)), (r.criteria.truncated = true)) },
-      { len: r.observations.length, cut: (k: number) => ((r.observations = r.observations.slice(0, k)), (r.observationsTruncated = true)) },
+      {
+        len: r.criteria.items.length,
+        cut: (k: number) => ((r.criteria.items = r.criteria.items.slice(0, k)), (r.criteria.truncated = true)),
+      },
+      {
+        len: r.observations.length,
+        cut: (k: number) => ((r.observations = r.observations.slice(0, k)), (r.observationsTruncated = true)),
+      },
     ].sort((a, b) => b.len - a.len);
     if (lists[0]!.len <= 1) return null;
     lists[0]!.cut(Math.floor(lists[0]!.len / 2));

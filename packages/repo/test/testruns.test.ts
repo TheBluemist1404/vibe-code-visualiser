@@ -2,7 +2,18 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { appendFileSync, chmodSync, cpSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  chmodSync,
+  cpSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { canonicalJson } from "../../core/src/index.ts";
@@ -32,13 +43,26 @@ const CONFIRM = "EnrollmentService > confirms an enrollment while seats are left
 const REPEAT = "EnrollmentService > rejects a repeat enrollment without taking a second seat";
 const host: HostContext = { principalId: "ci:main", permissions: ["tests:observe"] };
 const agentHost: HostContext = { principalId: "agent:coder", permissions: [] };
-const RUN = { root: "server", runner: { name: "vitest", version: "5.1.0" }, invocation: "npx vitest run --reporter=junit --outputFile=$RUNNER_TEMP/junit.xml" };
+const RUN = {
+  root: "server",
+  runner: { name: "vitest", version: "5.1.0" },
+  invocation: "npx vitest run --reporter=junit --outputFile=$RUNNER_TEMP/junit.xml",
+};
 const xml = (s: string) => Buffer.from(s, "utf8");
 
 const keys = mkdtempSync(join(tmpdir(), "vcv-runs-keys-"));
 let reviewer: ReturnType<typeof createReviewerKey> | undefined;
 
-const crit = (id: string, over: Record<string, unknown> = {}) => ({ id, kind: "criterion", owner: "mod-enrollment", name: id, statement: "A full course is rejected with COURSE_FULL and the student is notified.", verifies: ["rul-seat-limit"], verification: "required", ...over });
+const crit = (id: string, over: Record<string, unknown> = {}) => ({
+  id,
+  kind: "criterion",
+  owner: "mod-enrollment",
+  name: id,
+  statement: "A full course is rejected with COURSE_FULL and the student is notified.",
+  verifies: ["rul-seat-limit"],
+  verification: "required",
+  ...over,
+});
 
 /** Course Desk with two approved criteria, mapped to individual cases, committed. */
 function setup() {
@@ -48,15 +72,38 @@ function setup() {
   git(repo, "add", "-A");
   git(repo, "commit", "-qm", "trust");
   const changeId = "chg-criteria";
-  const sub = submitProposal(repo, { changeId, projectId: "prj-course-desk", expectedRevision: projectStatus(repo).model!.revision, operations: [
-    { type: "createCriterion", criterion: crit("crt-full-course") },
-    { type: "createCriterion", criterion: crit("crt-confirm", { statement: "A free seat confirms the enrollment and notifies the student.", verification: "optional" }) },
-  ] }, { principalId: "agent:coder", permissions: ["model:propose"] });
+  const sub = submitProposal(
+    repo,
+    {
+      changeId,
+      projectId: "prj-course-desk",
+      expectedRevision: projectStatus(repo).model!.revision,
+      operations: [
+        { type: "createCriterion", criterion: crit("crt-full-course") },
+        {
+          type: "createCriterion",
+          criterion: crit("crt-confirm", {
+            statement: "A free seat confirms the enrollment and notifies the student.",
+            verification: "optional",
+          }),
+        },
+      ],
+    },
+    { principalId: "agent:coder", permissions: ["model:propose"] },
+  );
   assert.ok(sub.ok);
   const pv = previewProposal(repo, { changeId });
   assert.ok(pv.ok);
   const head = git(repo, "rev-parse", "HEAD");
-  assert.equal(reviewApprove(repo, { changeId, expectedDigest: pv.data.proposal.proposalDigest, keyFile: join(keys, "hoang.pem"), trust: { kind: "git-ref", ref: head, pinnedCommit: head } }).outcome.status, "applied");
+  assert.equal(
+    reviewApprove(repo, {
+      changeId,
+      expectedDigest: pv.data.proposal.proposalDigest,
+      keyFile: join(keys, "hoang.pem"),
+      trust: { kind: "git-ref", ref: head, pinnedCommit: head },
+    }).outcome.status,
+    "applied",
+  );
   map(repo, "crt-full-course", FULL, "test.full");
   map(repo, "crt-confirm", CONFIRM, "test.confirm");
   git(repo, "add", "-A");
@@ -64,9 +111,19 @@ function setup() {
   return repo;
 }
 const map = (repo: string, id: string, name: string, bindingId: string) =>
-  recordBinding(repo, { bindingId, modelObjectId: id, relation: "tests", locator: { path: SPEC, selector: { kind: "test", name } } }, agent, null);
+  recordBinding(
+    repo,
+    { bindingId, modelObjectId: id, relation: "tests", locator: { path: SPEC, selector: { kind: "test", name } } },
+    agent,
+    null,
+  );
 
-function capture(repo: string, report: string, who: HostContext = host, extra: Record<string, unknown> = {}): TestRunRecord {
+function capture(
+  repo: string,
+  report: string,
+  who: HostContext = host,
+  extra: Record<string, unknown> = {},
+): TestRunRecord {
   const r = captureTestRun(repo, xml(report), { ...RUN, ...extra }, who);
   assert.ok(r.ok, JSON.stringify(r));
   return r.data;
@@ -88,7 +145,12 @@ test("a real Vitest JUnit report: per-case identity, status and message", () => 
   assert.deepEqual(ok.report.summary, { tests: 8, passed: 8, failed: 0, errors: 0, skipped: 0 });
   const full = ok.report.cases.find((c) => c.name === FULL)!;
   assert.equal(full.path, SPEC, "classname is joined to the report root");
-  assert.ok(ok.report.cases.some((c) => c.name === "NotificationsService > keeps each recipient's notifications separate, in order"), "entities are decoded");
+  assert.ok(
+    ok.report.cases.some(
+      (c) => c.name === "NotificationsService > keeps each recipient's notifications separate, in order",
+    ),
+    "entities are decoded",
+  );
 
   const bad = parseJUnit(xml(FAIL), "server");
   assert.ok(bad.ok);
@@ -112,7 +174,10 @@ test("the reader refuses DTDs, truncation, inconsistent counts, unsafe paths and
   refuse(PASS.slice(0, PASS.length / 2), "REPORT_INVALID"); // cut mid-tag
   refuse(PASS.replace('tests="8"', 'tests="9"'), "REPORT_INCONSISTENT", /declares tests="9" but has 8/);
   // A failing case cut out of a red report (its suite still declares it).
-  refuse(FAIL.replace(/<testcase[^>]*rejects an enrollment into a full course[\s\S]*?<\/testcase>/, ""), "REPORT_INCONSISTENT");
+  refuse(
+    FAIL.replace(/<testcase[^>]*rejects an enrollment into a full course[\s\S]*?<\/testcase>/, ""),
+    "REPORT_INCONSISTENT",
+  );
   // Flipping a failure to a pass without fixing the counts.
   refuse(FAIL.replace(/<failure[\s\S]*?<\/failure>/, ""), "REPORT_INCONSISTENT", /failures/);
   refuse(PASS.replace('classname="test/app.e2e-spec.ts"', 'classname="../../etc/passwd"'), "REPORT_INVALID", /path/);
@@ -131,7 +196,10 @@ test("the reader refuses DTDs, truncation, inconsistent counts, unsafe paths and
 test("a host-observed passing run of this candidate: every mapped case passed", () => {
   const repo = setup();
   const run = capture(repo, PASS);
-  assert.deepEqual([run.format, run.observedBy, run.principalId, run.summary.tests], ["vcv-test-run-1", "host", "ci:main", 8]);
+  assert.deepEqual(
+    [run.format, run.observedBy, run.principalId, run.summary.tests],
+    ["vcv-test-run-1", "host", "ci:main", 8],
+  );
   assert.equal(run.candidate.commit, git(repo, "rev-parse", "HEAD"));
   assert.equal(run.report.sha256, createHash("sha256").update(PASS).digest("hex"));
   const d = evaluate(repo, [run]);
@@ -157,7 +225,10 @@ test("a failed mapped case fails its criterion, naming the exact case; a skipped
   const full = of(d, "crt-full-course");
   assert.equal(full.result, "failed");
   const p = full.problems.find((x) => x.code === "TEST_FAILED")!;
-  assert.match(p.message, /server\/src\/enrollment\/enrollment\.service\.spec\.ts > EnrollmentService > rejects an enrollment into a full course/);
+  assert.match(
+    p.message,
+    /server\/src\/enrollment\/enrollment\.service\.spec\.ts > EnrollmentService > rejects an enrollment into a full course/,
+  );
   assert.match(p.message, /to match object/);
   assert.equal(p.bindingId, "test.full");
   const confirm = of(d, "crt-confirm");
@@ -173,15 +244,23 @@ test("a green suite does not stand in for a mapped case that did not run", () =>
   // The same green report without the mapped case, counts adjusted: e.g. a filtered invocation.
   const filtered = PASS.replace(/<testcase[^>]*rejects an enrollment into a full course[\s\S]*?<\/testcase>/, "")
     .replace('tests="8"', 'tests="7"')
-    .replace(/(name="src\/enrollment\/enrollment\.service\.spec\.ts" timestamp="[^"]*" hostname="[^"]*") tests="4"/, '$1 tests="3"');
-  const d = evaluate(repo, [capture(repo, filtered)], { coverage: { linesPct: 97.5, source: "istanbul json-summary" } });
+    .replace(
+      /(name="src\/enrollment\/enrollment\.service\.spec\.ts" timestamp="[^"]*" hostname="[^"]*") tests="4"/,
+      '$1 tests="3"',
+    );
+  const d = evaluate(repo, [capture(repo, filtered)], {
+    coverage: { linesPct: 97.5, source: "istanbul json-summary" },
+  });
   assert.equal(d.runs[0]!.green, true);
   assert.equal(of(d, "crt-full-course").result, "missing");
   assert.ok(codes(d, "crt-full-course").includes("TEST_NOT_RUN"));
   const notes = d.notes.map((n) => n.code);
   assert.ok(notes.includes("SUITE_GREEN_REQUIRED_NOT_PASSED"), JSON.stringify(d.notes));
   assert.ok(notes.includes("COVERAGE_IS_NOT_CRITERION_COVERAGE"));
-  assert.match(d.notes.find((n) => n.code === "COVERAGE_IS_NOT_CRITERION_COVERAGE")!.message, /97\.5%.*crt-full-course/);
+  assert.match(
+    d.notes.find((n) => n.code === "COVERAGE_IS_NOT_CRITERION_COVERAGE")!.message,
+    /97\.5%.*crt-full-course/,
+  );
   assert.equal(d.coverage!.linesPct, 97.5);
 });
 
@@ -204,7 +283,10 @@ test("a run of another candidate is stale: a dirty edit, a new commit, a model c
   // A fresh run next to the stale one: the fresh result counts, the stale one is only listed.
   const again = capture(repo, PASS);
   d = evaluate(repo, [run, again]);
-  assert.deepEqual(d.runs.map((r) => r.fresh), [false, true]);
+  assert.deepEqual(
+    d.runs.map((r) => r.fresh),
+    [false, true],
+  );
   assert.equal(of(d, "crt-full-course").result, "passed");
   assert.deepEqual(of(d, "crt-full-course").mappings[0]!.result!.runs, [1]);
 });
@@ -215,7 +297,10 @@ test("agent-claimed runs are labelled and never host-observed", () => {
   assert.equal(run.observedBy, "agent");
   const d = evaluate(repo, [run]);
   assert.deepEqual([of(d, "crt-full-course").result, of(d, "crt-full-course").resultObservedBy], ["passed", "claimed"]);
-  assert.deepEqual([d.runs[0]!.observedBy, d.runs[0]!.declaredObservedBy, d.runs[0]!.admittedAs], ["claimed", "agent", "imported"]);
+  assert.deepEqual(
+    [d.runs[0]!.observedBy, d.runs[0]!.declaredObservedBy, d.runs[0]!.admittedAs],
+    ["claimed", "agent", "imported"],
+  );
   assert.ok(codes(d, "crt-full-course").includes("RESULT_CLAIMED"));
 });
 
@@ -256,7 +341,10 @@ test("a duplicated case in a report makes its result ambiguous", () => {
   const repo = setup();
   const dup = PASS.replace(/(<testcase[^>]*rejects an enrollment into a full course[\s\S]*?<\/testcase>)/, "$1$1")
     .replace('tests="8"', 'tests="9"')
-    .replace(/(name="src\/enrollment\/enrollment\.service\.spec\.ts" timestamp="[^"]*" hostname="[^"]*") tests="4"/, '$1 tests="5"');
+    .replace(
+      /(name="src\/enrollment\/enrollment\.service\.spec\.ts" timestamp="[^"]*" hostname="[^"]*") tests="4"/,
+      '$1 tests="5"',
+    );
   const d = evaluate(repo, [capture(repo, dup)]);
   assert.equal(of(d, "crt-full-course").mappings[0]!.result!.status, "ambiguous");
   assert.equal(of(d, "crt-full-course").result, "missing");
@@ -286,7 +374,10 @@ test("an imported record is a claim, whatever it declares: a re-digested agentâ†
   const agentRun = capture(repo, PASS, agentHost);
   const forged = redigest({ ...JSON.parse(JSON.stringify(agentRun)), observedBy: "host", principalId: "ci:invented" });
   const d = evaluate(repo, [forged as TestRunRecord]);
-  assert.deepEqual([d.runs[0]!.observedBy, d.runs[0]!.declaredObservedBy, d.runs[0]!.admittedAs], ["claimed", "host", "imported"]);
+  assert.deepEqual(
+    [d.runs[0]!.observedBy, d.runs[0]!.declaredObservedBy, d.runs[0]!.admittedAs],
+    ["claimed", "host", "imported"],
+  );
   assert.deepEqual([of(d, "crt-full-course").result, of(d, "crt-full-course").resultObservedBy], ["passed", "claimed"]);
   assert.ok(codes(d, "crt-full-course").includes("RESULT_CLAIMED"));
   // A genuine host capture written to a file and read back is a claim too.
@@ -336,12 +427,18 @@ test("no usable source identity, no capture and no fresh result: no Git, failed 
   try {
     const broken = captureTestRun(repo, xml(PASS), RUN, host);
     assert.equal(!broken.ok && broken.error.code, "SOURCE_IDENTITY_UNAVAILABLE");
-    assert.match(!broken.ok ? broken.error.message : "", /could not be listed \(git failed\); an unknown tree is not a clean one/);
+    assert.match(
+      !broken.ok ? broken.error.message : "",
+      /could not be listed \(git failed\); an unknown tree is not a clean one/,
+    );
   } finally {
     writeFileSync(index, saved);
   }
   // A record whose own identity is incomplete is never fresh.
-  const partial = redigest({ ...JSON.parse(JSON.stringify(run)), candidate: { ...run.candidate, uncommitted: { ...run.candidate.uncommitted, complete: false } } });
+  const partial = redigest({
+    ...JSON.parse(JSON.stringify(run)),
+    candidate: { ...run.candidate, uncommitted: { ...run.candidate.uncommitted, complete: false } },
+  });
   const fixedId = { ...(partial as TestRunRecord) };
   fixedId.identityDigest = createHash("sha256").update(canonicalJson(fixedId.candidate)).digest("hex");
   const d3 = evaluate(repo, [redigest(fixedId as unknown as Record<string, unknown>) as TestRunRecord]);
@@ -354,8 +451,19 @@ test("root and suite counts are both checked, skipped included; raw runner paths
   const r = parseJUnit(xml(root('tests="1" failures="0" errors="0" skipped="1"', one)), "server");
   assert.ok(!r.ok && r.code === "REPORT_INCONSISTENT" && /skipped="1" but has 0/.test(r.message), JSON.stringify(r));
   assert.ok(parseJUnit(xml(root('tests="1" failures="0" errors="0" skipped="0"', one)), "server").ok);
-  for (const path of ["/src/a.test.ts", "C:/src/a.test.ts", "\\\\host\\share\\a.test.ts", "src/../../a.test.ts", "src/./a.test.ts", "./src/a.test.ts", "src//a.test.ts"]) {
-    const bad = parseJUnit(xml(root('tests="1"', `<testsuite tests="1"><testcase classname="${path}" name="passes"/></testsuite>`)), "server");
+  for (const path of [
+    "/src/a.test.ts",
+    "C:/src/a.test.ts",
+    "\\\\host\\share\\a.test.ts",
+    "src/../../a.test.ts",
+    "src/./a.test.ts",
+    "./src/a.test.ts",
+    "src//a.test.ts",
+  ]) {
+    const bad = parseJUnit(
+      xml(root('tests="1"', `<testsuite tests="1"><testcase classname="${path}" name="passes"/></testsuite>`)),
+      "server",
+    );
     assert.ok(!bad.ok && bad.code === "REPORT_INVALID", `${path}: ${JSON.stringify(bad)}`);
     assert.match(!bad.ok ? bad.message : "", /test case path/);
   }
@@ -371,7 +479,8 @@ test("a capture never emits a record larger than VCV reads back; a large record 
     const name = "\\".repeat(301);
     const message = "\\".repeat(500);
     let body = "";
-    for (let i = 0; i < n; i++) body += `<testcase classname="src/big.test.ts" name="${i} ${name}"><failure message="${message}"/></testcase>`;
+    for (let i = 0; i < n; i++)
+      body += `<testcase classname="src/big.test.ts" name="${i} ${name}"><failure message="${message}"/></testcase>`;
     return `<testsuites tests="${n}" failures="${n}" errors="0"><testsuite tests="${n}" failures="${n}">${body}</testsuite></testsuites>`;
   };
   const over = report(9000);
@@ -380,7 +489,10 @@ test("a capture never emits a record larger than VCV reads back; a large record 
   assert.equal(!r.ok && r.error.code, "REPORT_TOO_LARGE");
   const near = capture(repo, report(6000));
   const text = `${JSON.stringify(near, null, 2)}\n`;
-  assert.ok(Buffer.byteLength(text) > 10 * 1024 * 1024 && Buffer.byteLength(text) <= 16 * 1024 * 1024, `${Buffer.byteLength(text)} bytes`);
+  assert.ok(
+    Buffer.byteLength(text) > 10 * 1024 * 1024 && Buffer.byteLength(text) <= 16 * 1024 * 1024,
+    `${Buffer.byteLength(text)} bytes`,
+  );
   const back = criteriaEvidence(repo, { runs: [JSON.parse(text)] });
   assert.ok(back.ok, JSON.stringify(back).slice(0, 300));
   assert.equal(back.data.runs[0]!.summary.tests, 6000);
@@ -435,7 +547,13 @@ test("a bound file edited mid-capture is STATE_CHANGED; an unreadable claim refu
   git(repo, "add", ".gitignore");
   git(repo, "commit", "-qm", "ignore the service");
   let once = true;
-  const r = captureTestRun(repo, xml(PASS), RUN, host, { afterRead: () => (once ? ((once = false), edit(repo, SERVICE, "Enrollment rules. Every decision", "Enrollment rules (mid-read). Every decision")) : undefined) });
+  const r = captureTestRun(repo, xml(PASS), RUN, host, {
+    afterRead: () =>
+      once
+        ? ((once = false),
+          edit(repo, SERVICE, "Enrollment rules. Every decision", "Enrollment rules (mid-read). Every decision"))
+        : undefined,
+  });
   assert.equal(!r.ok && r.error.code, "STATE_CHANGED");
 
   writeFileSync(join(repo, ".vcv/bindings/broken.json"), "{");
@@ -491,7 +609,9 @@ test("a path that cannot be resolved (a link loop) is unavailable, not absent", 
   assert.equal(!r.ok && r.error.code, "SOURCE_IDENTITY_UNAVAILABLE");
 });
 
-test("an inaccessible parent directory is unavailable, not absent", { skip: process.getuid?.() === 0 ? "root ignores directory permissions" : false }, () => {
+test("an inaccessible parent directory is unavailable, not absent", {
+  skip: process.getuid?.() === 0 ? "root ignores directory permissions" : false,
+}, () => {
   const repo = setup();
   edit(repo, SERVICE, "Enrollment rules. Every decision", "Enrollment rules (uncommitted). Every decision");
   const dir = join(repo, "server/src/enrollment");
