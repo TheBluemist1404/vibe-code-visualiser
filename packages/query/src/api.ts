@@ -280,7 +280,7 @@ function context(req: z.output<typeof contextRequest>, snap: Snapshot): QueryRes
           : []),
         ...(inc ? (snap.incoming.get(id) ?? []).filter(allowed).map((e) => [e, e.from] as [Edge, Id]) : []),
       ].filter(([e]) => id === req.id || !listsChildren(e, id));
-      for (const [edge, other] of candidates) {
+      for (const [, other] of candidates) {
         if (other === undefined) continue; // unresolved outgoing reference: shown, never followed
         if (other === snap.model.project.id) continue; // the project root is in the overview
         if (!distance.has(other)) {

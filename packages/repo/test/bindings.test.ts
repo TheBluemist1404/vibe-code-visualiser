@@ -883,7 +883,7 @@ test("claim reads respect the checkout boundary: symlinked directories and entri
 
 test("large files: selectors are unchecked without parsing, and whole-file fingerprints stream with CRLF split across chunks", () => {
   const dir = tmp();
-  const big = "export const a = 1;\n" + "// padding\r\n".repeat(100_000);
+  const big = `export const a = 1;\n${"// padding\r\n".repeat(100_000)}`;
   writeFileSync(join(dir, "big.ts"), big);
   const r = resolveLocator(dir, parseLocator("big.ts#symbol:a"));
   assert.equal(r.state, "unchecked");

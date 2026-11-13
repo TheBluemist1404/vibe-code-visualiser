@@ -87,7 +87,7 @@ test("legacy sequential stores keep working and continue with branch-safe IDs", 
   writeFileSync(join(dir, "revisions", "rev-2.yaml"), dumpModel(legacy));
   writeFileSync(
     join(dir, "HEAD"),
-    JSON.stringify({ format: 1, revision: "rev-2", history: ["rev-1", "rev-2"] }, null, 2) + "\n",
+    `${JSON.stringify({ format: 1, revision: "rev-2", history: ["rev-1", "rev-2"] }, null, 2)}\n`,
   );
 
   const e = new ModelEngine(new FileStore(dir));
@@ -248,7 +248,7 @@ test("P2: a revision file whose modelRevision disagrees with its name is CORRUPT
   writeFileSync(join(dir, "revisions", "rev-2.yaml"), dumpModel(legacy));
   writeFileSync(
     join(dir, "HEAD"),
-    JSON.stringify({ format: 1, revision: "rev-2", history: ["rev-1", "rev-2"] }) + "\n",
+    `${JSON.stringify({ format: 1, revision: "rev-2", history: ["rev-1", "rev-2"] })}\n`,
   );
   assert.equal(inspectStore(dir).state, "ok", "legacy IDs carry no digest, so their content cannot be checked");
   legacy.project.modelRevision = "rev-7";

@@ -1,23 +1,56 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.6.7/schema.json",
-  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "vcs": {
+    "enabled": true,
+    "clientKind": "git",
+    "useIgnoreFile": true
+  },
   "files": {
     "includes": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "apps/*/src/**/*.ts", "apps/*/test/**/*.ts"]
   },
-  "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 120 },
-  "javascript": { "formatter": { "quoteStyle": "double", "trailingCommas": "all", "semicolons": "always" } },
-  "assist": { "enabled": false },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 120
+  },
+  "javascript": {
+    "formatter": {
+      "quoteStyle": "double",
+      "trailingCommas": "all",
+      "semicolons": "always"
+    }
+  },
+  "assist": {
+    "enabled": false
+  },
   "linter": {
     "enabled": true,
     "rules": {
       "preset": "recommended",
-      "style": { "noNonNullAssertion": "warn" }
+      "style": {
+        "noNonNullAssertion": "warn"
+      },
+      "suspicious": {
+        "noImplicitAnyLet": "off",
+        "noAssignInExpressions": "warn",
+        "useIterableCallbackReturn": "warn"
+      },
+      "complexity": {
+        "noCommaOperator": "warn"
+      }
     }
   },
   "overrides": [
     {
       "includes": ["packages/*/test/**", "apps/*/test/**"],
-      "linter": { "rules": { "style": { "noNonNullAssertion": "off" } } }
+      "linter": {
+        "rules": {
+          "style": {
+            "noNonNullAssertion": "off"
+          }
+        }
+      }
     }
   ]
 }

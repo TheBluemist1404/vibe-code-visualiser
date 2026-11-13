@@ -1252,15 +1252,13 @@ function decide(
     reasonsTruncated: reasons.length > GATE_LIMITS.reasons,
     counts,
     criteria: {
-      items: criteria
-        .slice(0, GATE_LIMITS.criteria)
-        .map((c) => ({
-          id: c.id,
-          verification: c.verification,
-          result: c.result,
-          observedBy: c.resultObservedBy,
-          verifies: c.verifies,
-        })),
+      items: criteria.slice(0, GATE_LIMITS.criteria).map((c) => ({
+        id: c.id,
+        verification: c.verification,
+        result: c.result,
+        observedBy: c.resultObservedBy,
+        verifies: c.verifies,
+      })),
       total: crit.total,
       truncated: criteria.length > GATE_LIMITS.criteria || crit.truncated,
       results: crit.results,

@@ -276,7 +276,7 @@ export function recordImplementation(
       return failFinal({ code: "NO_REPORT", message: `there is no report for ${req.changeId} to replace` }, obs, hooks);
 
     const report = redact(assemble(brief, req, host, observation), obs.status.root);
-    const body = JSON.stringify(report, null, 2) + "\n";
+    const body = `${JSON.stringify(report, null, 2)}\n`;
     if (Buffer.byteLength(body) > IMPLEMENTATION_LIMITS.reportBytes)
       return failFinal(
         {

@@ -360,7 +360,7 @@ export function addTrustedReviewer(path: string, entry: TrustEntry): string {
     throw new ApprovalError("KEY_EXISTS", "this key is already listed");
   list.reviewers.push(entry);
   const file = join(status.storeDir, REVIEWERS_FILE);
-  durableWrite(file, JSON.stringify(list, null, 2) + "\n");
+  durableWrite(file, `${JSON.stringify(list, null, 2)}\n`);
   return `${VCV_DIR}/${REVIEWERS_FILE}`;
 }
 
@@ -598,7 +598,7 @@ function writeAttestation(storeDir: string, r: ChangeRecord, a: Attestation): st
   if (st && (st.isSymbolicLink() || !st.isDirectory()))
     throw new Error(`${VCV_DIR}/${APPROVALS_DIR}/ is not a plain directory`);
   if (!st) mkdirSync(dir);
-  writeNew(join(storeDir, rel), JSON.stringify(a, null, 2) + "\n");
+  writeNew(join(storeDir, rel), `${JSON.stringify(a, null, 2)}\n`);
   return `${VCV_DIR}/${rel}`;
 }
 

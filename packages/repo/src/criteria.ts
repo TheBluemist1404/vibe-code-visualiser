@@ -456,13 +456,11 @@ export function criteriaEvidence(
       mappingsAvailable: available,
       ...(available ? {} : { mappingsProblem: cut(claims.key.slice("unreadable:".length)) }),
       invalidClaims: {
-        items: invalid
-          .slice(0, CRITERIA_LIMITS.invalidClaims)
-          .map((e) => ({
-            bindingId: cut(e.bindingId, 300),
-            file: cut(e.file, 300),
-            problem: cut(e.problem ?? "unreadable"),
-          })),
+        items: invalid.slice(0, CRITERIA_LIMITS.invalidClaims).map((e) => ({
+          bindingId: cut(e.bindingId, 300),
+          file: cut(e.file, 300),
+          problem: cut(e.problem ?? "unreadable"),
+        })),
         total: invalid.length,
         truncated: invalid.length > CRITERIA_LIMITS.invalidClaims,
       },

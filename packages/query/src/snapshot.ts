@@ -1,6 +1,6 @@
 // A read-only view over one model snapshot. Everything here is derived on demand from the
 // canonical IR via buildIndex/collectRefs; no relationship is stored a second time.
-import { COLLECTIONS, buildIndex, collectionOf, collectRefs, isUnresolved, refId, validateModel } from "@vcv/ir";
+import { COLLECTIONS, buildIndex, collectionOf, collectRefs, isUnresolved, validateModel } from "@vcv/ir";
 import type { CollectionName, Diagnostic, Id, IndexEntry, Kind, Model, RefRole } from "@vcv/ir";
 import type { Edge, ObjectSummary, QueryContext, Relation, RelationCategory } from "./types.ts";
 
@@ -132,7 +132,7 @@ export class Snapshot {
   diagnosticsFor(ids: Iterable<Id>): Diagnostic[] {
     const paths = [...ids].map((i) => this.index.get(i)?.path).filter((p): p is string => !!p);
     return this.diagnostics.filter((d) =>
-      paths.some((p) => d.path === p || d.path.startsWith(p + ".") || d.path.startsWith(p + "[")),
+      paths.some((p) => d.path === p || d.path.startsWith(`${p}.`) || d.path.startsWith(`${p}[`)),
     );
   }
 }

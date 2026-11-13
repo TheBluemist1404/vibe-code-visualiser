@@ -340,7 +340,7 @@ export class FileStore implements ModelStore {
     for (const sub of ["revisions", "changes", "orphaned"]) mkdirSync(join(dir, sub), { recursive: true });
     durableWrite(join(dir, "revisions", `${rev}.yaml`), dumpModel(initial));
     const head: Head = { format: 1, revision: rev, history: [rev] };
-    durableWrite(join(dir, "HEAD"), JSON.stringify(head, null, 2) + "\n"); // initialized only once HEAD exists
+    durableWrite(join(dir, "HEAD"), `${JSON.stringify(head, null, 2)}\n`); // initialized only once HEAD exists
     return new FileStore(dir, opts);
   }
 
@@ -408,9 +408,9 @@ export class FileStore implements ModelStore {
     const next: Head = { format: 1, revision: rev, history: [...this.head.history, rev], lastCommit: record };
 
     this.write("revision", join(this.dir, "revisions", `${rev}.yaml`), dumpModel(model));
-    this.write("head", join(this.dir, "HEAD"), JSON.stringify(next, null, 2) + "\n");
+    this.write("head", join(this.dir, "HEAD"), `${JSON.stringify(next, null, 2)}\n`);
     this.head = next; // committed: from here on the revision exists
-    this.write("change", this.changePath(record.changeId), JSON.stringify(record, null, 2) + "\n");
+    this.write("change", this.changePath(record.changeId), `${JSON.stringify(record, null, 2)}\n`);
     this.validated = storeFingerprint(this.dir); // our own writes are known-good
   }
 
@@ -441,7 +441,7 @@ export class FileStore implements ModelStore {
         );
       }
     }
-    durableWrite(path, JSON.stringify(record, null, 2) + "\n");
+    durableWrite(path, `${JSON.stringify(record, null, 2)}\n`);
     // Only bless our own write if nothing else had changed; otherwise the next read re-checks.
     if (before === this.validated) this.validated = storeFingerprint(this.dir);
   }
@@ -458,7 +458,7 @@ export class FileStore implements ModelStore {
         readSync(fd, last, 0, 1, size - 1);
         if (last[0] !== 0x0a) prefix = "\n";
       }
-      appendFileSync(fd, prefix + JSON.stringify(event) + "\n");
+      appendFileSync(fd, `${prefix}${JSON.stringify(event)}\n`);
       fsyncSync(fd);
     } finally {
       closeSync(fd);
@@ -553,7 +553,7 @@ export class FileStore implements ModelStore {
     if (last) {
       const onDisk = this.getChange(last.changeId);
       if (onDisk?.status !== "applied" || onDisk.resultingRevision !== last.resultingRevision) {
-        durableWrite(this.changePath(last.changeId), JSON.stringify(last, null, 2) + "\n");
+        durableWrite(this.changePath(last.changeId), `${JSON.stringify(last, null, 2)}\n`);
         report.repairedChangeRecords.push(last.changeId);
       }
     }

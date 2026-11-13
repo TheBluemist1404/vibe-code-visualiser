@@ -221,7 +221,7 @@ test("implementation report: agent claims, VCV observations and warnings kept ap
   edit(repo, SERVICE, "taken.length >= course.capacity", "taken.length >= course.capacity /* capacity reported */");
   writeFileSync(
     join(repo, "README.md"),
-    readFileSync(join(repo, "README.md"), "utf8") + "\nCapacity is reported on rejection.\n",
+    `${readFileSync(join(repo, "README.md"), "utf8")}\nCapacity is reported on rejection.\n`,
   );
   const claim = readBinding(repo, "impl.rul-seat-limit")!;
   recordBinding(
@@ -295,7 +295,7 @@ test("implementation report: agent claims, VCV observations and warnings kept ap
   const s1 = implementationStatus(repo, id);
   assert.ok(s1.ok, JSON.stringify(s1));
   assert.equal(s1.data.changedSinceReport, false);
-  writeFileSync(join(repo, "package.json"), readFileSync(join(repo, "package.json"), "utf8") + "\n");
+  writeFileSync(join(repo, "package.json"), `${readFileSync(join(repo, "package.json"), "utf8")}\n`);
   const s2 = implementationStatus(repo, id);
   assert.ok(s2.ok);
   assert.equal(s2.data.changedSinceReport, true);
@@ -386,7 +386,7 @@ test("handoff and report observe the working tree: an edit of a bound or changed
   const original = readFileSync(svc, "utf8");
 
   // A bound source file edited after binding verification read it.
-  const h1 = buildHandoff(repo, id, { afterRead: () => writeFileSync(svc, original + "\nexport const value = 2;\n") });
+  const h1 = buildHandoff(repo, id, { afterRead: () => writeFileSync(svc, `${original}\nexport const value = 2;\n`) });
   assert.equal(!h1.ok && h1.error.code, "STATE_CHANGED", JSON.stringify(h1));
   writeFileSync(svc, original);
   // A new dirty file appearing mid-read changes the observed file set.
@@ -451,7 +451,7 @@ test("replacing a report never overwrites one written since it was checked", () 
     agentClaims: { ...first.data.report.agentClaims, notes: "concurrent update" },
   };
   const r = recordImplementation(repo, report(h, { notes: "replacement" }), implementer, first.data.digest, {
-    afterRead: () => writeFileSync(file, JSON.stringify(concurrent, null, 2) + "\n"),
+    afterRead: () => writeFileSync(file, `${JSON.stringify(concurrent, null, 2)}\n`),
   });
   assert.equal(!r.ok && r.error.code, "REPORT_CHANGED", JSON.stringify(r));
   assert.equal(
@@ -461,7 +461,7 @@ test("replacing a report never overwrites one written since it was checked", () 
   );
   // A report changing while it is shown is STATE_CHANGED as well.
   const s = implementationStatus(repo, id, {
-    afterRead: () => writeFileSync(file, JSON.stringify(first.data.report, null, 2) + "\n"),
+    afterRead: () => writeFileSync(file, `${JSON.stringify(first.data.report, null, 2)}\n`),
   });
   assert.equal(!s.ok && s.error.code, "STATE_CHANGED");
 });

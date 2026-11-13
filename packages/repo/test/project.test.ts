@@ -81,7 +81,7 @@ function snapshot(dir: string): string {
   const walk = (d: string): string[] =>
     readdirSync(d, { withFileTypes: true })
       .filter((e) => e.name !== ".git")
-      .flatMap((e) => (e.isDirectory() ? [join(d, e.name) + "/", ...walk(join(d, e.name))] : [join(d, e.name)]));
+      .flatMap((e) => (e.isDirectory() ? [`${join(d, e.name)}/`, ...walk(join(d, e.name))] : [join(d, e.name)]));
   return walk(dir)
     .sort()
     .map((f) => (f.endsWith("/") ? f : `${f}:${statSync(f).mtimeMs}:${readFileSync(f, "utf8").length}`))
@@ -265,7 +265,7 @@ test("merging diverged branches and resolving .vcv/HEAD to the common ancestor k
 
   assert.equal(tryGit(repo, "merge", "-q", "feature-a"), false);
   // Resolve HEAD to main's version (rev-1): both rev-2 files now verify as "children of HEAD".
-  writeFileSync(join(repo, VCV_DIR, "HEAD"), git(repo, "show", `main:${VCV_DIR}/HEAD`) + "\n");
+  writeFileSync(join(repo, VCV_DIR, "HEAD"), `${git(repo, "show", `main:${VCV_DIR}/HEAD`)}\n`);
   git(repo, "add", `${VCV_DIR}/HEAD`);
   git(repo, "commit", "-q", "-m", "merge, model reset to ancestor");
 
@@ -346,7 +346,7 @@ test("a writer that rejected a diverged checkout keeps rejecting it on later cal
   // A merge commit whose .vcv/HEAD was resolved to the common ancestor.
   git(repo, "checkout", "-q", "-b", "bad-merge");
   assert.equal(tryGit(repo, "merge", "-q", "feature-a"), false);
-  writeFileSync(join(repo, VCV_DIR, "HEAD"), git(repo, "show", `main:${VCV_DIR}/HEAD`) + "\n");
+  writeFileSync(join(repo, VCV_DIR, "HEAD"), `${git(repo, "show", `main:${VCV_DIR}/HEAD`)}\n`);
   commitAll(repo, "merge, model reset to ancestor");
   git(repo, "checkout", "-q", "feature-a");
 

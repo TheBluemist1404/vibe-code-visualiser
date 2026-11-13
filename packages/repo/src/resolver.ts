@@ -213,7 +213,7 @@ function nodesFingerprint(sf: ts.SourceFile, nodes: readonly ts.Node[]): string 
     children.forEach(walk);
   };
   for (const n of nodes) walk(n);
-  return sha256("vcv-selector-v1\0" + tokens.filter((t) => t !== "").join("\n"));
+  return sha256(`vcv-selector-v1\0${tokens.filter((t) => t !== "").join("\n")}`);
 }
 
 const lineOf = (sf: ts.SourceFile, n: ts.Node) => sf.getLineAndCharacterOfPosition(n.getStart(sf)).line + 1;

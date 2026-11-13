@@ -20,7 +20,7 @@ import { dumpModel } from "../../ir/src/index.ts";
 import { FileStore, ModelEngine, branchSafeRevisionId, proposalDigest } from "../../core/src/index.ts";
 import type { HostContext, ProposedModelChange } from "../../core/src/index.ts";
 import {
-  ApprovalError,
+  type ApprovalError,
   addTrustedReviewer,
   checkIntegrity,
   createReviewerKey,

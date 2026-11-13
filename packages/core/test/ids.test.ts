@@ -49,7 +49,7 @@ test("a change with an unsafe changeId or expectedRevision is rejected with a st
       [["SCHEMA", "changeId"]],
     );
     assert.equal(r.record, undefined);
-    const stale = e.propose(renamePending("ch-ok-" + bad.length, bad), owner);
+    const stale = e.propose(renamePending(`ch-ok-${bad.length}`, bad), owner);
     assert.deepEqual(
       stale.diagnostics.map((d) => [d.code, d.path]),
       [["SCHEMA", "expectedRevision"]],

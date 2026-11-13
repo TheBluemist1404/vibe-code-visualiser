@@ -100,7 +100,7 @@ export function resolveInside(root: string, rel: string): PathResolution {
 /** Normalize a route for comparison: leading "/", single slashes, no trailing "/". */
 export function normalizeRoute(route: string): string {
   const parts = route.split("/").filter(Boolean);
-  return "/" + parts.join("/");
+  return `/${parts.join("/")}`;
 }
 
 /** Why a selector is malformed, or undefined. Shape only; whether it resolves is the resolver's job. */

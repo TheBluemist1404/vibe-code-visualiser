@@ -21,7 +21,7 @@ import { FileStoreReader } from "@vcv/core";
 import { createQueryApi } from "@vcv/query";
 import { VCV_DIR, createEvidenceApi, initProject, listBindings, recordBinding } from "../src/index.ts";
 import type { EvidenceResult } from "../src/index.ts";
-import { CONTROLLER, DRAFT, ROOT, SERVICE, SPEC, agent, baseline, edit, git, read } from "./course-desk.ts";
+import { DRAFT, ROOT, SERVICE, SPEC, agent, baseline, edit, git, read } from "./course-desk.ts";
 
 /** sha256 of every file under .vcv/ and server/, plus `git status`: the observable state. */
 function fingerprintTree(repo: string): Record<string, string> {
@@ -261,7 +261,7 @@ test("a dirty source edit during a read is refused, never mixed: multi-claim, de
 
   // An edit to a file no claim binds is not part of the observation; nothing is refused.
   const unrelated = createEvidenceApi(repo, {
-    afterRead: () => writeFileSync(join(repo, "README.md"), read(join(repo, "README.md")) + "\nmore\n"),
+    afterRead: () => writeFileSync(join(repo, "README.md"), `${read(join(repo, "README.md"))}\nmore\n`),
   });
   assert.equal(ok(unrelated.getEvidenceOverview()).counts.resolved, 4);
   assert.match(tree(), /README\.md/);

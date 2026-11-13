@@ -387,7 +387,7 @@ test("P1: approval evidence read by integrity is rechecked, also when the attest
       if (!once) return;
       once = false;
       const a = JSON.parse(readFileSync(attestation, "utf8"));
-      writeFileSync(attestation, JSON.stringify({ ...a, approverId: "user:mallory" }, null, 2) + "\n");
+      writeFileSync(attestation, `${JSON.stringify({ ...a, approverId: "user:mallory" }, null, 2)}\n`);
     },
   });
   assert.equal(
@@ -404,7 +404,7 @@ test("P1: a trust file or trust ref that moves mid-read is STATE_CHANGED", () =>
   const { repo, base, trust } = attested();
   // External trust file (outside the checkout).
   const file = join(mkdtempSync(join(tmpdir(), "vcv-trust-")), "reviewers.json");
-  writeFileSync(file, git(repo, "show", `${base}:.vcv/reviewers.json`) + "\n");
+  writeFileSync(file, `${git(repo, "show", `${base}:.vcv/reviewers.json`)}\n`);
   let once = true;
   const r1 = reconcile(
     repo,
@@ -457,7 +457,7 @@ test("P2: an unreadable claim store is reported as such, never as removed or una
 test("P2: the serialized report stays within its byte budget for valid worst-case claims", () => {
   const { repo, base } = setup();
   const template = JSON.parse(readFileSync(join(repo, ".vcv/bindings/test.rul-seat-limit.json"), "utf8"));
-  const long = "EnrollmentService > " + "x".repeat(50_000);
+  const long = `EnrollmentService > ${"x".repeat(50_000)}`;
   for (let i = 0; i < 5; i++)
     writeFileSync(
       join(repo, `.vcv/bindings/test.long-${i}.json`),

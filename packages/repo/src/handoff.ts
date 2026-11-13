@@ -356,13 +356,11 @@ function assemble(
       approverId: r.approverId ?? null,
       rationale: rationale === null ? null : cut(rationale, HANDOFF_LIMITS.rationaleChars),
       rationaleTruncated: rationale !== null && rationale.length > HANDOFF_LIMITS.rationaleChars,
-      operations: change.operations
-        .slice(0, HANDOFF_LIMITS.operations)
-        .map((op, index) => ({
-          index,
-          type: op.type,
-          summary: cut(describeOperation(op), HANDOFF_LIMITS.summaryChars),
-        })),
+      operations: change.operations.slice(0, HANDOFF_LIMITS.operations).map((op, index) => ({
+        index,
+        type: op.type,
+        summary: cut(describeOperation(op), HANDOFF_LIMITS.summaryChars),
+      })),
       operationsTotal: change.operations.length,
       operationsTruncated: change.operations.length > HANDOFF_LIMITS.operations,
     },

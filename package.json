@@ -11,7 +11,7 @@
     "typecheck": "tsc -p tsconfig.json",
     "lint": "biome lint",
     "format": "biome format --write",
-    "check": "biome ci",
+    "check": "biome ci --diagnostic-level=error",
     "vcv": "node --experimental-strip-types apps/cli/src/main.ts"
   },
   "engines": {

@@ -180,7 +180,7 @@ export function serializeClaim(c: BindingClaim): string {
     },
     disputed: c.disputed ? { by: c.disputed.by, reason: c.disputed.reason } : undefined,
   };
-  return JSON.stringify(ordered, null, 2) + "\n"; // undefined members are omitted
+  return `${JSON.stringify(ordered, null, 2)}\n`; // undefined members are omitted
 }
 
 function parseClaimFile(id: string, bytes: Buffer): Pick<ClaimEntry, "claim" | "problem"> {

@@ -202,7 +202,7 @@ export function observeGit(root: string, storeRelPath = ".vcv"): GitObservation 
   const status = git(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
   // A status Git could not give is not a clean tree.
   const entries = status === null ? [] : parsePorcelainZ(status);
-  const prefix = storeRelPath.replace(/\/+$/, "") + "/";
+  const prefix = `${storeRelPath.replace(/\/+$/, "")}/`;
   return {
     root,
     commit,

@@ -12,7 +12,7 @@ const newDir = () => join(mkdtempSync(join(tmpdir(), "vcv-reader-")), "store");
 function fingerprint(dir: string): string {
   const walk = (d: string): string[] =>
     readdirSync(d, { withFileTypes: true })
-      .flatMap((e) => (e.isDirectory() ? [join(d, e.name) + "/", ...walk(join(d, e.name))] : [join(d, e.name)]))
+      .flatMap((e) => (e.isDirectory() ? [`${join(d, e.name)}/`, ...walk(join(d, e.name))] : [join(d, e.name)]))
       .sort();
   return walk(dir)
     .map((f) =>

@@ -1015,7 +1015,7 @@ export function observed<T>(
 
 function observedUnsafe<T>(
   path: string,
-  hooks: ProposalHooks,
+  _hooks: ProposalHooks,
   body: (obs: Observation) => ProposalResult<T>,
 ): ProposalResult<T> {
   const status = projectStatus(path);

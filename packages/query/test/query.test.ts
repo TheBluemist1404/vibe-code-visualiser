@@ -342,7 +342,7 @@ test("the complete edge set between returned nodes is included", () => {
 
 /** A model far larger than the fixture: many modules, a huge behavior and a wide data object. */
 function largeModel(): Model {
-  const m = structuredClone(model()) as Model & Record<string, any>;
+  const m = structuredClone(model());
   for (let i = 0; i < 300; i++) {
     const id = `mod-bulk-${String(i).padStart(3, "0")}`;
     m.modules.push({
@@ -352,9 +352,9 @@ function largeModel(): Model {
       name: `Bulk ${i}`,
       purpose: "Generated",
       dependsOn: ["mod-enrollment"],
-    } as any);
+    });
   }
-  (m.data as any[]).push({
+  m.data.push({
     id: "data-wide",
     owner: "mod-enrollment",
     kind: "data",
@@ -362,21 +362,19 @@ function largeModel(): Model {
     attributes: Array.from({ length: 1000 }, (_, i) => ({ id: `attr-wide-${i}`, name: `Field ${i}`, type: "string" })),
   });
   const states = Array.from({ length: 1200 }, (_, i) => ({ id: `st-big-${i}`, name: `S${i}` }));
-  (m.behaviors as any[]).push({
+  m.behaviors.push({
     id: "beh-big",
     owner: "mod-enrollment",
     kind: "behavior",
     name: "Big",
     initialStateId: "st-big-0",
     states,
-    transitions: states
-      .slice(1)
-      .map((s, i) => ({
-        id: `tr-big-${i}`,
-        fromStateId: `st-big-${i}`,
-        toStateId: s.id,
-        trigger: { kind: "event", eventId: "evt-approval-submitted" },
-      })),
+    transitions: states.slice(1).map((s, i) => ({
+      id: `tr-big-${i}`,
+      fromStateId: `st-big-${i}`,
+      toStateId: s.id,
+      trigger: { kind: "event", eventId: "evt-approval-submitted" },
+    })),
   });
   return m;
 }
