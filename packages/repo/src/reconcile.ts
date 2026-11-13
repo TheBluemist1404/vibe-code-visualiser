@@ -26,13 +26,12 @@
 // movement (a branch flip, a same-path dirty edit) gives STATE_CHANGED instead of a mixed report.
 // Lists are cut at fixed limits and say so. Paths are repository-relative; the checkout's absolute
 // path never appears. Nothing is written, fetched, executed or inferred.
-import { createHash } from "node:crypto";
 import { z } from "zod";
 import { buildIndex, loadModel, persistedIdProblem } from "@vcv/ir";
 import type { Id, Model } from "@vcv/ir";
 import { lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { canonicalJson, readStoreFile, STORE_FILE_LIMITS } from "@vcv/core";
+import { canonicalJson, readStoreFile, STORE_FILE_LIMITS, sha256Hex, digestOf } from "@vcv/core";
 import { LIMITS as QUERY_LIMITS, createQueryApi } from "@vcv/query";
 import type { ImpactCandidate } from "@vcv/query";
 import { MAX_CLAIM_BYTES, verifyBinding } from "./bindings.ts";
@@ -53,11 +52,17 @@ import { APPROVALS_DIR, REVIEWERS_FILE, readPlainFile } from "./approval.ts";
 import type { TrustSource } from "./approval.ts";
 import { formatLocator } from "./locator.ts";
 import { VCV_DIR } from "./project.ts";
-import { redact } from "./handoff.ts";
-import { diffModels, failFinal, finish, impactOf, moduleOf, observed, readClaims } from "./proposals.ts";
-import type { ObjectChange, Observation, ProposalHooks, ProposalPreview, ProposalResult } from "./proposals.ts";
+import { redact } from "./shared/redact.ts";
+import { readClaims } from "./shared/claims.ts";
+import { diffModels, impactOf, moduleOf } from "./shared/model-diff.ts";
+import type { ObjectChange } from "./shared/model-diff.ts";
 import { worktreeState } from "./worktree.ts";
 import type { WorktreeState } from "./worktree.ts";
+import { failFinal, finish, observed } from "./shared/observation.ts";
+import type { Observation, ObserveHooks } from "./shared/observation.ts";
+import type { RepoResult } from "./shared/result.ts";
+import { invalidRequest } from "./shared/result.ts";
+import type { ModelImpact } from "./shared/model-diff.ts";
 
 export const RECONCILE_LIMITS = {
   files: 500,
@@ -220,7 +225,7 @@ export type Reconciliation = {
       authorization: string;
     };
     delta: { from: string | null; changes: ObjectChange[]; total: number; truncated: boolean };
-    impact: ProposalPreview["impact"];
+    impact: ModelImpact | null;
   };
   source: { files: ChangedFile[]; total: number; truncated: boolean; unmapped: number | null };
   /**
@@ -283,19 +288,12 @@ const SEMANTIC_NOTE =
 export function reconcile(
   path: string,
   input: unknown,
-  hooks: ProposalHooks = {},
+  hooks: ObserveHooks = {},
   collect?: (all: ReconcileFinding[]) => void,
-): ProposalResult<Reconciliation> {
+): RepoResult<Reconciliation> {
   const parsed = reconcileRequest.safeParse(input);
   if (!parsed.success) {
-    return {
-      ok: false,
-      error: {
-        code: "INVALID_REQUEST",
-        message: "request does not match the reconciliation input schema",
-        details: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
-      },
-    };
+    return invalidRequest(parsed.error, "request does not match the reconciliation input schema");
   }
   const req = parsed.data as ReconcileRequest;
   return observed(path, hooks, (obs) => {
@@ -380,8 +378,6 @@ const guardKey = (claimsKey: string, tree: Tree | null, base: string | null, evi
     evidence,
   ]);
 
-const sha = (b: Buffer | string) => createHash("sha256").update(b).digest("hex");
-
 /**
  * The integrity check's mutable inputs as bytes: every attestation file, the checkout's trust
  * list, every changed `.vcv/` file (worktreeState does not read inside .vcv/), the approvals
@@ -404,18 +400,18 @@ function evidenceKey(root: string, storeDir: string, tree: Tree | null, trust: T
   for (const p of tree?.changed ?? []) if (p.startsWith(`${VCV_DIR}/`)) rels.add(p.slice(VCV_DIR.length + 1));
   const files = [...rels].sort().map((rel) => {
     const f = readStoreFile(storeDir, rel, STORE_FILE_LIMITS.revision);
-    return [rel, f.kind === "file" ? sha(f.bytes) : f.kind === "absent" ? "absent" : `unsafe:${f.problem}`];
+    return [rel, f.kind === "file" ? sha256Hex(f.bytes) : f.kind === "absent" ? "absent" : `unsafe:${f.problem}`];
   });
   let source: string | null = null;
   if (trust?.kind === "file") {
     try {
-      source = `file:${sha(readPlainFile(trust.path, 1024 * 1024, "trust list"))}`;
+      source = `file:${sha256Hex(readPlainFile(trust.path, 1024 * 1024, "trust list"))}`;
     } catch (e) {
       source = `file-unreadable:${(e as Error).message}`;
     }
   } else if (trust?.kind === "git-ref") source = `ref:${resolveCommit(root, trust.ref)}`;
   else if (trust) source = trust.kind;
-  return sha(canonicalJson([listing, files, source]));
+  return digestOf([listing, files, source]);
 }
 
 const cutText = (t: string, max: number = RECONCILE_LIMITS.textChars) =>
@@ -537,10 +533,7 @@ function claimsAt(root: string, commit: string): Map<string, string> {
   for (const rel of filesAtCommit(root, commit, `${VCV_DIR}/bindings`)) {
     if (!rel.startsWith(dir) || !rel.endsWith(".json") || rel.slice(dir.length).includes("/")) continue;
     const bytes = fileAtCommit(root, commit, rel, MAX_CLAIM_BYTES);
-    out.set(
-      rel.slice(dir.length, -".json".length),
-      bytes ? createHash("sha256").update(bytes).digest("hex") : "unreadable",
-    );
+    out.set(rel.slice(dir.length, -".json".length), bytes ? sha256Hex(bytes) : "unreadable");
   }
   return out;
 }
@@ -1039,7 +1032,7 @@ function bindingFindings(
 /** A locator for display: cut at RECONCILE_LIMITS.locatorChars, with the digest of the full text when cut. */
 function locatorText(text: string | null): Pick<ReconciledBinding, "locator" | "locatorDigest"> {
   if (text === null || text.length <= RECONCILE_LIMITS.locatorChars) return { locator: text };
-  return { locator: cutText(text, RECONCILE_LIMITS.locatorChars), locatorDigest: sha(text) };
+  return { locator: cutText(text, RECONCILE_LIMITS.locatorChars), locatorDigest: sha256Hex(text) };
 }
 
 /**

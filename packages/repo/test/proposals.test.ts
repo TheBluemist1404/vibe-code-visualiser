@@ -19,7 +19,7 @@ import { FileStore, ModelEngine } from "../../core/src/index.ts";
 import type { HostContext, ProposedModelChange } from "../../core/src/index.ts";
 import { STORE_FILE_LIMITS } from "../../core/src/index.ts";
 import { PROPOSAL_LIMITS, listProposals, previewProposal, projectStatus, submitProposal } from "../src/index.ts";
-import type { ProposalList, ProposalPreview, ProposalResult, SubmitResult } from "../src/index.ts";
+import type { ProposalList, ProposalPreview, RepoResult, SubmitResult } from "../src/index.ts";
 import { baseline, git } from "./course-desk.ts";
 
 const agent: HostContext = { principalId: "agent:coder", permissions: ["model:propose"] };
@@ -31,7 +31,7 @@ const everything: HostContext = {
 const reviewer: HostContext = { principalId: "user:reviewer", permissions: ["model:approve"] };
 
 const revision = (repo: string) => projectStatus(repo).model!.revision;
-const data = <T>(r: ProposalResult<T>): T => {
+const data = <T>(r: RepoResult<T>): T => {
   assert.equal(r.ok, true, JSON.stringify(r));
   return (r as { data: T }).data;
 };

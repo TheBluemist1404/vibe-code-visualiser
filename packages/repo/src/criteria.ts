@@ -18,16 +18,18 @@
 // One observation, like every read surface since M2.4: store, HEAD, change records, claim files and
 // the bytes of every mapped test file are rechecked before answering (STATE_CHANGED). Bounded,
 // deterministic, redacted; nothing is written.
-import { createHash } from "node:crypto";
 import { z } from "zod";
 import { buildIndex, refId } from "@vcv/ir";
 import type { Criterion, Id } from "@vcv/ir";
-import { canonicalJson } from "@vcv/core";
+import { canonicalJson, sha256Hex } from "@vcv/core";
 import { verifyBinding, verifyMemo } from "./bindings.ts";
 import type { ClaimEntry, Verification } from "./bindings.ts";
-import { redact } from "./handoff.ts";
-import { failFinal, finish, moduleOf, observed, readClaims } from "./proposals.ts";
-import type { ProposalHooks, ProposalResult } from "./proposals.ts";
+import { redact } from "./shared/redact.ts";
+import { readClaims } from "./shared/claims.ts";
+import { moduleOf } from "./shared/model-diff.ts";
+import { failFinal, finish, observed } from "./shared/observation.ts";
+import type { ObserveHooks } from "./shared/observation.ts";
+import type { RepoResult } from "./shared/result.ts";
 import { worktreeState } from "./worktree.ts";
 import { caseKey } from "./junit.ts";
 import {
@@ -39,6 +41,7 @@ import {
   testRunRecordSchema,
 } from "./testruns.ts";
 import type { CandidateIdentity, TestRunRecord } from "./testruns.ts";
+import { invalidRequest } from "./shared/result.ts";
 
 export const CRITERIA_LIMITS = {
   criteria: 200,
@@ -251,11 +254,10 @@ const MEANING =
   "A mapping is an agent's claim that a test case checks a criterion; a result says whether that test case ran and passed in a run of this exact candidate. Neither shows that the test is sufficient. Changing a criterion or its verification policy is a model change (proposal + approval); remapping a renamed test is not.";
 
 const cut = (t: string, max: number = CRITERIA_LIMITS.textChars) => (t.length > max ? `${t.slice(0, max - 1)}…` : t);
-const sha = (t: string) => createHash("sha256").update(t).digest("hex");
 
 function identityOf(path: string, name: string): TestIdentity {
   return name.length > CRITERIA_LIMITS.testNameChars
-    ? { path, name: cut(name, CRITERIA_LIMITS.testNameChars), nameDigest: sha(name) }
+    ? { path, name: cut(name, CRITERIA_LIMITS.testNameChars), nameDigest: sha256Hex(name) }
     : { path, name };
 }
 
@@ -263,18 +265,11 @@ function identityOf(path: string, name: string): TestIdentity {
 export function criteriaEvidence(
   path: string,
   input: unknown = {},
-  hooks: ProposalHooks = {},
-): ProposalResult<CriteriaReport> {
+  hooks: ObserveHooks = {},
+): RepoResult<CriteriaReport> {
   const parsed = criteriaRequest.safeParse(input ?? {});
   if (!parsed.success) {
-    return {
-      ok: false,
-      error: {
-        code: "INVALID_REQUEST",
-        message: "request does not match the criteria input schema",
-        details: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
-      },
-    };
+    return invalidRequest(parsed.error, "request does not match the criteria input schema");
   }
   return observed(path, hooks, (obs) => {
     const root = obs.status.root;

@@ -23,7 +23,6 @@ import {
   readdirSync,
   rmSync,
 } from "node:fs";
-import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { z } from "zod";
 import { buildIndex, loadModel, persistedIdProblem } from "@vcv/ir";
@@ -38,6 +37,10 @@ import {
   readHeadRevision,
   readStoreFile,
   storeFingerprint,
+  sha256Hex,
+  digestOf,
+  OPEN_READ_NOFOLLOW,
+  readUpTo,
 } from "@vcv/core";
 import type { BindingClaim, BindingRelation, BindingState, ClaimSource, Permission, SourceLocator } from "@vcv/core";
 import { fileWorkingState, headCommit } from "./git.ts";
@@ -149,8 +152,6 @@ function claimProblem(c: z.infer<typeof claimSchema>): string | undefined {
   if (pp) return `locator path "${c.locator.path}" ${pp}`;
   return selectorProblem(c.locator.selector);
 }
-
-const digestOf = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 
 /** Serialize with a fixed key order, so the same claim is always the same bytes (no false Git conflicts). */
 export function serializeClaim(c: BindingClaim): string {
@@ -282,7 +283,7 @@ function readClaimFile(root: string, id: string): ClaimFile {
   if (st.size > MAX_CLAIM_BYTES) return unsafeFile(id, "oversize", `is larger than ${MAX_CLAIM_BYTES} bytes`);
   let fd: number;
   try {
-    fd = openSync(p, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0));
+    fd = openSync(p, OPEN_READ_NOFOLLOW);
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return { kind: "absent" };
@@ -292,12 +293,9 @@ function readClaimFile(root: string, id: string): ClaimFile {
   try {
     const fst = fstatSync(fd);
     if (!fst.isFile()) return unsafeFile(id, "special", "is not a regular file");
-    const buf = Buffer.alloc(MAX_CLAIM_BYTES + 1);
-    let n = 0;
-    for (let r; n < buf.length && (r = readSync(fd, buf, n, buf.length - n, n)) > 0; ) n += r;
-    if (n > MAX_CLAIM_BYTES) return unsafeFile(id, "oversize", `is larger than ${MAX_CLAIM_BYTES} bytes`);
-    const bytes = buf.subarray(0, n);
-    return { kind: "file", bytes, digest: digestOf(bytes) };
+    const bytes = readUpTo(fd, MAX_CLAIM_BYTES);
+    if (bytes.length > MAX_CLAIM_BYTES) return unsafeFile(id, "oversize", `is larger than ${MAX_CLAIM_BYTES} bytes`);
+    return { kind: "file", bytes, digest: sha256Hex(bytes) };
   } finally {
     closeSync(fd);
   }
@@ -498,7 +496,7 @@ export function defaultBindingId(objectId: Id, relation: BindingRelation, locato
     .replace(/^[^a-z0-9]+/, "")
     .slice(0, 80)
     .replace(/[.-]+$/, "");
-  const hash = createHash("sha256").update(canonicalJson(locator)).digest("hex").slice(0, 8);
+  const hash = digestOf(locator).slice(0, 8);
   return `${relation}.${slug || "object"}.${hash}`;
 }
 
@@ -565,7 +563,7 @@ export function recordBinding(
   if (!snap.history.includes(modelRevision))
     throw new BindingError("UNKNOWN_REVISION", `revision ${modelRevision} is not in this checkout's model history`);
   const atRevision =
-    modelRevision === snap.model.project.modelRevision ? snap.model : readRevision(snap.storeDir, modelRevision);
+    modelRevision === snap.model.project.modelRevision ? snap.model : readRevisionFile(snap.storeDir, modelRevision);
   if (!atRevision || !buildIndex(atRevision).byId.has(input.modelObjectId)) {
     throw new BindingError(
       "UNKNOWN_OBJECT",
@@ -615,7 +613,7 @@ export function recordBinding(
   const content = serializeClaim(claim);
   commitWrite(snap, bindingId, content, { rel: input.locator.path, fingerprint: resolution.fileFingerprint! }, hooks);
   return {
-    entry: { bindingId, file: claimRel(bindingId), digest: digestOf(Buffer.from(content)), claim },
+    entry: { bindingId, file: claimRel(bindingId), digest: sha256Hex(Buffer.from(content)), claim },
     resolution,
     created: expected === null,
   };
@@ -666,7 +664,7 @@ export function disputeBinding(
   const claim: BindingClaim = { ...current.claim, disputed: { by: host.principalId, reason } };
   const content = serializeClaim(claim);
   commitWrite(snap, bindingId, content, undefined, hooks);
-  return { bindingId, file: claimRel(bindingId), digest: digestOf(Buffer.from(content)), claim };
+  return { bindingId, file: claimRel(bindingId), digest: sha256Hex(Buffer.from(content)), claim };
 }
 
 // --- verification ---------------------------------------------------------------------
@@ -849,9 +847,9 @@ function modelFreshness(
   const then = memo
     ? memo.revisions.has(c.modelRevision)
       ? memo.revisions.get(c.modelRevision)
-      : (memo.revisions.set(c.modelRevision, readRevision(storeDir, c.modelRevision)),
+      : (memo.revisions.set(c.modelRevision, readRevisionFile(storeDir, c.modelRevision)),
         memo.revisions.get(c.modelRevision))
-    : readRevision(storeDir, c.modelRevision);
+    : readRevisionFile(storeDir, c.modelRevision);
   const before = then ? objectJson(then, c.modelObjectId, memo) : undefined;
   if (before === undefined)
     return { state: "unknown", cause: `${c.modelObjectId} cannot be read at ${c.modelRevision}` };
@@ -867,7 +865,7 @@ function modelFreshness(
 }
 
 /** A revision listed in HEAD's history (already verified by the project's inspection). */
-function readRevision(storeDir: string, rev: string): Model | undefined {
+function readRevisionFile(storeDir: string, rev: string): Model | undefined {
   if (persistedIdProblem(rev)) return undefined;
   // Same safe reader as the store: no symlinks, no special files, bounded.
   const f = readStoreFile(storeDir, `revisions/${rev}.yaml`, STORE_FILE_LIMITS.revision);

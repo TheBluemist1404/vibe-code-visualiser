@@ -8,24 +8,12 @@
 // (rev-2-3f9a… and rev-2-c01d…) unless they made exactly the same change, in which case
 // the two states are identical and sharing an ID is correct. Legacy IDs (rev-1, rev-2, v7…)
 // stay valid: they are read as-is and simply cannot be verified against their content.
-import { createHash } from "node:crypto";
+import { canonicalJson, sha256Hex } from "./digest.ts";
 import { dumpModel, loadModel } from "@vcv/ir";
 import type { Model } from "@vcv/ir";
 
 const BRANCH_SAFE = /^rev-(\d+)-([0-9a-f]{12})$/;
 export const REVISION_DIGEST_LENGTH = 12;
-
-/** JSON with object keys sorted at every level and undefined values dropped. */
-export function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map((v) => (v === undefined ? "null" : canonicalJson(v))).join(",")}]`;
-  if (value !== null && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, unknown>)
-      .filter(([, v]) => v !== undefined)
-      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
-    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
 
 /**
  * Digest of a model state as a child of `parent`. The model's own modelRevision is excluded
@@ -37,10 +25,7 @@ export function revisionDigest(model: Model, parent: string): string {
   blank.project.modelRevision = "rev-0";
   const persisted = loadModel(dumpModel(blank)).model ?? blank;
   persisted.project.modelRevision = "";
-  return createHash("sha256")
-    .update(`vcv-revision-v1\0${parent}\0${canonicalJson(persisted)}`)
-    .digest("hex")
-    .slice(0, REVISION_DIGEST_LENGTH);
+  return sha256Hex(`vcv-revision-v1\0${parent}\0${canonicalJson(persisted)}`).slice(0, REVISION_DIGEST_LENGTH);
 }
 
 /** The ID a model committed as the `seq`-th revision, directly after `parent`, receives. */
