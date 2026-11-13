@@ -79,7 +79,7 @@ export function unlistedRevisions(
     const id = file.replace(/\.yaml$/, "");
     if (committed.has(id)) continue;
     if (parseRevisionId(id).scheme === "legacy") {
-      // Pre-M2 stores minted sequential IDs, so only the name can be checked.
+      // Older stores minted sequential IDs, so only the name can be checked.
       found.push(
         id === nextRevision(head.revision)
           ? { id, file, kind: "leftover", reason: `named as the next sequential revision after ${head.revision}` }
@@ -126,7 +126,7 @@ export function unlistedRevisions(
 
 /** Revision ID → change ID, for every readable "applied" change record. Read-only. */
 /** One message per `changes/*.json` file that is not a readable record for its own change ID. */
-/** One file under changes/, read without writing anything (M3.1 proposal listings). */
+/** One file under changes/, read without writing anything (proposal listings). */
 export type ChangeRecordEntry = { changeId: string; record?: ChangeRecord; problem?: string };
 
 /**

@@ -1,4 +1,4 @@
-// The bounded implementation handoff (Issue #17, M3.3).
+// The bounded implementation handoff. Design notes: docs/implementation.md.
 //
 // After a change is approved, the coding agent that will implement it needs one reviewable
 // brief: what was approved (the operations, the delta, the implementation request the reviewer
@@ -134,7 +134,7 @@ const CAVEATS = [
   "Binding states are VCV-verified locator facts about the working tree now (does the pointer resolve, did the code or model change since the claim); their meaning is the claimant's and unverified.",
   "Impact is structural (declared model references), not a code, test or runtime analysis.",
   "The attestation's signature was checked against the change record; whether its key is trusted is decided by the host gate (vcv integrity against the protected base), not here.",
-  "Nothing in this handoff is reconciled against the code; that is M4.",
+  "Nothing in this handoff is reconciled against the code; that is pre-merge reconciliation (`vcv reconcile`, `vcv gate`).",
 ];
 
 /**

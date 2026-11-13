@@ -18,15 +18,15 @@ export const operationSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("linkContract"), moduleId: id, contractId: id }).strict(),
   z.object({ type: z.literal("setModuleDependencies"), moduleId: id, dependsOn: z.array(id) }).strict(),
   z.object({ type: z.literal("removeObject"), objectId: id }).strict(),
-  // Text-only edits of existing objects (M2.5): the smallest general additions that let a
+  // Text-only edits of existing objects: the smallest general additions that let a
   // maintainer record a changed rule or a corrected description without remove-and-recreate.
   z.object({ type: z.literal("createRule"), rule: schemas.rule }).strict(),
-  // M3.1: the one general operation the model-first path was missing (a new capability had no
+  // The one general operation the model-first path was missing (a new capability had no
   // typed way in; the other top-level kinds a change typically adds already had one).
   z.object({ type: z.literal("createCapability"), capability: schemas.capability }).strict(),
   z.object({ type: z.literal("setRuleStatement"), ruleId: id, statement: z.string().min(1) }).strict(),
   z.object({ type: z.literal("setDescription"), objectId: id, description: z.string().min(1) }).strict(),
-  // M4.2: approved acceptance criteria. Creating one, or changing what it says, what it is about
+  // Approved acceptance criteria. Creating one, or changing what it says, what it is about
   // or whether its evidence is required, is a model change like any other (proposal + approval).
   // Renaming uses renameObject, a description setDescription, removal removeObject.
   z.object({ type: z.literal("createCriterion"), criterion: schemas.criterion }).strict(),
@@ -64,7 +64,7 @@ const scopePath = z
 const line = (max: number) => z.string().min(1).max(max);
 
 /**
- * What the proposer asks to be implemented once the change is approved (M3.3). Part of the
+ * What the proposer asks to be implemented once the change is approved (the implementation handoff). Part of the
  * proposal, so the proposal digest covers it and the reviewer approves it together with the
  * operations. It changes nothing in the model: the engine never reads it.
  */

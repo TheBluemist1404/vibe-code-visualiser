@@ -1,8 +1,8 @@
-// Read-only integrity check of a checkout's `.vcv/` history (Issue #17, M3.2).
+// Read-only integrity check of a checkout's `.vcv/` history. Design notes: docs/approvals.md.
 //
 // Usable locally and in CI. It checks what is deterministically provable from the repository
 // (and, for trust, from a source the change under review cannot alter), and says plainly what is
-// not provable. It is baseline *model integrity*, not M4's reconciliation of model and code.
+// not provable. It is baseline *model integrity*, not the pre-merge reconciliation of model and code.
 //
 // Per revision after the first:
 //   derivation  exactly one applied change record names it as its result; the record's base is
@@ -129,7 +129,7 @@ const LIMITS = [
   "An attestation proves that the holder of a trusted reviewer key signed this exact change; it does not prove which person held the key, or that the key was not shared or stolen.",
   "Trust is only as strong as its source. A trust list in the checkout under review can be changed by that same change; in CI, read it from the protected base branch (--trust-ref) and protect who may change it there. Git pins the commit the list was read from; it cannot prove that the branch is protected. An unpinned --trust-ref is a local name anyone with a shell in the checkout can create or move: rely on it only where the host provides the ref (a CI checkout), or pin it with --trust-commit.",
   "The initial revision has no recorded derivation: who created it, and from what, is not provable from the repository.",
-  "Derivation replays the recorded typed operations; it says nothing about whether the source code implements the model (that is M4's reconciliation).",
+  "Derivation replays the recorded typed operations; it says nothing about whether the source code implements the model (that is pre-merge reconciliation (`vcv reconcile`, `vcv gate`)).",
   "The local audit log (.vcv/audit.jsonl) is not shared through Git and is not evidence here.",
 ];
 

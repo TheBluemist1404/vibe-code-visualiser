@@ -27,17 +27,18 @@ approved intent to match the code, or the other way round.
 
 ## Status
 
-Early and pre-release. The engine works from the command line and from coding agents over
-MCP, and a model can now live in a `.vcv/` folder inside your Git repository. There is no
-visual interface yet, and the model is not yet linked to source code.
+Early and pre-release. The engine works from the command line and from coding agents over MCP.
+A model lives in a `.vcv/` folder inside your Git repository, is bound to the source code it
+describes, changes only through reviewed proposals, and is checked against every pull request
+before it merges. There is no visual interface yet.
 
 | Milestone | What it delivers | Status |
 |---|---|---|
 | **M0** Semantic foundation | Typed IR, validation, change/approval engine, file store with crash recovery, audit log, read-only query API, CLI | ✅ Done |
-| **M1** Local MCP for agents | stdio MCP server with four read-only query tools, opt-in agent guidance, Claude Code demo | ✅ Done ([#5](https://github.com/TheBluemist1404/vibe-code-visualiser/pull/5)) |
-| **M2** Repository integration | `.vcv/` in the repo, TypeScript indexer, portable model↔code bindings | 🚧 In progress ([#6](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/6)): `.vcv/` projects and branch-safe revisions done ([#8](https://github.com/TheBluemist1404/vibe-code-visualiser/pull/8)) |
-| **M3** Approved model → code | Agent proposes model changes, human approves, coding agent implements, VCV records diff and tests | Planned |
-| **M4** Code → model reconciliation | Detect stale bindings and real contract drift after direct code edits | Planned |
+| **M1** Local MCP for agents | stdio MCP server with read-only query tools, opt-in agent guidance, Claude Code demo | ✅ Done ([#5](https://github.com/TheBluemist1404/vibe-code-visualiser/pull/5)) |
+| **M2** Repository integration | `.vcv/` in the repo, branch-safe revisions, a reference app, agent-drafted first models, portable model↔code binding claims resolved for TypeScript, source evidence queries | ✅ Done ([#6](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/6)) |
+| **M3** Approved model → code | Agent proposes model changes, a reviewer approves with a signed attestation, a coding agent implements from a bounded handoff, VCV records what was implemented | ✅ Done ([#17](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/17)) |
+| **M4** Code → model reconciliation | Pre-merge reconciliation of a PR against its base, acceptance criteria mapped to tests, per-test runner evidence, a policy gate for CI | ✅ Done ([#22](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/22)) |
 | **M5** Local visual product | Module graph, change review and evidence panels in a local UI | Planned |
 
 M0 to M4 make up the technical MVP; M5 makes it usable without reading code. Everything is
@@ -99,25 +100,41 @@ than silently reset. See [ADR 0007](docs/adr/0007-repository-projects.md).
 node --experimental-strip-types apps/mcp/src/main.ts --store .vcv-store
 ```
 
-This starts a read-only MCP server over stdio for one store. Any MCP client (Claude Code,
+This starts a read-only MCP server over stdio for one store (or `--repo <checkout>` for a
+`.vcv/` project, which adds source-evidence and proposal tools). Any MCP client (Claude Code,
 Codex and others) can then call `vcv_get_project_overview`, `vcv_search_objects`,
 `vcv_get_context` and `vcv_analyze_impact`. Results describe the model only
 (`implementationChecked: false`), so agents still need to check the code itself.
 Client configs, opt-in `CLAUDE.md` / `AGENTS.md` guidance and the recommended agent workflow
 are in [apps/mcp/README.md](apps/mcp/README.md).
 
+### Change the model, then the code
+
+The full loop (an agent proposes a model change, a reviewer approves it, a coding agent
+implements it, and the pull request is reconciled and gated before merge) is walked through
+end to end on the Course Desk reference app in [the golden path](docs/golden-path.md) and
+[pre-merge reconciliation](docs/reconciliation.md). The main commands:
+
+```sh
+npm run vcv -- proposal ...        # submit and preview model proposals
+npm run vcv -- review approve ...  # trusted reviewer approval with a signed attestation
+npm run vcv -- handoff ...         # the bounded brief a coding agent implements from
+npm run vcv -- reconcile ...       # compare a candidate checkout with its protected base
+npm run vcv -- gate ...            # the pre-merge policy decision for CI
+```
+
 ## Repository layout
 
 ```
 packages/ir        The model (IR): types, schema, validation, YAML load/dump, tree and graph views
-packages/core      Typed operations, ModelEngine (propose/approve), file and memory stores, audit log, bindings, layout
+packages/core      Typed operations, ModelEngine (propose/approve), model stores, audit log, layout
 packages/query     Read-only semantic queries: overview, search, context, impact
-packages/repo      Repository projects: find and load .vcv/, observe Git state, track branches
+packages/repo      .vcv/ in a Git checkout: bindings, proposals, review, handoff, pre-merge checks
+packages/testkit   Private helpers shared by the test suites
 apps/cli           `vcv` command-line tool, a thin layer over the engine
 apps/mcp           Local stdio MCP server for coding agents
-examples/          Sample Enrollment model and a proposed change
-docs/adr/          Architecture decision records
-docs/samples/      Sample query output and a recorded Claude Code session
+examples/          Sample Enrollment model, and the Course Desk reference app
+docs/              Guides, design notes and architecture decision records
 ```
 
 Every interface (CLI, MCP, and the future canvas) calls the same engine operations. None of
@@ -125,22 +142,25 @@ them holds its own copy of the model or its own rules.
 
 ## Documentation
 
-- **Architecture decisions** in [docs/adr](docs/adr):
-  [0001](docs/adr/0001-ir-first-scope.md) IR first, Enrollment as the only domain ·
-  [0002](docs/adr/0002-semantic-command-api.md) one typed command API for every write ·
-  [0003](docs/adr/0003-persistence.md) file persistence and crash recovery ·
-  [0004](docs/adr/0004-audit.md) change records and audit log ·
-  [0005](docs/adr/0005-semantic-query-api.md) semantic query API ·
-  [0006](docs/adr/0006-mcp-adapter.md) MCP adapter ·
-  [0007](docs/adr/0007-repository-projects.md) repository projects, revisions and bindings
+- **Guides for agents and people**: [bootstrapping a first model](docs/agent-bootstrap.md),
+  [maintaining it after code changes](docs/agent-maintenance.md),
+  [the model-first golden path](docs/golden-path.md), [the MCP server](apps/mcp/README.md)
+- **How each part works**: [binding claims](docs/bindings.md) and
+  [source evidence](docs/evidence.md) (where the code for a model object is) ·
+  [proposals](docs/proposals.md) · [trusted approval and integrity](docs/approvals.md) ·
+  [handoff and implementation reports](docs/implementation.md) ·
+  [pre-merge reconciliation](docs/reconciliation.md) · [acceptance criteria](docs/criteria.md) ·
+  [test evidence](docs/test-evidence.md) (what the tests returned on a candidate) ·
+  [the pre-merge gate](docs/premerge-gate.md) · [the reference app](docs/reference-app.md)
+- **Architecture decisions** in [docs/adr](docs/adr), 0001 to 0009
 - [IR v0.2 conformance](docs/ir-v0.2-conformance.md): which tests cover the spec's acceptance
   cases, extra hardening, and decisions the spec left open
 - [Sample semantic queries](docs/samples/semantic-queries.md) and the
   [recorded agent demo](docs/samples/mcp-agent-demo.md)
-- [MCP server](apps/mcp/README.md): tools, configuration and agent guidance
 
 ## Development
 
-CI ([.github/workflows/ci.yml](.github/workflows/ci.yml)) runs `npm ci`, typecheck and tests on
-Node 22.18.0 and the latest 22.x for pushes to `main` and every pull request. Commit messages
-follow [Conventional Commits](https://www.conventionalcommits.org).
+Working on VCV itself: [docs/development.md](docs/development.md) covers the workspace, package
+boundaries, scripts, tests and conventions. CI ([.github/workflows/ci.yml](.github/workflows/ci.yml))
+runs formatting and lint checks, typecheck and tests on Node 22.18.0 and the latest 22.x for
+pushes to `main` and every pull request.

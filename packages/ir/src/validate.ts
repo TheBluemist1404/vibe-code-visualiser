@@ -102,7 +102,7 @@ export function validateModel(model: Model): Diagnostic[] {
     check(c.publishes, "publishes");
   });
 
-  // Criteria (M4.2): each object listed once.
+  // Criteria: each object listed once.
   (model.criteria ?? []).forEach((c, i) => {
     const seen = new Set<Id>();
     c.verifies.forEach((r, j) => {

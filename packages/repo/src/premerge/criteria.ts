@@ -1,10 +1,10 @@
-// Approved acceptance criteria and their test-case mappings (Issue #22, M4.2).
+// Approved acceptance criteria and their test-case mappings. Design notes: docs/criteria.md.
 //
 // Two things with different authority, kept apart:
 //
 //   intent    a criterion is an IR object (`criteria` in the model): an ID, an observable
 //             statement, the objects it is about and a `required`/`optional` verification policy.
-//             It changes only through a typed proposal and a separate human approval (M3).
+//             It changes only through a typed proposal and a separate human approval.
 //   evidence  which individual test cases check it is an agent-maintained `tests` binding claim
 //             on the criterion's ID, naming one test case (file + full title). Reasserting it after
 //             a test is renamed or moved is routine binding maintenance: no approval, no new model
@@ -13,9 +13,9 @@
 // This read surface reports, for each criterion, its mappings as verifyBinding sees them now
 // (resolved, stale because the test or the criterion changed, missing after a rename, ambiguous
 // for a duplicated test title) and what is wrong with them. A mapping is a claim that a test
-// checks the criterion; it is not a test result (M4.3) and not evidence that the test is enough.
+// checks the criterion; it is not a test result (testruns.ts) and not evidence that the test is enough.
 //
-// One observation, like every read surface since M2.4: store, HEAD, change records, claim files and
+// One observation, like every read surface: store, HEAD, change records, claim files and
 // the bytes of every mapped test file are rechecked before answering (STATE_CHANGED). Bounded,
 // deterministic, redacted; nothing is written.
 import { z } from "zod";
@@ -62,9 +62,9 @@ export const criteriaRequest = z
   .object({
     /** Only these criteria (all when absent). */
     ids: z.array(z.string().min(1).max(256)).min(1).max(CRITERIA_LIMITS.criteria).optional(),
-    /** M4.3: test-run records (captureTestRun) to evaluate the mappings against. */
+    /** Test-run records (captureTestRun) to evaluate the mappings against. */
     runs: z.array(testRunRecordSchema).min(1).max(CRITERIA_LIMITS.runs).optional(),
-    /** M4.3: optional code coverage, supporting context only (never criterion coverage). */
+    /** Optional code coverage, supporting context only (never criterion coverage). */
     coverage: z
       .object({ linesPct: z.number().min(0).max(100), source: z.string().min(1).max(200) })
       .strict()
@@ -95,7 +95,7 @@ export type MappingProblemCode =
    * unreadable file is about is unknown, so every criterion's assessment is then incomplete.
    */
   | "MAPPING_INVALID"
-  // ---- M4.3: results of the mapped test cases in the supplied runs -----------------------
+  // ---- Results of the mapped test cases in the supplied runs -----------------------
   /** A mapped test case failed (the exact case and message are given). */
   | "TEST_FAILED"
   /** A mapped test case ended with an error. */
@@ -132,7 +132,7 @@ export type CriterionMapping = {
   /** Other criteria mapped to the same test case (many-to-many), at most CRITERIA_LIMITS.relatedCriteria. */
   alsoMapsTo: Id[];
   alsoMapsToTotal: number;
-  /** M4.3: this test case's result in the supplied runs; null when no runs were supplied or it is not a test mapping. */
+  /** This test case's result in the supplied runs; null when no runs were supplied or it is not a test mapping. */
   result: MappingResult | null;
 };
 
@@ -146,7 +146,7 @@ export type MappingResult = {
 };
 
 /**
- * M4.3, per criterion: passed (every mapped test case ran in a fresh run and passed, every mapping
+ * Per criterion: passed (every mapped test case ran in a fresh run and passed, every mapping
  * resolved, assessment complete); failed (a mapped case failed or errored); stale (results only from
  * another candidate, or a mapping is stale); missing (no mapping, or a mapped case skipped, not run
  * or ambiguous); unknown (the mappings could not all be read); unverified (no runs supplied).
@@ -235,7 +235,7 @@ export type CriteriaReport = {
   /** Every claim file that could not be read. Not attributed to a criterion: its content is what would say which. */
   invalidClaims: { items: { bindingId: string; file: string; problem: string }[]; total: number; truncated: boolean };
   budget: { limit: number; bytes: number; shrunk: boolean };
-  /** M4.3: the supplied runs (empty when none were). */
+  /** The supplied runs (empty when none were). */
   runs: RunSummary[];
   /** The candidate the runs are compared with. */
   candidate: CandidateIdentity & { identityDigest: string; problem: string | null };

@@ -1,4 +1,4 @@
-// Deterministic locator resolution for a bounded TypeScript/TSX subset (ADR 0007 §6, Issue #13).
+// Deterministic locator resolution for a bounded TypeScript/TSX subset (ADR 0007 §6).
 //
 // This answers exactly one question: does a locator point at one existing artifact, and what is
 // that artifact's fingerprint? It does not look for architecture, guess meaning, follow imports or

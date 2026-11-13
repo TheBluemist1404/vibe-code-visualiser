@@ -1,4 +1,4 @@
-// Read-only source-evidence queries (Issue #15, M2.5).
+// Read-only source-evidence queries over binding claims. Design notes: docs/evidence.md.
 //
 // One shared layer behind the CLI (`vcv evidence`) and MCP (`vcv_get_*_evidence`): request
 // validation, limits, cursors, the expectedRevision guard and every error code live here, so the

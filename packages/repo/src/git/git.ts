@@ -26,7 +26,7 @@ export type GitObservation = {
 };
 
 /**
- * Every read runs with the checkout treated as data (M4.4 review): the checkout's own
+ * Every read runs with the checkout treated as data: the checkout's own
  * configuration must not make Git execute anything. Repository-local config can name commands
  * (core.fsmonitor, hooks such as post-index-change, external diff drivers, clean/smudge filter
  * drivers selected by .gitattributes); these options switch each of them off for this process.
@@ -94,7 +94,7 @@ function baseEnv(): NodeJS.ProcessEnv {
 /**
  * Thrown when Git cannot be run safely on this checkout: the configured filter and diff/merge
  * drivers could not be enumerated exactly (unreadable or oversized config, too many driver keys,
- * a failed or killed `git config`). Nothing that reads content runs then (M4.4 review round 2):
+ * a failed or killed `git config`). Nothing that reads content runs then:
  * a missing override would let the checkout's own driver commands execute. Callers do not turn it
  * into "no changes" or "absent"; read surfaces report it as SOURCE_IDENTITY_UNAVAILABLE.
  */

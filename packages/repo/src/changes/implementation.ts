@@ -1,4 +1,4 @@
-// The implementation evidence report (Issue #17, M3.3).
+// The implementation evidence report. Design notes: docs/implementation.md.
 //
 // After implementing an approved change, the coding agent records one bounded report, linked to
 // the approved revision and change ID, at `.vcv/implementations/<changeId>.json` (committed with
@@ -12,7 +12,7 @@
 //   vcvObserved      what VCV can see now: files changed since the base commit, which of them are
 //                    outside the approved scope, and the binding claims on the changed objects as
 //                    verifyBinding reports them (resolved / stale / missing…, reasserted or not);
-//   notReconciled    always: whether the code implements the model is M4's reconciliation.
+//   notReconciled    always: whether the code implements the model is pre-merge reconciliation's job.
 //
 // It warns rather than passes silently: out-of-scope changes, an undeclared scope, stale or
 // unreasserted bindings, failed or missing tests, unmet or unaddressed criteria, a model that
@@ -648,7 +648,7 @@ function assemble(
     },
     notReconciled: {
       state: "not-reconciled",
-      note: "Whether the source implements the approved model is not established by anything here (M4 reconciliation).",
+      note: "Whether the source implements the approved model is not established by anything here; see pre-merge reconciliation (`vcv reconcile`, `vcv gate`).",
     },
     warnings: warningsFor(brief, req, o),
   };

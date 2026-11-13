@@ -105,12 +105,12 @@ export type Behavior = Base<"behavior"> & {
   transitions: Transition[];
 };
 
-/** How a criterion must be verified before merge (M4.2). Changing it is a model change. */
+/** How a criterion must be verified before merge. Changing it is a model change. */
 export const VERIFICATION_POLICIES = ["required", "optional"] as const;
 export type VerificationPolicy = (typeof VERIFICATION_POLICIES)[number];
 
 /**
- * An approved acceptance criterion (M4.2): one observable expected behaviour or invariant, the
+ * An approved acceptance criterion: one observable expected behaviour or invariant, the
  * model objects it is about, and whether evidence for it is required. Intent, like every IR
  * object: it changes only through a typed proposal and approval. Which test cases check it is
  * not stored here; that is an agent-maintained `tests` binding claim on the criterion's ID.
@@ -135,7 +135,7 @@ export type Model = {
   contracts: Contract[];
   behaviors: Behavior[];
   /**
-   * Optional and absent when empty, so every model written before M4.2 keeps exactly the same
+   * Optional and absent when empty, so every model written before criteria existed keeps exactly the same
    * canonical form (and branch-safe revision digest).
    */
   criteria?: Criterion[];

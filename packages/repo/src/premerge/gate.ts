@@ -1,4 +1,4 @@
-// The pre-merge reconciliation report and policy gate (Issue #22, M4.4).
+// The pre-merge reconciliation report and policy gate. Design notes: docs/premerge-gate.md.
 //
 // One deterministic, reviewer-facing answer for a pull request: may this candidate merge into the
 // protected base? It combines what earlier slices already establish, and adds nothing VCV cannot
@@ -6,10 +6,10 @@
 //
 //   integrity   the model history against the base's history and trust list (checkIntegrity,
 //               always pinned to the base commit and with attestation required);
-//   structure   checked contradictions between claims and the approved model (M4.1);
-//   bindings    stale, missing, ambiguous, removed claims (M4.1): facts about pointers, never drift;
+//   structure   checked contradictions between claims and the approved model (reconcile.ts);
+//   bindings    stale, missing, ambiguous, removed claims (reconcile.ts): facts about pointers, never drift;
 //   criteria    every approved criterion's mapped test cases and their results in runs of this exact
-//               candidate (M4.2, M4.3). Runs captured here, for a caller holding `tests:observe`,
+//               candidate (criteria.ts, testruns.ts). Runs captured here, for a caller holding `tests:observe`,
 //               are host-observed; every imported record is a claim;
 //   agents      bounded, agent-authored semantic observations ("this code no longer notifies on
 //               rejection"). VCV checks that what they point at exists (model objects, files and
@@ -103,8 +103,8 @@ const level = z.enum(["block", "warn", "off"]);
 /** Settings that may be lowered to warn but never switched off. */
 const requiredLevel = z.enum(["block", "warn"]);
 /**
- * Required criteria are not configurable here (M4.4 review): whether a criterion's evidence is
- * mandatory is approved intent in the model, changed only through an M3 proposal and a separate
+ * Required criteria are not configurable here: whether a criterion's evidence is
+ * mandatory is approved intent in the model, changed only through a model proposal and a separate
  * human approval. Every outcome of a required criterion other than a host-observed pass blocks.
  */
 export const REQUIRED_EVIDENCE = {
@@ -211,7 +211,7 @@ export const observationsSchema = z
               .array(z.object({ path: portablePath, name: z.string().min(1).max(1000) }).strict())
               .max(GATE_LIMITS.refsPerObservation)
               .default([]),
-            /** What the agent proposes: fix the code, submit a model proposal (M3), or have a person inspect. */
+            /** What the agent proposes: fix the code, submit a model proposal, or have a person inspect. */
             resolution: z.enum(["fix-code", "submit-model-proposal", "inspect", "none"]),
             author: z.string().min(1).max(100).optional(),
           })
@@ -260,7 +260,7 @@ export type GateReason = {
   code: string;
   /** Which policy setting decided the severity (e.g. "required.failed"); "integrity" is fixed. */
   rule: string;
-  /** checked / observed / not-checked as in M4.1; claim for agent observations. */
+  /** checked / observed / not-checked as in reconcile.ts; claim for agent observations. */
   basis: "checked" | "observed" | "not-checked" | "claim";
   message: string;
   criterionId?: Id;
@@ -423,7 +423,7 @@ export function preMergeGate(
   const pol = policyOf(root, req);
   if ("error" in pol) return { ok: false, error: pol.error };
 
-  // 3. History, structure, bindings: M4.1, pinned to the base, attestation required. The policy is
+  // 3. History, structure, bindings: the reconciliation, pinned to the base, attestation required. The policy is
   //    applied to every finding, before the report's lists are cut.
   let allFindings: ReconcileFinding[] | null = null;
   const rec = reconcile(
@@ -552,7 +552,7 @@ function snapshotKey(obs: Observation, cited: string[], budget: StoreBudget): st
  * sha256 over every entry under the store directory: path, type, and bytes (or link text). Null
  * when the store cannot be observed completely (an unreadable entry, too many entries, too deep,
  * too many bytes): the decision depends on every attestation and trust-list byte, so a partial
- * walk would let an unobserved change through (M4.4 review round 2).
+ * walk would let an unobserved change through.
  */
 function storeDigest(dir: string, budget: StoreBudget): string | null {
   const h = createHash("sha256");
@@ -610,7 +610,7 @@ const fileSha = (a: string, max: number): string | null => {
 type BaseContext = { objects: Set<Id>; complete: boolean; problem: string | null };
 
 /**
- * What the protected base's claims say the change touches (M4.4 review): objects whose base-side
+ * What the protected base's claims say the change touches: objects whose base-side
  * claims point into a changed file, or whose claims the candidate removed or reasserted. Removing a
  * claim must not take its object out of the policy's scope.
  */
@@ -1275,7 +1275,7 @@ function observationReasons(observations: VerifiedObservation[], p: GatePolicy, 
 
 /**
  * A proposal the candidate carries but nobody has approved: the approved model (and so this
- * check) does not include it. Shown so the reviewer knows an intent change is waiting on M3.
+ * check) does not include it. Shown so the reviewer knows an intent change is waiting on review and approval.
  * Also: a candidate that changes the gate policy itself.
  */
 function pendingAndPolicyReasons(pending: string[], pol: ResolvedPolicy, add: AddReason): void {
@@ -1285,7 +1285,7 @@ function pendingAndPolicyReasons(pending: string[], pol: ResolvedPolicy, add: Ad
       code: "PROPOSAL_PENDING",
       rule: "integrity",
       basis: "observed",
-      message: `the candidate carries the pending proposal ${id}; it is not part of the approved model this check used. If the code depends on it, a separate reviewer approves it through M3 (vcv review approve)`,
+      message: `the candidate carries the pending proposal ${id}; it is not part of the approved model this check used. If the code depends on it, a separate reviewer approves it as a model proposal (vcv review approve)`,
     });
   }
   if (pol.changedByCandidate)

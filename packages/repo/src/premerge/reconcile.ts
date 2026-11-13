@@ -1,4 +1,4 @@
-// Pre-merge candidate/base reconciliation baseline (Issue #22, M4.1).
+// Pre-merge candidate/base reconciliation. Design notes: docs/reconciliation.md.
 //
 // Compares a candidate checkout (a PR branch, committed and dirty) with the protected base it
 // targets, read-only, from one observation. It reports what VCV can establish and keeps apart
@@ -19,9 +19,9 @@
 // (the bound code or object changed since the claim), a missing binding (nothing locates the
 // code of a changed object), a checked structural contradiction (integrity errors, claims on
 // objects the approved model does not have), and a semantic concern (an agent's interpretation;
-// VCV authors none, and M4.4 adds agent-authored observations as labelled claims).
+// VCV authors none; the gate adds agent-authored observations as labelled claims).
 //
-// Coherent and bounded like every read surface since M2.4: the store, Git HEAD, the base ref, the
+// Coherent and bounded like every read surface: the store, Git HEAD, the base ref, the
 // claim files and the bytes of every changed or bound file are read again before answering; any
 // movement (a branch flip, a same-path dirty edit) gives STATE_CHANGED instead of a mixed report.
 // Lists are cut at fixed limits and say so. Paths are repository-relative; the checkout's absolute
@@ -278,11 +278,11 @@ const LIMITS = [
 ];
 
 const SEMANTIC_NOTE =
-  "VCV makes no semantic observations. Agent-authored interpretations are added to the pre-merge report (M4.4) and labelled as claims.";
+  "VCV makes no semantic observations. Agent-authored interpretations are added to the pre-merge gate report and labelled as claims.";
 
 /** Compare the candidate checkout containing `path` with a protected base. Read-only, one observation. */
 /**
- * `collect`, when given, receives every finding before any list is cut (the M4.4 gate decides on
+ * `collect`, when given, receives every finding before any list is cut (the gate decides on
  * all of them; the report shows the bounded list).
  */
 export function reconcile(

@@ -1,5 +1,9 @@
 # Per-test runner evidence (M4.3)
 
+> **Not source evidence.** This page is about *test runs*: which mapped test cases ran on a
+> candidate and what they returned. Queries over binding claims (where the code for a model object
+> is) are [source evidence](evidence.md).
+
 M4.3 ([Issue #22](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/22)) answers, for each
 approved acceptance criterion: did every test case mapped to it ([criteria.md](criteria.md)) run on
 **this exact candidate** and pass?

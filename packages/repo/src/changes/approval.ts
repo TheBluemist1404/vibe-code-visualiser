@@ -1,4 +1,4 @@
-// Trusted reviewer approval and signed approval attestations (Issue #17, M3.2).
+// Trusted reviewer approval and signed approval attestations.
 //
 // The threat model is in docs/approvals.md. In short: `--as`, `--perm` and `VCV_HOST_*` are
 // assertions by whoever runs the CLI, so a shell-capable coding agent can make them too. They
