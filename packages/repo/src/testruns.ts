@@ -24,9 +24,12 @@ import type { Permission } from "@vcv/core";
 import { changedFilesSince } from "./git.ts";
 import { JUNIT_LIMITS, parseJUnit } from "./junit.ts";
 import type { JUnitCase } from "./junit.ts";
-import { failFinal, finish, observed, readClaims } from "./proposals.ts";
-import type { Observation, ProposalHooks, ProposalResult } from "./proposals.ts";
+import { readClaims } from "./shared/claims.ts";
+import { failFinal, finish, observed } from "./shared/observation.ts";
+import type { Observation, ObserveHooks } from "./shared/observation.ts";
+import type { RepoResult } from "./shared/result.ts";
 import { WORKTREE_LIMITS, worktreeStateDetail } from "./worktree.ts";
+import { invalidRequest } from "./shared/result.ts";
 
 /** recordBytes bounds the record as written by the CLI (JSON, 2-space indent, trailing newline) and as read back. */
 export const TEST_RUN_LIMITS = { invocationChars: 2000, runnerChars: 100, recordBytes: 16 * 1024 * 1024 } as const;
@@ -144,8 +147,8 @@ export const identityDigest = (c: CandidateIdentity) => digestOf(c);
 /** The candidate's identity now: read it before running the tests, and pass its digest to capture. */
 export function testIdentity(
   path: string,
-  hooks: ProposalHooks = {},
-): ProposalResult<{ candidate: CandidateIdentity; identityDigest: string }> {
+  hooks: ObserveHooks = {},
+): RepoResult<{ candidate: CandidateIdentity; identityDigest: string }> {
   return observed(path, hooks, (obs) => {
     const { candidate, problem } = candidateIdentityOf(obs);
     if (problem) return failFinal({ code: "SOURCE_IDENTITY_UNAVAILABLE", message: problem }, obs, hooks);
@@ -183,18 +186,11 @@ export function captureTestRun(
   report: Uint8Array,
   input: unknown,
   host: TestRunHost,
-  hooks: ProposalHooks = {},
-): ProposalResult<TestRunRecord> {
+  hooks: ObserveHooks = {},
+): RepoResult<TestRunRecord> {
   const parsed = captureRequest.safeParse(input ?? {});
   if (!parsed.success) {
-    return {
-      ok: false,
-      error: {
-        code: "INVALID_REQUEST",
-        message: "request does not match the test-run capture schema",
-        details: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
-      },
-    };
+    return invalidRequest(parsed.error, "request does not match the test-run capture schema");
   }
   const req = parsed.data;
   return observed(path, hooks, (obs) => {

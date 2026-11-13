@@ -26,7 +26,7 @@ import {
 } from "@vcv/repo";
 import type { EvidenceApi, EvidenceResult } from "@vcv/repo";
 import { PROPOSAL_LIMITS, listProposalsRequest, previewProposalRequest } from "@vcv/repo";
-import type { ProposalReadApi, ProposalResult } from "@vcv/repo";
+import type { ProposalReadApi, RepoResult } from "@vcv/repo";
 
 export const SERVER_NAME = "vcv";
 export const SERVER_VERSION = "0.1.0";
@@ -58,7 +58,7 @@ Source evidence (repository mode): binding claims say that some code implements,
 export type Apis = { query: QueryApi; evidence?: EvidenceApi; proposals?: ProposalReadApi };
 type ToolDef = {
   tool: Tool;
-  call: (apis: Apis, args: unknown) => QueryResult<unknown> | EvidenceResult<unknown> | ProposalResult<unknown>;
+  call: (apis: Apis, args: unknown) => QueryResult<unknown> | EvidenceResult<unknown> | RepoResult<unknown>;
 };
 
 /** JSON Schema for a tool's input, generated from the query package's request contract. */
@@ -254,7 +254,7 @@ export function createVcvMcpServer(api: QueryApi | Apis, opts: ServerOptions = {
 type AdapterResult =
   | QueryResult<unknown>
   | EvidenceResult<unknown>
-  | ProposalResult<unknown>
+  | RepoResult<unknown>
   | { ok: false; error: { code: "INVALID_REQUEST" | "STORE_ERROR"; message: string } };
 
 /** The QueryResult itself is the structured content; the text block carries the same JSON. */

@@ -52,17 +52,19 @@ import {
   mergeBase,
   resolveCommit,
 } from "./git.ts";
-import { redact } from "./handoff.ts";
+import { redact } from "./shared/redact.ts";
 import { caseKey } from "./junit.ts";
 import { pathProblem, resolveInside } from "./locator.ts";
-import { finish, observed } from "./proposals.ts";
-import type { Observation, ProposalError, ProposalHooks, ProposalResult } from "./proposals.ts";
+import { finish, observed } from "./shared/observation.ts";
+import type { Observation, ObserveHooks } from "./shared/observation.ts";
+import type { RepoError, RepoResult } from "./shared/result.ts";
 import { worktreeState } from "./worktree.ts";
 import { reconcile } from "./reconcile.ts";
 import { resolveLocator } from "./resolver.ts";
 import type { Reconciliation, ReconcileFinding } from "./reconcile.ts";
 import { candidateIdentityOf, captureTestRun, identityDigest } from "./testruns.ts";
 import type { TestRunHost, TestRunRecord } from "./testruns.ts";
+import { invalidRequest } from "./shared/result.ts";
 
 export const GATE_LIMITS = {
   reasons: 300,
@@ -367,11 +369,11 @@ export function preMergeGate(
   path: string,
   req: GateRequest,
   host: TestRunHost,
-  hooks: ProposalHooks = {},
+  hooks: ObserveHooks = {},
   options: GateOptions = {},
-): ProposalResult<GateReport> {
+): RepoResult<GateReport> {
   const budget = budgetOf(options);
-  const bad = (message: string): ProposalResult<GateReport> => ({
+  const bad = (message: string): RepoResult<GateReport> => ({
     ok: false,
     error: { code: "INVALID_REQUEST", message },
   });
@@ -386,15 +388,7 @@ export function preMergeGate(
   let observations: z.infer<typeof observationsSchema> | null = null;
   if (req.observations !== undefined) {
     const o = observationsSchema.safeParse(req.observations);
-    if (!o.success)
-      return {
-        ok: false,
-        error: {
-          code: "INVALID_REQUEST",
-          message: "observations do not match vcv-observations-1",
-          details: o.error.issues.slice(0, 20).map((i) => ({ path: i.path.join("."), message: i.message })),
-        },
-      };
+    if (!o.success) return invalidRequest(o.error, "observations do not match vcv-observations-1", 20);
     const ids = o.data.observations.map((x) => x.id);
     if (new Set(ids).size !== ids.length) return bad("observation IDs must be unique");
     observations = o.data;
@@ -421,7 +415,7 @@ export function preMergeGate(
         message: `${req.base} is not a commit in this repository (fetch the base first)`,
       },
     };
-  const moved = (phase: string): ProposalResult<GateReport> | null => {
+  const moved = (phase: string): RepoResult<GateReport> | null => {
     const now = snapshotNow(path, cited, hooks, budget);
     if (now.ok && now.data.key === first.data.key) return null;
     if (!now.ok && now.error.code === "SOURCE_IDENTITY_UNAVAILABLE") return now;
@@ -500,7 +494,7 @@ export function preMergeGate(
           code: "REPORT_TOO_LARGE",
           message: `the gate report exceeds ${GATE_LIMITS.bytes} bytes even with every list cut`,
         },
-      } as ProposalResult<GateReport>;
+      } as RepoResult<GateReport>;
     return finish(obs, hooks, bounded, {
       key: first.data.key,
       again: () => snapshotKey(obs, cited, budget) ?? "incomplete",
@@ -525,9 +519,9 @@ function citedPaths(
 function snapshotNow(
   path: string,
   cited: string[],
-  hooks: ProposalHooks,
+  hooks: ObserveHooks,
   budget: StoreBudget,
-): ProposalResult<{ key: string; identity: string; root: string }> {
+): RepoResult<{ key: string; identity: string; root: string }> {
   return observed(path, hooks, (obs) => {
     const key = snapshotKey(obs, cited, budget);
     if (key === null) {
@@ -664,7 +658,7 @@ function baseClaimContext(root: string, rec: Reconciliation): BaseContext {
   return { objects, complete, problem };
 }
 
-function notReady(path: string, req: GateRequest, message: string): ProposalResult<GateReport> {
+function notReady(path: string, req: GateRequest, message: string): RepoResult<GateReport> {
   const root = findWorkTreeRoot(path);
   const commit = root ? headCommit(root) : null;
   if (!root || !commit) return { ok: false, error: { code: "PROJECT_NOT_READY", message } };
@@ -733,8 +727,8 @@ function notReady(path: string, req: GateRequest, message: string): ProposalResu
 
 type ResolvedPolicy = { policy: GatePolicy; source: string; digest: string; changedByCandidate: boolean };
 
-function policyOf(root: string, req: GateRequest): ResolvedPolicy | { error: ProposalError } {
-  const parse = (value: unknown, source: string): ResolvedPolicy | { error: ProposalError } => {
+function policyOf(root: string, req: GateRequest): ResolvedPolicy | { error: RepoError } {
+  const parse = (value: unknown, source: string): ResolvedPolicy | { error: RepoError } => {
     const p = gatePolicySchema.safeParse(value);
     if (!p.success)
       return {
@@ -824,8 +818,8 @@ function criteriaAll(
   path: string,
   runs: unknown[],
   coverage: GateRequest["coverage"],
-  hooks: ProposalHooks,
-): ProposalResult<CriteriaReport> {
+  hooks: ObserveHooks,
+): RepoResult<CriteriaReport> {
   const input = { ...(runs.length ? { runs } : {}), ...(coverage ? { coverage } : {}) };
   const all = criteriaEvidence(path, input, hooks);
   if (!all.ok || !all.data.truncated) return all;
@@ -849,7 +843,7 @@ function criteriaAll(
   return { ...all, data: { ...all.data, criteria, truncated: criteria.length < all.data.total } };
 }
 
-function allCriterionIds(path: string, hooks: ProposalHooks): ProposalResult<Id[]> {
+function allCriterionIds(path: string, hooks: ObserveHooks): RepoResult<Id[]> {
   return observed(path, hooks, (obs) => finish(obs, hooks, (obs.model.criteria ?? []).map((c) => c.id).sort()));
 }
 

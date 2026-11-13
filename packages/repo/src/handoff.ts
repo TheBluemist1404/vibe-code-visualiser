@@ -11,7 +11,6 @@
 // Deterministic: no timestamps, stable ordering, bounded lists; the same checkout state gives the
 // same bytes and the same `digest`. Redacted: only repository-relative paths; the checkout's
 // absolute path and the home directory never appear (free text is scrubbed too).
-import { homedir } from "node:os";
 import type { Id } from "@vcv/ir";
 import { canonicalJson, proposalDigest, proposedChangeSchema, sha256Hex, digestOf } from "@vcv/core";
 import type { ChangeRecord, ImplementationRequest } from "@vcv/core";
@@ -23,17 +22,15 @@ import { changedFilesSince } from "./git.ts";
 import { VCV_DIR } from "./project.ts";
 import { worktreeState } from "./worktree.ts";
 import type { WorktreeState } from "./worktree.ts";
-import {
-  describeOperation,
-  diffModels,
-  failFinal,
-  finish,
-  impactOf,
-  observed,
-  readClaims,
-  readRevision,
-} from "./proposals.ts";
-import type { ObjectChange, Observation, ProposalHooks, ProposalPreview, ProposalResult } from "./proposals.ts";
+import { failFinal, finish, observed } from "./shared/observation.ts";
+import type { Observation, ObserveHooks } from "./shared/observation.ts";
+import type { RepoResult } from "./shared/result.ts";
+import { readClaims } from "./shared/claims.ts";
+import { describeOperation, diffModels, impactOf } from "./shared/model-diff.ts";
+import type { ObjectChange } from "./shared/model-diff.ts";
+import { redact } from "./shared/redact.ts";
+import type { ModelImpact } from "./shared/model-diff.ts";
+import { readRevision } from "./shared/observation.ts";
 
 export const HANDOFF_LIMITS = {
   delta: 50,
@@ -92,7 +89,7 @@ export type Handoff = {
   /** Where the model is now; later revisions are other changes this handoff does not cover. */
   modelNow: { revision: string; atApprovedRevision: boolean; laterRevisions: string[]; laterRevisionsTotal: number };
   delta: { changes: ObjectChange[]; total: number; truncated: boolean };
-  impact: NonNullable<ProposalPreview["impact"]> & { listsTruncated: boolean };
+  impact: ModelImpact & { listsTruncated: boolean };
   /** The implementation request approved with the change, or null when the proposal had none. */
   request: ImplementationRequest | null;
   scope: {
@@ -145,7 +142,7 @@ const CAVEATS = [
  * if the checkout moved while reading). Errors: UNKNOWN_CHANGE, INVALID_RECORD, NOT_APPLIED,
  * NOT_IN_HISTORY, NOT_ATTESTED, PROJECT_NOT_READY, STORE_ERROR, STATE_CHANGED.
  */
-export function buildHandoff(path: string, changeId: string, hooks: ProposalHooks = {}): ProposalResult<Handoff> {
+export function buildHandoff(path: string, changeId: string, hooks: ObserveHooks = {}): RepoResult<Handoff> {
   return observed(path, hooks, (obs) => {
     const attestation = attestationKey(obs, changeId);
     const brief = approvedChange(obs, changeId);
@@ -227,7 +224,7 @@ export type ApprovedChange = {
   record: ChangeRecord & { resultingRevision: string };
   request: ImplementationRequest | null;
   changes: ObjectChange[];
-  impact: NonNullable<ProposalPreview["impact"]>;
+  impact: ModelImpact;
   keyFingerprint: string | null;
 };
 
@@ -428,25 +425,6 @@ function assemble(
     ],
   };
   return boundBytes(redact(body, obs.status.root));
-}
-
-/** Replace the checkout's absolute path and the home directory in every string. */
-export function redact<T>(v: T, root: string): T {
-  const home = homedir();
-  const scrub = (s: string) => {
-    let out = s.split(root).join("<checkout>");
-    if (home && home.length > 1) out = out.split(home).join("~");
-    return out;
-  };
-  const walk = (x: unknown): unknown =>
-    typeof x === "string"
-      ? scrub(x)
-      : Array.isArray(x)
-        ? x.map(walk)
-        : x && typeof x === "object"
-          ? Object.fromEntries(Object.entries(x).map(([k, y]) => [k, walk(y)]))
-          : x;
-  return walk(v) as T;
 }
 
 /** The handoff as printed, digest included: what the byte limit applies to. */

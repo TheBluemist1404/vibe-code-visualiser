@@ -45,11 +45,16 @@ import {
 import type { HostContext, ImplementationRequest } from "@vcv/core";
 import { isAncestor, resolveCommit } from "./git.ts";
 import { VCV_DIR } from "./project.ts";
-import { affectedBindings, approvedChange, attestationKey, guardOf, redact, worktreeOf } from "./handoff.ts";
+import { affectedBindings, approvedChange, attestationKey, guardOf, worktreeOf } from "./handoff.ts";
 import type { ApprovedChange, HandoffBinding } from "./handoff.ts";
-import { describeOperation, failFinal, finish, observed, readClaims } from "./proposals.ts";
-import type { Observation, ProposalError, ProposalHooks, ProposalResult } from "./proposals.ts";
+import { readClaims } from "./shared/claims.ts";
+import { describeOperation } from "./shared/model-diff.ts";
+import { failFinal, finish, observed } from "./shared/observation.ts";
+import type { Observation, ObserveHooks } from "./shared/observation.ts";
+import type { RepoError, RepoResult } from "./shared/result.ts";
 import type { WorktreeState } from "./worktree.ts";
+import { invalidRequest } from "./shared/result.ts";
+import { redact } from "./shared/redact.ts";
 
 export const IMPLEMENTATIONS_DIR = "implementations";
 export const IMPLEMENTATION_LIMITS = { files: 500, reportBytes: 256 * 1024 } as const;
@@ -233,18 +238,14 @@ export function recordImplementation(
   input: unknown,
   host: HostContext,
   expected: string | null = null,
-  hooks: ProposalHooks = {},
-): ProposalResult<RecordImplementationResult> {
+  hooks: ObserveHooks = {},
+): RepoResult<RecordImplementationResult> {
   const parsed = implementationReportInput.safeParse(input);
   if (!parsed.success) {
-    return {
-      ok: false,
-      error: {
-        code: "INVALID_REQUEST",
-        message: "the report does not match the implementation report schema (docs/implementation.md)",
-        details: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
-      },
-    };
+    return invalidRequest(
+      parsed.error,
+      "the report does not match the implementation report schema (docs/implementation.md)",
+    );
   }
   const req = parsed.data;
   return observed(path, hooks, (obs) => {
@@ -307,7 +308,7 @@ export function recordImplementation(
 
     // Recheck store, commit, records, claims, attestation and working tree (files and bytes).
     const done = finish(obs, hooks, null, guardOf(obs, req.changeId, attestation, req.baseCommit, claims, seen.tree));
-    if (!done.ok) return done as ProposalResult<RecordImplementationResult>;
+    if (!done.ok) return done as RepoResult<RecordImplementationResult>;
     // The report file is part of the guard too: re-read it right before writing, so a report
     // written since it was checked is never overwritten (exclusive link for a new one).
     const now = readPlain(file);
@@ -379,8 +380,8 @@ export type ImplementationStatus = {
 export function implementationStatus(
   path: string,
   changeId: string,
-  hooks: ProposalHooks = {},
-): ProposalResult<ImplementationStatus> {
+  hooks: ObserveHooks = {},
+): RepoResult<ImplementationStatus> {
   return observed(path, hooks, (obs) => {
     if (persistedIdProblem(changeId))
       return failFinal({ code: "UNKNOWN_CHANGE", message: `no change "${changeId}"` }, obs, hooks);
@@ -467,7 +468,7 @@ function observe(
   brief: ApprovedChange,
   baseCommit: string,
   entries: ReturnType<typeof readClaims>["entries"],
-): Seen | { error: ProposalError } {
+): Seen | { error: RepoError } {
   const root = obs.status.root;
   if (!obs.status.git)
     return {

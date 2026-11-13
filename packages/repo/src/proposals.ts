@@ -50,6 +50,13 @@ import { GitRefusedError, headCommit } from "./git.ts";
 import { formatLocator } from "./locator.ts";
 import { projectStatus } from "./project.ts";
 import type { ProjectStatus } from "./project.ts";
+import { invalidRequest, notReady, okWith } from "./shared/result.ts";
+import type { RepoResult } from "./shared/result.ts";
+import { failFinal, finish, observed, readRevision } from "./shared/observation.ts";
+import type { ObserveHooks } from "./shared/observation.ts";
+import { DIFF_LIMITS, describeOperation, diffModels, impactOf } from "./shared/model-diff.ts";
+import type { ModelImpact, ObjectChange } from "./shared/model-diff.ts";
+import { readClaims } from "./shared/claims.ts";
 
 export const PROPOSAL_LIMITS = {
   /** Operations per proposal accepted by this surface. */
@@ -60,7 +67,7 @@ export const PROPOSAL_LIMITS = {
   /** Object changes, impact candidates and binding claims listed per preview. */
   items: { default: 50, max: 200 },
   /** Characters of one before/after field value shown in a preview. */
-  valueChars: 300,
+  valueChars: DIFF_LIMITS.valueChars,
 } as const;
 
 // ---- requests --------------------------------------------------------------------------
@@ -99,72 +106,6 @@ export const previewProposalRequest = z
 
 export type ListProposalsRequest = z.input<typeof listProposalsRequest>;
 export type PreviewProposalRequest = z.input<typeof previewProposalRequest>;
-
-// ---- results ---------------------------------------------------------------------------
-
-export type ProposalErrorCode =
-  | "INVALID_REQUEST"
-  /** The project is absent, uninitialized, conflicted, diverged or invalid. */
-  | "PROJECT_NOT_READY"
-  /** No change record with this ID in this checkout. */
-  | "UNKNOWN_CHANGE"
-  /** The change record file exists but cannot be read as a record. */
-  | "INVALID_RECORD"
-  /** The model store could not be read. */
-  | "STORE_ERROR"
-  /** The checkout, model store, change records or claims changed while reading (e.g. a Git checkout). Nothing was mixed; retry. */
-  | "STATE_CHANGED"
-  // M3.3 handoff and implementation reports:
-  /** The change is not applied (pending, rejected): there is nothing approved to implement. */
-  | "NOT_APPLIED"
-  /** The change's resulting revision is not in this checkout's model history (another branch?). */
-  | "NOT_IN_HISTORY"
-  /** The change has no attestation whose signature verifies against its record. */
-  | "NOT_ATTESTED"
-  /** A commit named in the request is not in this repository, or not an ancestor of HEAD. */
-  | "UNKNOWN_COMMIT"
-  /** An implementation report for this change exists; pass its digest to replace it. */
-  | "REPORT_EXISTS"
-  /** The existing report's digest is not the one passed. */
-  | "REPORT_CHANGED"
-  /** The implementations directory or report file is not a plain directory/file. */
-  | "UNSAFE_PATH"
-  /** No implementation report for this change. */
-  | "NO_REPORT"
-  /** The handoff would exceed its byte limit even with every derived list cut. */
-  | "HANDOFF_TOO_LARGE"
-  /** M4.1: the reconciliation report would exceed its byte budget even with every list cut. */
-  | "REPORT_TOO_LARGE"
-  /** M4.3: a test report that cannot be read as the supported JUnit XML subset. */
-  | "REPORT_INVALID"
-  /** M4.3: a test report whose declared counts do not match its cases (truncated or edited). */
-  | "REPORT_INCONSISTENT"
-  /** M4.3: the candidate changed between reading its identity and capturing the run. */
-  | "TEST_RUN_RACED"
-  /** M4.3: a test-run record that does not check (shape, digest, summary). */
-  | "RUN_INVALID"
-  /** M4.3: the candidate's source cannot be identified exactly (no Git commit, a failed Git read, too much to hash). */
-  | "SOURCE_IDENTITY_UNAVAILABLE"
-  /** M4.4: the gate policy does not match vcv-policy-1, or cannot be read. */
-  | "POLICY_INVALID";
-
-export type ProposalError = { code: ProposalErrorCode; message: string; details?: { path: string; message: string }[] };
-
-export type ProposalContext = {
-  projectId: string;
-  /** The revision .vcv/HEAD names in this checkout now. */
-  modelRevision: string;
-  /** The model snapshot's own status. Says nothing about any change record's approval. */
-  snapshotStatus: string;
-  source: "model-proposals";
-  /** Always false: nothing here looks at code. */
-  implementationChecked: false;
-  observed: { commit: string | null; branch: string | null; dirty: boolean | null };
-};
-
-export type ProposalResult<T> =
-  | { ok: true; context: ProposalContext; data: T }
-  | { ok: false; context?: ProposalContext; error: ProposalError };
 
 /** An engine diagnostic plus what to do about it. */
 export type HintedDiagnostic = Diagnostic & { hint?: string };
@@ -225,18 +166,6 @@ export type ProposalList = {
   counts: Record<ProposalLifecycle, number>;
 };
 
-export type FieldChange = { field: string; before?: string; after?: string; truncated?: true };
-
-export type ObjectChange = {
-  id: Id;
-  kind: string;
-  name: string;
-  /** Module the object belongs to (after the change, or before it for removals). */
-  moduleId: Id | null;
-  change: "added" | "removed" | "modified";
-  fields: FieldChange[];
-};
-
 export type ProposalPreview = {
   proposal: {
     changeId: string;
@@ -272,18 +201,7 @@ export type ProposalPreview = {
     total: number;
     truncated: boolean;
   } | null;
-  impact: {
-    /** Modules owning a changed object ("changed") or a structural impact candidate ("impacted"). */
-    modules: { id: Id; name: string; via: "changed" | "impacted" }[];
-    /** "not-determined": one module seen, but the impact list was cut, so others may be affected. */
-    crossModule: "yes" | "no" | "not-determined";
-    contracts: { id: Id; name: string; moduleId: Id | null; via: "changed" | "impacted" }[];
-    candidates: ImpactCandidate[];
-    total: number;
-    truncated: boolean;
-    impactClass: "structural-candidate";
-    note: string;
-  } | null;
+  impact: ModelImpact | null;
   /** Binding claims about changed, removed or impacted objects: code that probably has to move with this change. */
   bindings: {
     items: {
@@ -370,7 +288,7 @@ const NOT_IMPLEMENTED =
  * model:propose, so the engine can only record it as pending (or rejected), whatever else the
  * caller may hold. Throws only when the project cannot be opened (StoreError) or on a bug.
  */
-export function submitProposal(path: string, input: unknown, host: HostContext): ProposalResult<SubmitResult> {
+export function submitProposal(path: string, input: unknown, host: HostContext): RepoResult<SubmitResult> {
   const status = projectStatus(path);
   if (status.state !== "ready" || !status.model) return notReady(status);
   const before = status.model.revision;
@@ -450,13 +368,9 @@ function sizeProblem(input: unknown): { path: string; message: string } | undefi
 // ---- list ------------------------------------------------------------------------------
 
 /** Every proposal recorded in this checkout with its derived lifecycle. Read-only. */
-export function listProposals(
-  path: string,
-  input: unknown = {},
-  hooks: ProposalHooks = {},
-): ProposalResult<ProposalList> {
+export function listProposals(path: string, input: unknown = {}, hooks: ObserveHooks = {}): RepoResult<ProposalList> {
   const parsed = listProposalsRequest.safeParse(input ?? {});
-  if (!parsed.success) return invalid(parsed.error);
+  if (!parsed.success) return invalidRequest(parsed.error);
   return observed(path, hooks, (obs) => {
     const { model, history } = obs;
     const all = obs.records.map((e) => summarize(e.changeId, e.record, e.problem, model, history));
@@ -548,13 +462,9 @@ function summarize(
  * A bounded, read-only review of one proposal: what it changes, what that structurally touches,
  * whether the engine would accept it now, and what nobody has verified. Writes nothing.
  */
-export function previewProposal(
-  path: string,
-  input: unknown,
-  hooks: ProposalHooks = {},
-): ProposalResult<ProposalPreview> {
+export function previewProposal(path: string, input: unknown, hooks: ObserveHooks = {}): RepoResult<ProposalPreview> {
   const parsed = previewProposalRequest.safeParse(input ?? {});
-  if (!parsed.success) return invalid(parsed.error);
+  if (!parsed.success) return invalidRequest(parsed.error);
   const req = parsed.data;
   return observed(path, hooks, (obs) => {
     const { model, history, reader } = obs;
@@ -672,14 +582,6 @@ export function previewProposal(
   });
 }
 
-export function readRevision(reader: FileStoreReader, rev: string): Model | undefined {
-  try {
-    return reader.revision(rev);
-  } catch {
-    return undefined;
-  }
-}
-
 function assumptionsFor(
   change: ProposedModelChange,
   record: ChangeRecord | undefined,
@@ -724,165 +626,6 @@ function assumptionsFor(
   return out;
 }
 
-// ---- delta -----------------------------------------------------------------------------
-
-type Item = { id: Id; kind: string; name: string; fields: Record<string, unknown> };
-
-/** Field-level records for every object, nested elements as their own items. */
-function items(m: Model): Map<Id, Item> {
-  const out = new Map<Id, Item>();
-  const { project } = m;
-  const { modelRevision: _rev, ...projectFields } = project;
-  out.set(project.id, { id: project.id, kind: "project", name: project.name, fields: projectFields });
-  const put = (kind: string, o: { id: Id; name?: string }, omit: string[] = []) => {
-    const fields = Object.fromEntries(Object.entries(o).filter(([k]) => !omit.includes(k)));
-    out.set(o.id, { id: o.id, kind, name: o.name ?? o.id, fields });
-  };
-  for (const x of m.actors) put("actor", x);
-  for (const x of m.modules) put("module", x);
-  for (const x of m.capabilities) put("capability", x);
-  for (const x of m.rules) put("rule", x);
-  for (const x of m.events) put("event", x);
-  for (const x of m.contracts) put("contract", x);
-  for (const d of m.data) {
-    put("data", d, ["attributes"]);
-    for (const a of d.attributes) put("attribute", a);
-  }
-  for (const x of m.criteria ?? []) put("criterion", x);
-  for (const b of m.behaviors) {
-    put("behavior", b, ["states", "transitions"]);
-    for (const s of b.states) put("state", s);
-    for (const t of b.transitions) put("transition", t);
-  }
-  return out;
-}
-
-export function moduleOf(m: Model, id: Id): Id | null {
-  const index = buildIndex(m).byId;
-  let e = index.get(id);
-  while (e) {
-    if (e.kind === "module") return e.id;
-    if (!e.parentId) return null;
-    e = index.get(e.parentId);
-  }
-  return null;
-}
-
-const show = (v: unknown): { text?: string; truncated?: true } => {
-  if (v === undefined) return {};
-  const text = typeof v === "string" ? v : canonicalJson(v);
-  return text.length > PROPOSAL_LIMITS.valueChars
-    ? { text: `${text.slice(0, PROPOSAL_LIMITS.valueChars)}…`, truncated: true }
-    : { text };
-};
-
-/** Object-level before/after delta, in a stable order (kind, then ID). */
-export function diffModels(before: Model, after: Model): ObjectChange[] {
-  const a = items(before);
-  const b = items(after);
-  const out: ObjectChange[] = [];
-  const ids = [...new Set([...a.keys(), ...b.keys()])];
-  for (const id of ids) {
-    const x = a.get(id);
-    const y = b.get(id);
-    const fields: FieldChange[] = [];
-    const keys = [...new Set([...Object.keys(x?.fields ?? {}), ...Object.keys(y?.fields ?? {})])].sort();
-    for (const k of keys) {
-      const bv = x?.fields[k];
-      const av = y?.fields[k];
-      if (canonicalJson(bv ?? null) === canonicalJson(av ?? null)) continue;
-      const bs = show(bv);
-      const as = show(av);
-      fields.push({
-        field: k,
-        ...(bs.text !== undefined ? { before: bs.text } : {}),
-        ...(as.text !== undefined ? { after: as.text } : {}),
-        ...(bs.truncated || as.truncated ? { truncated: true as const } : {}),
-      });
-    }
-    if (x && y && !fields.length) continue;
-    const item = (y ?? x)!;
-    out.push({
-      id,
-      kind: item.kind,
-      name: item.name,
-      moduleId: y ? moduleOf(after, id) : moduleOf(before, id),
-      change: !x ? "added" : !y ? "removed" : "modified",
-      fields,
-    });
-  }
-  return out.sort((p, q) => (p.kind === q.kind ? (p.id < q.id ? -1 : p.id > q.id ? 1 : 0) : p.kind < q.kind ? -1 : 1));
-}
-
-export function impactOf(
-  before: Model,
-  after: Model,
-  changes: ObjectChange[],
-  limit: number,
-): NonNullable<ProposalPreview["impact"]> {
-  const seen = new Map<Id, ImpactCandidate>();
-  let truncated = false;
-  const changedIds = new Set(changes.map((c) => c.id));
-  const run = (m: Model, ids: Id[]) => {
-    for (let i = 0; i < ids.length; i += QUERY_LIMITS.impact.maxSeeds) {
-      const r = createQueryApi({ current: () => m }).analyzeImpact({
-        ids: ids.slice(i, i + QUERY_LIMITS.impact.maxSeeds),
-        maxResults: Math.min(limit, QUERY_LIMITS.impact.maxResults),
-      });
-      if (!r.ok) continue;
-      truncated ||= r.data.truncated;
-      for (const c of r.data.candidates) if (!changedIds.has(c.id) && !seen.has(c.id)) seen.set(c.id, c);
-    }
-  };
-  // Removed objects are traced in the model they were removed from; everything else in the result.
-  run(
-    after,
-    changes.filter((c) => c.change !== "removed" && c.kind !== "project").map((c) => c.id),
-  );
-  run(
-    before,
-    changes.filter((c) => c.change === "removed").map((c) => c.id),
-  );
-  const candidates = [...seen.values()].sort((p, q) => p.distance - q.distance || (p.id < q.id ? -1 : 1));
-
-  const modules = new Map<Id, { id: Id; name: string; via: "changed" | "impacted" }>();
-  const nameIn = (id: Id) => buildIndex(after).byId.get(id)?.name ?? buildIndex(before).byId.get(id)?.name ?? id;
-  for (const c of changes)
-    if (c.moduleId) modules.set(c.moduleId, { id: c.moduleId, name: nameIn(c.moduleId), via: "changed" });
-  for (const c of candidates)
-    if (c.moduleId && !modules.has(c.moduleId))
-      modules.set(c.moduleId, { id: c.moduleId, name: nameIn(c.moduleId), via: "impacted" });
-
-  const contracts = new Map<Id, { id: Id; name: string; moduleId: Id | null; via: "changed" | "impacted" }>();
-  for (const c of changes)
-    if (c.kind === "contract") contracts.set(c.id, { id: c.id, name: c.name, moduleId: c.moduleId, via: "changed" });
-  for (const c of candidates)
-    if (c.kind === "contract" && !contracts.has(c.id))
-      contracts.set(c.id, { id: c.id, name: c.name, moduleId: c.moduleId ?? null, via: "impacted" });
-
-  return {
-    modules: [...modules.values()].sort((p, q) => (p.id < q.id ? -1 : 1)),
-    crossModule: modules.size > 1 ? "yes" : truncated || candidates.length > limit ? "not-determined" : "no",
-    contracts: [...contracts.values()].sort((p, q) => (p.id < q.id ? -1 : 1)),
-    candidates: candidates.slice(0, limit),
-    total: candidates.length,
-    truncated: truncated || candidates.length > limit,
-    impactClass: "structural-candidate",
-    note: "Structural candidates from declared model references (@vcv/query analyzeImpact), not proof of semantic or code impact. Confirm each in the repository.",
-  };
-}
-
-/** The checkout's claim files and a key for exactly this set (IDs and digests). */
-export function readClaims(root: string): { entries: ClaimEntry[]; key: string } {
-  try {
-    const entries = listBindings(root);
-    return { entries, key: canonicalJson(entries.map((e) => [e.bindingId, e.digest])) };
-  } catch (e) {
-    // An unsafe or unreadable bindings directory is reported by vcv evidence, not here.
-    return { entries: [], key: `unreadable:${(e as Error).message}` };
-  }
-}
-
 export function bindingsFor(
   entries: ClaimEntry[],
   changes: ObjectChange[],
@@ -907,221 +650,13 @@ export function bindingsFor(
   return out;
 }
 
-/** One line per operation, for people. */
-export function describeOperation(op: ProposedModelChange["operations"][number]): string {
-  switch (op.type) {
-    case "createModule":
-      return `create module ${op.module.id} "${op.module.name}"`;
-    case "createEvent":
-      return `create event ${op.event.id} "${op.event.name}" owned by ${String(op.event.owner)}`;
-    case "createCapability":
-      return `create capability ${op.capability.id} "${op.capability.name}" owned by ${String(op.capability.owner)}`;
-    case "createRule":
-      return `create rule ${op.rule.id} owned by ${String(op.rule.owner)}`;
-    case "addDataAttribute":
-      return `add attribute ${op.attribute.id} (${op.attribute.name}: ${op.attribute.type}) to ${op.dataId}`;
-    case "addState":
-      return `add state ${op.state.id} "${op.state.name}" to ${op.behaviorId}`;
-    case "addTransition":
-      return `add transition ${op.transition.id} to ${op.behaviorId}`;
-    case "renameObject":
-      return `rename ${op.objectId} to "${op.name}"`;
-    case "renameState":
-      return `rename state ${op.stateId} of ${op.behaviorId} to "${op.name}"`;
-    case "linkContract":
-      return `module ${op.moduleId} consumes contract ${op.contractId}`;
-    case "setModuleDependencies":
-      return `module ${op.moduleId} depends on [${op.dependsOn.join(", ")}]`;
-    case "removeObject":
-      return `remove ${op.objectId}`;
-    case "setRuleStatement":
-      return `change the statement of rule ${op.ruleId}`;
-    case "setDescription":
-      return `change the description of ${op.objectId}`;
-    case "createCriterion":
-      return `create ${op.criterion.verification} criterion ${op.criterion.id} on ${op.criterion.verifies.map(String).join(", ")}`;
-    case "reviseCriterion": {
-      const what = [
-        op.statement !== undefined && "its statement",
-        op.verifies !== undefined && `what it verifies (${op.verifies.join(", ")})`,
-        op.verification !== undefined && `its verification policy (${op.verification})`,
-      ].filter(Boolean);
-      return `change ${what.join(", ")} of criterion ${op.criterionId}`;
-    }
-    case "approveDraft":
-      return "mark the model snapshot approved (draft → approved)";
-  }
-}
-
-// ---- plumbing --------------------------------------------------------------------------
-
-function contextOf(status: ProjectStatus, model: Model): ProposalContext {
-  return {
-    projectId: model.project.id,
-    modelRevision: model.project.modelRevision,
-    snapshotStatus: model.project.status,
-    source: "model-proposals",
-    implementationChecked: false,
-    observed: {
-      commit: status.git?.commit ?? null,
-      branch: status.git?.branch ?? null,
-      dirty: status.git?.dirty ?? null,
-    },
-  };
-}
-
-/** Test hook: called after everything was read and before the consistency recheck. */
-export type ProposalHooks = { afterRead?: () => void };
-
-/**
- * One observation of the checkout (review of PR #18): the project status, the model and history
- * it names, and the change records, read once. Everything a result reports comes from this one
- * observation, and before returning, the store fingerprint, the Git commit and the change records
- * (and, for previews, the claim files) are read again; if any moved (a checkout, a record rewrite),
- * the call fails with STATE_CHANGED instead of mixing two generations. No locks, no writes.
- */
-export type Observation = {
-  status: ProjectStatus;
-  model: Model;
-  history: string[];
-  reader: FileStoreReader;
-  records: ChangeRecordEntry[];
-  store: string;
-  commit: string | null;
-  recordsKey: string;
-};
-
-const recordsKeyOf = (records: ChangeRecordEntry[]) => digestOf(records);
-const commitOf = (status: ProjectStatus) => (status.git ? headCommit(status.root) : null);
-
-export function observed<T>(
-  path: string,
-  hooks: ProposalHooks,
-  body: (obs: Observation) => ProposalResult<T>,
-): ProposalResult<T> {
-  try {
-    return observedUnsafe(path, hooks, body);
-  } catch (e) {
-    // Git refused to run on this checkout (driver configuration not enumerable): nothing was read
-    // through it, and nothing is reported as clean or absent in its place.
-    if (e instanceof GitRefusedError)
-      return {
-        ok: false,
-        error: { code: "SOURCE_IDENTITY_UNAVAILABLE", message: `Git was not run on this checkout: ${e.message}` },
-      };
-    throw e;
-  }
-}
-
-function observedUnsafe<T>(
-  path: string,
-  _hooks: ProposalHooks,
-  body: (obs: Observation) => ProposalResult<T>,
-): ProposalResult<T> {
-  const status = projectStatus(path);
-  if (status.state !== "ready" || !status.model) return notReady(status);
-  let obs: Observation;
-  try {
-    const store = storeFingerprint(status.storeDir);
-    const reader = new FileStoreReader(status.storeDir);
-    const model = reader.current();
-    const history = reader.revisions();
-    const records = listChangeRecords(status.storeDir);
-    obs = {
-      status,
-      model,
-      history,
-      reader,
-      records,
-      store,
-      commit: status.git?.commit ?? null,
-      recordsKey: recordsKeyOf(records),
-    };
-    if (model.project.modelRevision !== status.model.revision) return changed(obs);
-  } catch (e) {
-    return {
-      ok: false,
-      error: { code: "STORE_ERROR", message: `the model store could not be read: ${(e as Error).message}` },
-    };
-  }
-  return body(obs);
-}
-
-/** Whether the checkout is still exactly as observed. Read-only. */
-function unchanged(obs: Observation, hooks: ProposalHooks, extra?: { key: string; again: () => string }): boolean {
-  hooks.afterRead?.();
-  try {
-    return (
-      storeFingerprint(obs.status.storeDir) === obs.store &&
-      commitOf(obs.status) === obs.commit &&
-      recordsKeyOf(listChangeRecords(obs.status.storeDir)) === obs.recordsKey &&
-      (!extra || extra.again() === extra.key)
-    );
-  } catch {
-    return false;
-  }
-}
-
-function changed<T>(obs: Observation): ProposalResult<T> {
-  return {
-    ok: false,
-    error: {
-      code: "STATE_CHANGED",
-      message: `the checkout changed while it was read (a Git checkout, or an edit of .vcv/, of binding claims or of the observed source files); nothing was mixed, retry the call`,
-    },
-    context: contextOf(obs.status, obs.model),
-  } as ProposalResult<T>;
-}
-
-export function finish<T>(
-  obs: Observation,
-  hooks: ProposalHooks,
-  data: T,
-  extra?: { key: string; again: () => string },
-): ProposalResult<T> {
-  if (!unchanged(obs, hooks, extra)) return changed(obs);
-  return { ok: true, context: contextOf(obs.status, obs.model), data };
-}
-
-/** An error about what was observed (e.g. UNKNOWN_CHANGE), still only if the observation held. */
-export function failFinal<T>(error: ProposalError, obs: Observation, hooks: ProposalHooks): ProposalResult<T> {
-  if (!unchanged(obs, hooks)) return changed(obs);
-  return { ok: false, context: contextOf(obs.status, obs.model), error };
-}
-
-function okWith<T>(status: ProjectStatus, model: Model, data: T): ProposalResult<T> {
-  return { ok: true, context: contextOf(status, model), data };
-}
-
-function notReady<T>(status: ProjectStatus): ProposalResult<T> {
-  const why = status.diagnostics
-    .filter((d) => d.severity === "error")
-    .map((d) => d.message)
-    .join("; ");
-  return {
-    ok: false,
-    error: { code: "PROJECT_NOT_READY", message: `the VCV project is ${status.state}${why ? `: ${why}` : ""}` },
-  };
-}
-
-function invalid<T>(error: z.ZodError): ProposalResult<T> {
-  return {
-    ok: false,
-    error: {
-      code: "INVALID_REQUEST",
-      message: "request does not match the input schema",
-      details: error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
-    },
-  };
-}
-
 /** The read-only half, bound to one checkout, for adapters that serve it (MCP --repo). */
 export type ProposalReadApi = {
-  listProposals(req?: ListProposalsRequest): ProposalResult<ProposalList>;
-  previewProposal(req: PreviewProposalRequest): ProposalResult<ProposalPreview>;
+  listProposals(req?: ListProposalsRequest): RepoResult<ProposalList>;
+  previewProposal(req: PreviewProposalRequest): RepoResult<ProposalPreview>;
 };
 
-export function createProposalReadApi(path: string, hooks: ProposalHooks = {}): ProposalReadApi {
+export function createProposalReadApi(path: string, hooks: ObserveHooks = {}): ProposalReadApi {
   return {
     listProposals: (req) => listProposals(path, req, hooks),
     previewProposal: (req) => previewProposal(path, req, hooks),

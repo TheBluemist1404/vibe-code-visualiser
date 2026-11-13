@@ -27,6 +27,7 @@ import { formatLocator, resolveInside } from "./locator.ts";
 import { projectStatus } from "./project.ts";
 import type { ProjectStatus } from "./project.ts";
 import { RESOLVER_ID, fileFingerprintAt } from "./resolver.ts";
+import { invalidRequest } from "./shared/result.ts";
 
 // ---- requests --------------------------------------------------------------------------
 
@@ -245,14 +246,7 @@ export function createEvidenceApi(path: string, hooks: EvidenceHooks = {}): Evid
   ): EvidenceResult<T> {
     const parsed = schema.safeParse(input ?? {});
     if (!parsed.success) {
-      return {
-        ok: false,
-        error: {
-          code: "INVALID_REQUEST",
-          message: "request does not match the evidence query's input schema",
-          details: parsed.error.issues.map((i) => ({ path: i.path.join("."), message: i.message })),
-        },
-      };
+      return invalidRequest(parsed.error, "request does not match the evidence query's input schema");
     }
     const req = parsed.data;
     const status = projectStatus(path);

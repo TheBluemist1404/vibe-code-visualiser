@@ -563,7 +563,7 @@ export function recordBinding(
   if (!snap.history.includes(modelRevision))
     throw new BindingError("UNKNOWN_REVISION", `revision ${modelRevision} is not in this checkout's model history`);
   const atRevision =
-    modelRevision === snap.model.project.modelRevision ? snap.model : readRevision(snap.storeDir, modelRevision);
+    modelRevision === snap.model.project.modelRevision ? snap.model : readRevisionFile(snap.storeDir, modelRevision);
   if (!atRevision || !buildIndex(atRevision).byId.has(input.modelObjectId)) {
     throw new BindingError(
       "UNKNOWN_OBJECT",
@@ -847,9 +847,9 @@ function modelFreshness(
   const then = memo
     ? memo.revisions.has(c.modelRevision)
       ? memo.revisions.get(c.modelRevision)
-      : (memo.revisions.set(c.modelRevision, readRevision(storeDir, c.modelRevision)),
+      : (memo.revisions.set(c.modelRevision, readRevisionFile(storeDir, c.modelRevision)),
         memo.revisions.get(c.modelRevision))
-    : readRevision(storeDir, c.modelRevision);
+    : readRevisionFile(storeDir, c.modelRevision);
   const before = then ? objectJson(then, c.modelObjectId, memo) : undefined;
   if (before === undefined)
     return { state: "unknown", cause: `${c.modelObjectId} cannot be read at ${c.modelRevision}` };
@@ -865,7 +865,7 @@ function modelFreshness(
 }
 
 /** A revision listed in HEAD's history (already verified by the project's inspection). */
-function readRevision(storeDir: string, rev: string): Model | undefined {
+function readRevisionFile(storeDir: string, rev: string): Model | undefined {
   if (persistedIdProblem(rev)) return undefined;
   // Same safe reader as the store: no symlinks, no special files, bounded.
   const f = readStoreFile(storeDir, `revisions/${rev}.yaml`, STORE_FILE_LIMITS.revision);

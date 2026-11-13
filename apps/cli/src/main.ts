@@ -65,7 +65,7 @@ import type {
   TrustSource,
   ProjectStatus,
   ProposalPreview,
-  ProposalResult,
+  RepoResult,
   Verification,
 } from "@vcv/repo";
 import type { BindingRelation, ClaimSource } from "@vcv/core";
@@ -593,7 +593,7 @@ function printHinted(ds: HintedDiagnostic[]) {
   }
 }
 
-function printResultError(r: Extract<ProposalResult<unknown>, { ok: false }>) {
+function printResultError(r: Extract<RepoResult<unknown>, { ok: false }>) {
   console.log(`✗ ${r.error.code}: ${r.error.message}`);
   for (const d of r.error.details ?? []) console.log(`  ${d.path || "(root)"}: ${d.message}`);
 }
