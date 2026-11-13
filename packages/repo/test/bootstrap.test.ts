@@ -5,19 +5,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { checkModel, loadModel, parseYaml } from "@vcv/ir";
 import { FileStoreReader } from "@vcv/core";
 import { createQueryApi } from "@vcv/query";
 import { RepositoryProject, initProject, projectStatus } from "../src/index.ts";
+import { tempDir } from "@vcv/testkit";
 
 const ROOT = join(import.meta.dirname, "../../..");
 const GUIDE = join(ROOT, "docs/agent-bootstrap.md");
 const BOOTSTRAP = join(ROOT, "examples/reference-app/bootstrap");
 const RUN = join(ROOT, "docs/samples/m2.3-bootstrap");
-const tmp = () => realpathSync(mkdtempSync(join(tmpdir(), "vcv-bootstrap-")));
+const tmp = () => realpathSync(tempDir("vcv-bootstrap-"));
 const git = (cwd: string, ...args: string[]) => execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8" }).trim();
 
 /** Words that would tell an agent what the fixture app contains. */

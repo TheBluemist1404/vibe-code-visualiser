@@ -1,14 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { loadModel } from "@vcv/ir";
 import type { Model } from "@vcv/ir";
 import { FileStore, MemoryStore, ModelEngine } from "@vcv/core";
 import { LIMITS, createQueryApi } from "../src/index.ts";
 import type { QueryResult } from "../src/index.ts";
+import { tempDir } from "@vcv/testkit";
 
 const FIXTURE = join(import.meta.dirname, "../../../examples/enrollment/model.rev-1.yaml");
 const model = (): Model => loadModel(readFileSync(FIXTURE, "utf8")).model!;
@@ -262,7 +262,7 @@ test("draft snapshots surface unresolved references with diagnostics, never as r
 });
 
 test("queries never change the model, its revision or anything on disk", () => {
-  const dir = join(mkdtempSync(join(tmpdir(), "vcv-query-")), "store");
+  const dir = join(tempDir("vcv-query-"), "store");
   FileStore.init(dir, model());
   const fingerprint = () =>
     walk(dir)

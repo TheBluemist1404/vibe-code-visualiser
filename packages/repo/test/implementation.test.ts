@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import {
   appendFileSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -12,7 +11,6 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { FileStore, ModelEngine } from "../../core/src/index.ts";
@@ -34,10 +32,11 @@ import {
 } from "../src/index.ts";
 import type { Handoff, ImplementationReportInput, TrustSource } from "../src/index.ts";
 import { ENROLL, SERVICE, baseline, edit, git } from "./course-desk.ts";
+import { tempDir } from "@vcv/testkit";
 
 const proposer: HostContext = { principalId: "agent:coder", permissions: ["model:propose"] };
 const implementer: HostContext = { principalId: "agent:coder", permissions: ["model:propose", "binding:record"] };
-const keys = mkdtempSync(join(tmpdir(), "vcv-keys-"));
+const keys = tempDir("vcv-keys-");
 
 const NEW_STATEMENT =
   "Confirmed enrollments for a course never exceed its capacity; a request for a full course is rejected with COURSE_FULL and the student is told how many seats the course has.";
@@ -338,7 +337,7 @@ test("implementation report refusals: bad input, unknown or foreign base commit,
   const pending = recordImplementation(repo, report(h, { changeId: "chg-pending" }), implementer);
   assert.equal(!pending.ok && pending.error.code, "NOT_APPLIED");
 
-  const elsewhere = mkdtempSync(join(tmpdir(), "vcv-elsewhere-"));
+  const elsewhere = tempDir("vcv-elsewhere-");
   symlinkSync(elsewhere, join(repo, ".vcv/implementations"));
   const unsafe = recordImplementation(repo, report(h), implementer);
   assert.equal(!unsafe.ok && unsafe.error.code, "UNSAFE_PATH");

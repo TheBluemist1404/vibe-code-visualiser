@@ -128,11 +128,9 @@ test("MCP repository mode serves vcv_list_proposals and vcv_preview_proposal rea
       await call("vcv_preview_proposal", { changeId: "chg-cancel-enrollment" }),
       cliJson("preview", repo, "chg-cancel-enrollment"),
     );
-    assert.deepEqual(
-      await call("vcv_preview_proposal", { change: { ...change, changeId: "chg-dry" } }),
-      (writeFileSync(file, JSON.stringify({ ...change, changeId: "chg-dry" })),
-      cliJson("preview", repo, "--file", file)),
-    );
+    const dry = await call("vcv_preview_proposal", { change: { ...change, changeId: "chg-dry" } });
+    writeFileSync(file, JSON.stringify({ ...change, changeId: "chg-dry" }));
+    assert.deepEqual(dry, cliJson("preview", repo, "--file", file));
     assert.deepEqual(await call("vcv_list_proposals", {}), cliJson("list", repo));
     const unknown = (await call("vcv_preview_proposal", { changeId: "chg-nope" })) as {
       ok: boolean;

@@ -4,8 +4,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
@@ -16,6 +15,7 @@ import type { Model } from "@vcv/ir";
 import { FileStore, ModelEngine } from "@vcv/core";
 import { contextRequest, impactRequest, overviewRequest, searchRequest } from "@vcv/query";
 import type { ImpactAnalysis, ObjectContext, ProjectOverview, QueryResult, SearchResults } from "@vcv/query";
+import { tempDir } from "@vcv/testkit";
 
 const ROOT = join(import.meta.dirname, "../../..");
 const MAIN = join(ROOT, "apps/mcp/src/main.ts");
@@ -23,7 +23,7 @@ const FIXTURES = join(ROOT, "examples/enrollment");
 const TOOLS = ["vcv_analyze_impact", "vcv_get_context", "vcv_get_project_overview", "vcv_search_objects"];
 
 function newStore(edit?: (m: Model) => void): string {
-  const dir = join(mkdtempSync(join(tmpdir(), "vcv-mcp-")), "store");
+  const dir = join(tempDir("vcv-mcp-"), "store");
   const model = loadModel(readFileSync(join(FIXTURES, "model.rev-1.yaml"), "utf8")).model!;
   edit?.(model);
   FileStore.init(dir, model);
@@ -393,7 +393,7 @@ test("the server refuses to start without an explicit, initialized store and kee
   assert.equal(none.stdout, "");
   assert.match(none.stderr, /nothing to serve: pass --store <store-dir> or --repo <checkout>/);
 
-  const empty = mkdtempSync(join(tmpdir(), "vcv-mcp-empty-"));
+  const empty = tempDir("vcv-mcp-empty-");
   const uninit = run(["--store", empty]);
   assert.equal(uninit.status, 2);
   assert.equal(uninit.stdout, "");

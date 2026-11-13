@@ -48,12 +48,6 @@
         "rules": {
           "style": {
             "noNonNullAssertion": "off"
-          },
-          "suspicious": {
-            "noAssignInExpressions": "warn"
-          },
-          "complexity": {
-            "noCommaOperator": "warn"
           }
         }
       }

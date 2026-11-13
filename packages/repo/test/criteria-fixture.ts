@@ -1,7 +1,5 @@
 // Course Desk with approved, attested acceptance criteria mapped to test cases (M4.4 tests).
 import assert from "node:assert/strict";
-import { mkdtempSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   addTrustedReviewer,
@@ -13,11 +11,12 @@ import {
   submitProposal,
 } from "../src/index.ts";
 import { SPEC, agent, baseline, git } from "./course-desk.ts";
+import { tempDir } from "@vcv/testkit";
 
 export const FULL = "EnrollmentService > rejects an enrollment into a full course and notifies the student";
 export const CONFIRM = "EnrollmentService > confirms an enrollment while seats are left and notifies the student";
 
-const keys = mkdtempSync(join(tmpdir(), "vcv-gate-keys-"));
+const keys = tempDir("vcv-gate-keys-");
 let reviewer: ReturnType<typeof createReviewerKey> | undefined;
 const crit = (id: string, over: Record<string, unknown> = {}) => ({
   id,

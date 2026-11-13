@@ -1,8 +1,7 @@
 // Approved acceptance criteria and criterion ↔ test-case mappings (Issue #22, M4.2).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, rmSync, writeFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { FileStore, ModelEngine, canonicalJson } from "../../core/src/index.ts";
 import { loadModel } from "../../ir/src/index.ts";
@@ -23,10 +22,11 @@ import {
 } from "../src/index.ts";
 import type { CriteriaReport } from "../src/index.ts";
 import { SPEC, agent, baseline, edit, git } from "./course-desk.ts";
+import { once, tempDir } from "@vcv/testkit";
 
 const FULL = "EnrollmentService > rejects an enrollment into a full course and notifies the student";
 const CONFIRM = "EnrollmentService > confirms an enrollment while seats are left and notifies the student";
-const keys = mkdtempSync(join(tmpdir(), "vcv-crit-keys-")); // outside every checkout
+const keys = tempDir("vcv-crit-keys-"); // outside every checkout
 let reviewer: ReturnType<typeof createReviewerKey> | undefined;
 /** Trust user:hoang (one key for the whole file) and commit the trust list. */
 function trust(repo: string) {
@@ -370,8 +370,7 @@ test("an unreadable claim store (a file in place of the directory) gives mapping
 test("one observation: a mapped test or a claim edited mid-read is STATE_CHANGED", () => {
   const repo = setup();
   map(repo, "crt-full-course", FULL, "test.crt-full-course");
-  let once = true;
-  const flip = (fn: () => void) => ({ afterRead: () => (once ? ((once = false), fn()) : undefined) });
+  const flip = (fn: () => void) => ({ afterRead: once(fn) });
   const r1 = criteriaEvidence(
     repo,
     {},
@@ -381,7 +380,6 @@ test("one observation: a mapped test or a claim edited mid-read is STATE_CHANGED
   );
   assert.equal(!r1.ok && r1.error.code, "STATE_CHANGED");
   git(repo, "checkout", "-q", "--", SPEC);
-  once = true;
   const r2 = criteriaEvidence(
     repo,
     {},

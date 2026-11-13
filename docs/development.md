@@ -15,6 +15,7 @@ An npm workspace with no build step: Node 22.18+ runs the TypeScript sources dir
 | `@vcv/repo` | core, ir, query | `.vcv/` in a Git checkout: bindings, proposals, review, pre-merge |
 | `@vcv/cli` (`apps/cli`) | all packages | The `vcv` command |
 | `@vcv/mcp` (`apps/mcp`) | core, query, repo | The stdio MCP server |
+| `@vcv/testkit` | – | Private test helpers (dev dependency only) |
 
 Every package lists the `@vcv/*` packages it imports in its `package.json`, and code imports
 other packages only by name (`@vcv/core`), never by a relative path into their `src/`.
@@ -45,6 +46,19 @@ imports `premerge/`.
 | `npm run lint` | Biome lint, warnings included |
 | `npm run format` | Format with Biome (2 spaces, 120 columns) |
 | `npm run check` | What CI runs: formatting and lint errors |
+
+## Tests
+
+Tests live next to each package in `test/` and run with `node --test`. Shared helpers come from
+`@vcv/testkit` rather than being redefined per file:
+
+- `tempDir(prefix)` makes a temporary directory that is removed when the test process exits.
+- `git(cwd, ...args)` runs Git with a fixed author and no system or global config (`GIT_ENV`),
+  so results do not depend on the developer's machine.
+- `once(fn)` wraps a hook so it fires on the first call only, for the "something changes
+  mid-read" tests that drive `afterRead` and similar hooks.
+
+Biome's test override only relaxes `noNonNullAssertion`; the other rules apply to tests too.
 
 ## Conventions
 

@@ -3,15 +3,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawnSync, execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { tempDir } from "@vcv/testkit";
 
 const MAIN = join(import.meta.dirname, "../src/main.ts");
 const FIXTURE = join(import.meta.dirname, "../../../examples/enrollment/model.rev-1.yaml");
 const vcv = (...args: string[]) =>
   spawnSync("node", ["--experimental-strip-types", "--no-warnings", MAIN, ...args], { encoding: "utf8" });
-const tmp = () => realpathSync(mkdtempSync(join(tmpdir(), "vcv-cli-")));
+const tmp = () => realpathSync(tempDir("vcv-cli-"));
 
 test("an unreadable input file is a one-line diagnostic with exit code 2, not a stack trace", () => {
   for (const args of [

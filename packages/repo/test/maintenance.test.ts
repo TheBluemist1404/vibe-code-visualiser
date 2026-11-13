@@ -6,17 +6,17 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, realpathSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { createEvidenceApi } from "../src/index.ts";
+import { tempDir } from "@vcv/testkit";
 
 const ROOT = join(import.meta.dirname, "../../..");
 const GUIDE = join(ROOT, "docs/agent-maintenance.md");
 const HERE = join(ROOT, "examples/reference-app/maintenance");
 const RUN = join(ROOT, "docs/samples/m2.5-maintenance");
 const CLI = join(ROOT, "apps/cli/src/main.ts");
-const tmp = () => realpathSync(mkdtempSync(join(tmpdir(), "vcv-maint-")));
+const tmp = () => realpathSync(tempDir("vcv-maint-"));
 const FIXTURE_TERMS =
   /\b(courses?|enrol\w*|students?|seats?|notif\w*|nest(js)?|react|vite|poetry|algebra|outbox|catalog|waitlist\w*)\b/i;
 

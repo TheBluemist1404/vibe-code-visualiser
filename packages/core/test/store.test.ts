@@ -1,12 +1,12 @@
 // Persistence safety: commit point, recovery after interrupted commits, retry.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readdirSync, readFileSync, writeFileSync, appendFileSync } from "node:fs";
 import { join } from "node:path";
 import { FileStore, ModelEngine, StoreError } from "../src/index.ts";
 import type { CommitStep } from "../src/index.ts";
 import { assertRev, baseModel, mcpAgent, owner, reviewer, timeoutChange } from "./helpers.ts";
+import { tempDir } from "@vcv/testkit";
 
 const STEPS: CommitStep[] = [
   "revision.write",
@@ -19,7 +19,7 @@ const STEPS: CommitStep[] = [
 /** HEAD is the commit point: a crash before its rename leaves the old revision current. */
 const committedIfCrashAt = (s: CommitStep) => s.startsWith("change.");
 
-const freshDir = () => join(mkdtempSync(join(tmpdir(), "vcv-store-")), "store");
+const freshDir = () => join(tempDir("vcv-store-"), "store");
 
 class Crash extends Error {}
 const crashAt = (step: CommitStep) => ({

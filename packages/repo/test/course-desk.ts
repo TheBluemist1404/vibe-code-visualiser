@@ -2,13 +2,15 @@
 // committed as an explicit Git baseline.
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { loadModel } from "../../ir/src/index.ts";
 import type { SourceLocator } from "../../core/src/index.ts";
 import { initProject, recordBinding } from "../src/index.ts";
 import type { BindingHost, RecordInput } from "../src/index.ts";
+import { git, tempDir } from "@vcv/testkit";
+
+export { git };
 
 export const ROOT = join(import.meta.dirname, "../../..");
 export const DRAFT = join(ROOT, "docs/samples/m2.3-bootstrap/agent-output/model.yaml");
@@ -18,21 +20,6 @@ export const SPEC = "server/src/enrollment/enrollment.service.spec.ts";
 export const ENROLL: SourceLocator = { path: SERVICE, selector: { kind: "symbol", name: "EnrollmentService.enroll" } };
 export const agent: BindingHost = { principalId: "agent:bootstrap", permissions: ["binding:record"], source: "agent" };
 
-const GIT_ENV = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "VCV Test",
-  GIT_AUTHOR_EMAIL: "vcv-test@example.invalid",
-  GIT_COMMITTER_NAME: "VCV Test",
-  GIT_COMMITTER_EMAIL: "vcv-test@example.invalid",
-  GIT_CONFIG_NOSYSTEM: "1",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-};
-export const git = (cwd: string, ...args: string[]) =>
-  execFileSync("git", ["-C", cwd, ...args], {
-    encoding: "utf8",
-    env: GIT_ENV,
-    stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
 export const read = (p: string) => readFileSync(p, "utf8");
 export const edit = (repo: string, rel: string, from: string | RegExp, to: string) => {
   const before = read(join(repo, rel));
@@ -43,7 +30,7 @@ export const edit = (repo: string, rel: string, from: string | RegExp, to: strin
 
 /** Course Desk with the draft, four claims, all committed as the baseline. */
 export function baseline(): string {
-  const repo = join(realpathSync(mkdtempSync(join(tmpdir(), "vcv-evidence-"))), "course-desk");
+  const repo = join(realpathSync(tempDir("vcv-evidence-")), "course-desk");
   execFileSync("bash", [join(ROOT, "examples/reference-app/materialize.sh"), repo], { encoding: "utf8" });
   initProject(repo, loadModel(read(DRAFT)).model!);
   const add = (over: Partial<RecordInput> & Pick<RecordInput, "modelObjectId" | "locator">) =>

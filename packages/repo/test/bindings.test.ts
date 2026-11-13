@@ -6,7 +6,6 @@ import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   realpathSync,
@@ -14,7 +13,6 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadModel } from "@vcv/ir";
 import { FileStore, FileStoreReader, ModelEngine } from "@vcv/core";
@@ -38,6 +36,7 @@ import {
   verifyBindings,
 } from "../src/index.ts";
 import type { BindingHost, RecordInput } from "../src/index.ts";
+import { GIT_ENV, git, tempDir } from "@vcv/testkit";
 
 const ROOT = join(import.meta.dirname, "../../..");
 const DRAFT = join(ROOT, "docs/samples/m2.3-bootstrap/agent-output/model.yaml");
@@ -53,22 +52,7 @@ const reviewer: BindingHost = {
   source: "human",
 };
 
-const GIT_ENV = {
-  ...process.env,
-  GIT_AUTHOR_NAME: "VCV Test",
-  GIT_AUTHOR_EMAIL: "vcv-test@example.invalid",
-  GIT_COMMITTER_NAME: "VCV Test",
-  GIT_COMMITTER_EMAIL: "vcv-test@example.invalid",
-  GIT_CONFIG_NOSYSTEM: "1",
-  GIT_CONFIG_GLOBAL: "/dev/null",
-};
-const git = (cwd: string, ...args: string[]) =>
-  execFileSync("git", ["-C", cwd, ...args], {
-    encoding: "utf8",
-    env: GIT_ENV,
-    stdio: ["ignore", "pipe", "pipe"],
-  }).trim();
-const tmp = () => realpathSync(mkdtempSync(join(tmpdir(), "vcv-bind-")));
+const tmp = () => realpathSync(tempDir("vcv-bind-"));
 const read = (p: string) => readFileSync(p, "utf8");
 const edit = (repo: string, rel: string, from: string | RegExp, to: string) => {
   const before = read(join(repo, rel));

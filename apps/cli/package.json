@@ -8,5 +8,8 @@
     "@vcv/ir": "*",
     "@vcv/query": "*",
     "@vcv/repo": "*"
+  },
+  "devDependencies": {
+    "@vcv/testkit": "*"
   }
 }

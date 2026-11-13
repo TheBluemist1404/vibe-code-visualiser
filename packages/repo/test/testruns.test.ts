@@ -7,7 +7,6 @@ import {
   chmodSync,
   cpSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   renameSync,
   rmSync,
@@ -34,6 +33,7 @@ import {
 } from "../src/index.ts";
 import type { CriteriaReport, TestRunRecord } from "../src/index.ts";
 import { SERVICE, SPEC, agent, baseline, edit, git } from "./course-desk.ts";
+import { once, tempDir } from "@vcv/testkit";
 
 const FIX = join(import.meta.dirname, "fixtures/junit");
 const PASS = readFileSync(join(FIX, "vitest-pass.xml"), "utf8");
@@ -50,7 +50,7 @@ const RUN = {
 };
 const xml = (s: string) => Buffer.from(s, "utf8");
 
-const keys = mkdtempSync(join(tmpdir(), "vcv-runs-keys-"));
+const keys = tempDir("vcv-runs-keys-");
 let reviewer: ReturnType<typeof createReviewerKey> | undefined;
 
 const crit = (id: string, over: Record<string, unknown> = {}) => ({
@@ -397,7 +397,7 @@ test("no usable source identity, no capture and no fresh result: no Git, failed 
   const run = capture(repo, PASS);
 
   // No Git: a copy of the checkout without .git.
-  const bare = join(mkdtempSync(join(tmpdir(), "vcv-nogit-")), "course-desk");
+  const bare = join(tempDir("vcv-nogit-"), "course-desk");
   cpSync(repo, bare, { recursive: true, filter: (src) => !src.split(/[\\/]/).includes(".git") });
   const id = testIdentity(bare);
   assert.equal(!id.ok && id.error.code, "SOURCE_IDENTITY_UNAVAILABLE");
@@ -546,13 +546,10 @@ test("a bound file edited mid-capture is STATE_CHANGED; an unreadable claim refu
   git(repo, "rm", "-q", "--cached", SERVICE);
   git(repo, "add", ".gitignore");
   git(repo, "commit", "-qm", "ignore the service");
-  let once = true;
   const r = captureTestRun(repo, xml(PASS), RUN, host, {
-    afterRead: () =>
-      once
-        ? ((once = false),
-          edit(repo, SERVICE, "Enrollment rules. Every decision", "Enrollment rules (mid-read). Every decision"))
-        : undefined,
+    afterRead: once(() =>
+      edit(repo, SERVICE, "Enrollment rules. Every decision", "Enrollment rules (mid-read). Every decision"),
+    ),
   });
   assert.equal(!r.ok && r.error.code, "STATE_CHANGED");
 
@@ -568,7 +565,7 @@ test("a bound path through a link that leaves the checkout is unavailable: no ca
   const repo = setup();
   const run = capture(repo, PASS);
   // The service's directory becomes a link (a junction, on Windows) to a copy outside the checkout.
-  const outside = mkdtempSync(join(tmpdir(), "vcv-outside-"));
+  const outside = tempDir("vcv-outside-");
   cpSync(join(repo, "server/src/enrollment"), outside, { recursive: true });
   rmSync(join(repo, "server/src/enrollment"), { recursive: true });
   symlinkSync(outside, join(repo, "server/src/enrollment"), "junction");

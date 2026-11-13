@@ -4,7 +4,6 @@ import assert from "node:assert/strict";
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
   rmSync,
@@ -13,7 +12,6 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { createHash } from "node:crypto";
 import { dumpModel } from "../../ir/src/index.ts";
@@ -32,9 +30,10 @@ import {
 } from "../src/index.ts";
 import type { IntegrityReport, ReviewApproveInput, TrustSource } from "../src/index.ts";
 import { baseline, git } from "./course-desk.ts";
+import { tempDir } from "@vcv/testkit";
 
 const agent: HostContext = { principalId: "agent:coder", permissions: ["model:propose"] };
-const keys = mkdtempSync(join(tmpdir(), "vcv-keys-")); // outside every checkout
+const keys = tempDir("vcv-keys-"); // outside every checkout
 const keyFor = (id: string) => {
   const file = join(keys, `${id.replace(/[^a-z0-9]/gi, "_")}-${Math.random().toString(36).slice(2, 8)}.pem`);
   return { file, entry: createReviewerKey(id, file) };
@@ -89,7 +88,10 @@ const approve = (
 const finalize = (repo: string, id: string, digest: string, keyFile: string, trust: TrustSource = pinned(repo)) =>
   reviewFinalize(repo, { changeId: id, expectedDigest: digest, keyFile, trust });
 const throwsCode = (fn: () => unknown, code: string) =>
-  assert.throws(fn, (e: ApprovalError) => (assert.equal(e.code, code, e.message), true));
+  assert.throws(fn, (e: ApprovalError) => {
+    assert.equal(e.code, code, e.message);
+    return true;
+  });
 const codes = (r: IntegrityReport) => r.problems.map((p) => `${p.severity}:${p.code}`);
 const storeHash = (repo: string) => {
   const h = createHash("sha256");
@@ -232,7 +234,7 @@ test("an agent that commits its own key on the feature branch cannot anchor trus
   throwsCode(() => approve(repo, "chg-a", digest, own.file, { kind: "working-tree" }), "UNPROTECTED_TRUST");
   // Trust files inside the checkout, however spelled (relative, ../, through a symlinked parent).
   const inTree = join(repo, ".vcv/reviewers.json");
-  const link = join(mkdtempSync(join(tmpdir(), "vcv-link-")), "store");
+  const link = join(tempDir("vcv-link-"), "store");
   symlinkSync(join(repo, ".vcv"), link);
   for (const path of [
     inTree,
@@ -277,7 +279,7 @@ test("an agent that commits its own key on the feature branch cannot anchor trus
   assert.equal(rev(repo), "rev-1", "nothing was applied");
   assert.equal(JSON.parse(readFileSync(join(repo, ".vcv/changes/chg-a.json"), "utf8")).status, "pending");
   // A file outside the checkout is an external anchor (its integrity is the caller's).
-  const outside = join(mkdtempSync(join(tmpdir(), "vcv-trust-")), "reviewers.json");
+  const outside = join(tempDir("vcv-trust-"), "reviewers.json");
   writeFileSync(outside, git(repo, "show", "main:.vcv/reviewers.json")); // the reviewer's own copy of the base list
   assert.equal(loadTrust(repo, { kind: "file", path: outside }).authority, "external-file");
   throwsCode(() => approve(repo, "chg-a", digest, own.file, { kind: "file", path: outside }), "UNTRUSTED_KEY");
@@ -360,7 +362,7 @@ test("the attestation destination is checked before anything is committed, and a
   {
     const { repo, hoang } = setup();
     const digest = propose(repo, change(repo, "chg-a"));
-    const elsewhere = mkdtempSync(join(tmpdir(), "vcv-elsewhere-"));
+    const elsewhere = tempDir("vcv-elsewhere-");
     symlinkSync(elsewhere, join(repo, ".vcv/approvals"));
     throwsCode(() => approve(repo, "chg-a", digest, hoang.file), "UNSAFE_PATH");
     assert.equal(rev(repo), "rev-1");

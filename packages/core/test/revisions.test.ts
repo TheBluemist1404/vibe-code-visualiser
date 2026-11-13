@@ -1,8 +1,7 @@
 // Branch-safe revision identity and divergence detection (ADR 0007, Issue #6 M2.1 gate).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { dumpModel, loadModel } from "@vcv/ir";
 import {
@@ -20,7 +19,7 @@ import {
 } from "../src/index.ts";
 import { assertRev, baseModel, mcpAgent, owner, renamePending, reviewer, timeoutChange } from "./helpers.ts";
 
-const tmp = () => mkdtempSync(join(tmpdir(), "vcv-rev-"));
+const tmp = () => tempDir("vcv-rev-");
 const storeErr = (code: string) => (err: unknown) => err instanceof StoreError && err.code === code;
 
 /** One store, copied to two "branches" that then each commit a different change. */
@@ -400,6 +399,7 @@ test("commit refuses with STORE_CHANGED if a same-ID revision file is swapped af
 
 // Review on PR #8, round 5: the store moves between the engine's dry-run and the commit.
 import type { ChangeGuard, ChangeRecord, HostContext, ModelStore, StoreSnapshot } from "../src/index.ts";
+import { tempDir } from "@vcv/testkit";
 
 /**
  * A FileStore that runs a hook once, right after `on` (snapshot or getChange) returns its result
