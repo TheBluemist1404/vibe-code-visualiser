@@ -12,17 +12,7 @@
 // it immediately before the write. The caller also names the claim it expects to replace (by
 // digest, or null for "there is none"), so a claim read on one branch can never overwrite a
 // different same-ID claim after `git checkout`.
-import {
-  closeSync,
-  constants as fsConstants,
-  fstatSync,
-  lstatSync,
-  mkdirSync,
-  openSync,
-  readSync,
-  readdirSync,
-  rmSync,
-} from "node:fs";
+import { closeSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { buildIndex, loadModel, persistedIdProblem } from "@vcv/ir";
@@ -43,12 +33,12 @@ import {
   readUpTo,
 } from "@vcv/core";
 import type { BindingClaim, BindingRelation, BindingState, ClaimSource, Permission, SourceLocator } from "@vcv/core";
-import { fileWorkingState, headCommit } from "./git.ts";
+import { fileWorkingState, headCommit } from "../git/git.ts";
 import { pathProblem, resolveInside, selectorProblem } from "./locator.ts";
 import { fileFingerprintAt, resolveLocator } from "./resolver.ts";
 import type { Resolution } from "./resolver.ts";
-import { VCV_DIR, projectStatus, resolveProjectRoot } from "./project.ts";
-import type { ProjectStatus } from "./project.ts";
+import { VCV_DIR, projectStatus, resolveProjectRoot } from "../project.ts";
+import type { ProjectStatus } from "../project.ts";
 
 export const BINDINGS_DIR = "bindings";
 /** Recorded in each claim; a claim fingerprinted with another algorithm is compared as "unknown". */
@@ -830,7 +820,8 @@ function modelFreshness(
   c: BindingClaim,
   memo?: VerifyMemo,
 ): ModelFreshness {
-  const current = memo ? (memo.head ??= readHeadRevision(storeDir)) : readHeadRevision(storeDir);
+  if (memo) memo.head ??= readHeadRevision(storeDir);
+  const current = memo?.head ?? readHeadRevision(storeDir);
   const now = objectJson(current, c.modelObjectId, memo);
   if (now === undefined)
     return {
@@ -844,12 +835,13 @@ function modelFreshness(
       state: "unknown",
       cause: `revision ${c.modelRevision} is not in this checkout's model history (another branch?)`,
     };
-  const then = memo
-    ? memo.revisions.has(c.modelRevision)
-      ? memo.revisions.get(c.modelRevision)
-      : (memo.revisions.set(c.modelRevision, readRevisionFile(storeDir, c.modelRevision)),
-        memo.revisions.get(c.modelRevision))
-    : readRevisionFile(storeDir, c.modelRevision);
+  let then: Model | undefined;
+  if (!memo) then = readRevisionFile(storeDir, c.modelRevision);
+  else {
+    if (!memo.revisions.has(c.modelRevision))
+      memo.revisions.set(c.modelRevision, readRevisionFile(storeDir, c.modelRevision));
+    then = memo.revisions.get(c.modelRevision);
+  }
   const before = then ? objectJson(then, c.modelObjectId, memo) : undefined;
   if (before === undefined)
     return { state: "unknown", cause: `${c.modelObjectId} cannot be read at ${c.modelRevision}` };

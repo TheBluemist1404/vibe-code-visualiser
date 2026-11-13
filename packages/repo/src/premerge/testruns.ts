@@ -19,17 +19,17 @@
 // gap between running and capturing, the host reads `testIdentity` first and passes its digest as
 // `before`; if anything moved in between, capture is refused (TEST_RUN_RACED).
 import { z } from "zod";
-import { canonicalJson, sha256Hex, digestOf } from "@vcv/core";
+import { sha256Hex, digestOf } from "@vcv/core";
 import type { Permission } from "@vcv/core";
-import { changedFilesSince } from "./git.ts";
+import { changedFilesSince } from "../git/git.ts";
 import { JUNIT_LIMITS, parseJUnit } from "./junit.ts";
 import type { JUnitCase } from "./junit.ts";
-import { readClaims } from "./shared/claims.ts";
-import { failFinal, finish, observed } from "./shared/observation.ts";
-import type { Observation, ObserveHooks } from "./shared/observation.ts";
-import type { RepoResult } from "./shared/result.ts";
-import { WORKTREE_LIMITS, worktreeStateDetail } from "./worktree.ts";
-import { invalidRequest } from "./shared/result.ts";
+import { readClaims } from "../shared/claims.ts";
+import { failFinal, finish, observed } from "../shared/observation.ts";
+import type { Observation, ObserveHooks } from "../shared/observation.ts";
+import type { RepoResult } from "../shared/result.ts";
+import { WORKTREE_LIMITS, worktreeStateDetail } from "../git/worktree.ts";
+import { invalidRequest } from "../shared/result.ts";
 
 /** recordBytes bounds the record as written by the CLI (JSON, 2-space indent, trailing newline) and as read back. */
 export const TEST_RUN_LIMITS = { invocationChars: 2000, runnerChars: 100, recordBytes: 16 * 1024 * 1024 } as const;

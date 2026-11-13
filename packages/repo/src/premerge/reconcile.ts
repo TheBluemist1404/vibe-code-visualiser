@@ -34,8 +34,8 @@ import { join } from "node:path";
 import { canonicalJson, readStoreFile, STORE_FILE_LIMITS, sha256Hex, digestOf } from "@vcv/core";
 import { LIMITS as QUERY_LIMITS, createQueryApi } from "@vcv/query";
 import type { ImpactCandidate } from "@vcv/query";
-import { MAX_CLAIM_BYTES, verifyBinding } from "./bindings.ts";
-import type { ClaimEntry, Verification } from "./bindings.ts";
+import { MAX_CLAIM_BYTES, verifyBinding } from "../bindings/bindings.ts";
+import type { ClaimEntry, Verification } from "../bindings/bindings.ts";
 import {
   changedFilesBetween,
   changedFilesSince,
@@ -45,24 +45,24 @@ import {
   isAncestor,
   mergeBase,
   resolveCommit,
-} from "./git.ts";
-import { checkIntegrity } from "./integrity.ts";
-import type { IntegrityReport } from "./integrity.ts";
-import { APPROVALS_DIR, REVIEWERS_FILE, readPlainFile } from "./approval.ts";
-import type { TrustSource } from "./approval.ts";
-import { formatLocator } from "./locator.ts";
-import { VCV_DIR } from "./project.ts";
-import { redact } from "./shared/redact.ts";
-import { readClaims } from "./shared/claims.ts";
-import { diffModels, impactOf, moduleOf } from "./shared/model-diff.ts";
-import type { ObjectChange } from "./shared/model-diff.ts";
-import { worktreeState } from "./worktree.ts";
-import type { WorktreeState } from "./worktree.ts";
-import { failFinal, finish, observed } from "./shared/observation.ts";
-import type { Observation, ObserveHooks } from "./shared/observation.ts";
-import type { RepoResult } from "./shared/result.ts";
-import { invalidRequest } from "./shared/result.ts";
-import type { ModelImpact } from "./shared/model-diff.ts";
+} from "../git/git.ts";
+import { checkIntegrity } from "../changes/integrity.ts";
+import type { IntegrityReport } from "../changes/integrity.ts";
+import { APPROVALS_DIR, REVIEWERS_FILE, readPlainFile } from "../changes/approval.ts";
+import type { TrustSource } from "../changes/approval.ts";
+import { formatLocator } from "../bindings/locator.ts";
+import { VCV_DIR } from "../project.ts";
+import { redact } from "../shared/redact.ts";
+import { readClaims } from "../shared/claims.ts";
+import { diffModels, impactOf, moduleOf } from "../shared/model-diff.ts";
+import type { ObjectChange } from "../shared/model-diff.ts";
+import { worktreeState } from "../git/worktree.ts";
+import type { WorktreeState } from "../git/worktree.ts";
+import { failFinal, finish, observed } from "../shared/observation.ts";
+import type { Observation, ObserveHooks } from "../shared/observation.ts";
+import type { RepoResult } from "../shared/result.ts";
+import { invalidRequest } from "../shared/result.ts";
+import type { ModelImpact } from "../shared/model-diff.ts";
 
 export const RECONCILE_LIMITS = {
   files: 500,
@@ -426,34 +426,57 @@ function fitBudget(r: Reconciliation): Reconciliation | null {
   let bytes = size(r);
   let shrunk = false;
   const lists: { get: () => unknown[]; set: (n: number) => void }[] = [
-    { get: () => r.findings, set: (n) => ((r.findings = r.findings.slice(0, n)), (r.findingsTruncated = true)) },
+    {
+      get: () => r.findings,
+      set: (n) => {
+        r.findings = r.findings.slice(0, n);
+        r.findingsTruncated = true;
+      },
+    },
     {
       get: () => r.bindings.items,
-      set: (n) => ((r.bindings.items = r.bindings.items.slice(0, n)), (r.bindings.truncated = true)),
+      set: (n) => {
+        r.bindings.items = r.bindings.items.slice(0, n);
+        r.bindings.truncated = true;
+      },
     },
     {
       get: () => r.source.files,
-      set: (n) => ((r.source.files = r.source.files.slice(0, n)), (r.source.truncated = true)),
+      set: (n) => {
+        r.source.files = r.source.files.slice(0, n);
+        r.source.truncated = true;
+      },
     },
     {
       get: () => r.model.delta.changes,
-      set: (n) => ((r.model.delta.changes = r.model.delta.changes.slice(0, n)), (r.model.delta.truncated = true)),
+      set: (n) => {
+        r.model.delta.changes = r.model.delta.changes.slice(0, n);
+        r.model.delta.truncated = true;
+      },
     },
     {
       get: () => r.model.impact?.candidates ?? [],
-      set: (n) =>
-        r.model.impact &&
-        ((r.model.impact.candidates = r.model.impact.candidates.slice(0, n)), (r.model.impact.truncated = true)),
+      set: (n) => {
+        if (r.model.impact) {
+          r.model.impact.candidates = r.model.impact.candidates.slice(0, n);
+          r.model.impact.truncated = true;
+        }
+      },
     },
     {
       get: () => r.sourceImpact?.candidates ?? [],
-      set: (n) =>
-        r.sourceImpact &&
-        ((r.sourceImpact.candidates = r.sourceImpact.candidates.slice(0, n)), (r.sourceImpact.truncated = true)),
+      set: (n) => {
+        if (r.sourceImpact) {
+          r.sourceImpact.candidates = r.sourceImpact.candidates.slice(0, n);
+          r.sourceImpact.truncated = true;
+        }
+      },
     },
     {
       get: () => r.sourceImpact?.seeds ?? [],
-      set: (n) => r.sourceImpact && (r.sourceImpact.seeds = r.sourceImpact.seeds.slice(0, n)),
+      set: (n) => {
+        if (r.sourceImpact) r.sourceImpact.seeds = r.sourceImpact.seeds.slice(0, n);
+      },
     },
     { get: () => r.model.introduced, set: (n) => (r.model.introduced = r.model.introduced.slice(0, n)) },
     {

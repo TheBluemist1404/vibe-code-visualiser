@@ -13,20 +13,11 @@
 // O_NOFOLLOW|O_NONBLOCK and streamed in chunks; past the per-file or total byte budget, or the file
 // count, a file is identified by its size and modification time instead of its bytes, and the state
 // says so (`complete: false`). This is observation integrity, not a claim about what the code does.
-import {
-  closeSync,
-  constants as fsConstants,
-  fstatSync,
-  lstatSync,
-  openSync,
-  readSync,
-  readlinkSync,
-  realpathSync,
-} from "node:fs";
+import { closeSync, fstatSync, lstatSync, openSync, readlinkSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, relative, sep } from "node:path";
-import { canonicalJson, sha256Hex, digestOf, OPEN_READ_NOFOLLOW, readChunks } from "@vcv/core";
-import { EXCLUDED_SEGMENTS, pathProblem, resolveInside } from "./locator.ts";
+import { sha256Hex, digestOf, OPEN_READ_NOFOLLOW, readChunks } from "@vcv/core";
+import { EXCLUDED_SEGMENTS, pathProblem, resolveInside } from "../bindings/locator.ts";
 
 export const WORKTREE_LIMITS = { files: 5000, fileBytes: 64 * 1024 * 1024, totalBytes: 512 * 1024 * 1024 } as const;
 const CHUNK = 1024 * 1024;

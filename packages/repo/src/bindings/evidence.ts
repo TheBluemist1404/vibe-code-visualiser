@@ -18,16 +18,16 @@
 // changes when any reported evidence changes. Results never contain source text or absolute paths.
 import { z } from "zod";
 import { buildIndex, persistedIdProblem } from "@vcv/ir";
-import { BINDING_RELATIONS, canonicalJson, readHeadRevision, storeFingerprint, sha256Hex, digestOf } from "@vcv/core";
+import { BINDING_RELATIONS, readHeadRevision, storeFingerprint, sha256Hex, digestOf } from "@vcv/core";
 import type { BindingClaim, BindingRelation, Selector } from "@vcv/core";
 import { BindingError, FINGERPRINT_ALGORITHM, listBindings, readBinding, verifyBinding } from "./bindings.ts";
 import type { ClaimEntry, Verification } from "./bindings.ts";
-import { headCommit } from "./git.ts";
+import { headCommit } from "../git/git.ts";
 import { formatLocator, resolveInside } from "./locator.ts";
-import { projectStatus } from "./project.ts";
-import type { ProjectStatus } from "./project.ts";
+import { projectStatus } from "../project.ts";
+import type { ProjectStatus } from "../project.ts";
 import { RESOLVER_ID, fileFingerprintAt } from "./resolver.ts";
-import { invalidRequest } from "./shared/result.ts";
+import { invalidRequest } from "../shared/result.ts";
 
 // ---- requests --------------------------------------------------------------------------
 

@@ -214,19 +214,19 @@ what a proposal changes before deciding.
 
 ## Consequences
 
-- New: `readStoreFile` / `STORE_FILE_LIMITS` in core (now used by every store read), `packages/repo/src/proposals.ts` (`submitProposal`, `listProposals`, `previewProposal`,
+- New: `readStoreFile` / `STORE_FILE_LIMITS` in core (now used by every store read), `packages/repo/src/changes/proposals.ts` (`submitProposal`, `listProposals`, `previewProposal`,
   `createProposalReadApi`), `listChangeRecords` and `FileStoreReader.revision` in core,
   `checkChange` / `proposalDigest` exported from the engine, CLI `vcv proposal submit|preview|list`,
   MCP `vcv_list_proposals` / `vcv_preview_proposal`.
 - Unchanged: `vcv propose` / `vcv approve`, the store format, change records, revision IDs.
-- M3.2 new: `packages/repo/src/approval.ts` (`createReviewerKey`, `addTrustedReviewer`,
-  `loadTrust`, `reviewApprove`, `readAttestation`), `packages/repo/src/integrity.ts`
+- M3.2 new: `packages/repo/src/changes/approval.ts` (`createReviewerKey`, `addTrustedReviewer`,
+  `loadTrust`, `reviewApprove`, `readAttestation`), `packages/repo/src/changes/integrity.ts`
   (`checkIntegrity`), `reviewFinalize`, `ApproveOptions.expectedDigest` in the engine, `resolveCommit` /
   `fileAtCommit` git helpers, CLI `vcv reviewer init`, `vcv review approve|finalize`, `vcv integrity`.
   New store files: `.vcv/reviewers.json`, `.vcv/approvals/`. Unchanged: change records,
   revision IDs, `vcv approve`.
-- M3.3 new: `implementation` request in `proposedChangeSchema` (core), `packages/repo/src/handoff.ts`
-  (`buildHandoff`), `packages/repo/src/implementation.ts` (`recordImplementation`,
+- M3.3 new: `implementation` request in `proposedChangeSchema` (core), `packages/repo/src/changes/handoff.ts`
+  (`buildHandoff`), `packages/repo/src/changes/implementation.ts` (`recordImplementation`,
   `implementationStatus`, `globMatcher`), `changedFilesSince` git helper, CLI `vcv handoff`,
   `vcv implementation record|show`, preview shows the request. New store directory:
   `.vcv/implementations/`.

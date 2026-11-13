@@ -7,7 +7,7 @@
 // Parser: the TypeScript 6 compiler API, pinned in @vcv/repo's package.json. TypeScript 7 (the
 // repository's type checker) is a native binary whose JS API is "unstable" and runs over IPC, so
 // it is not used for this. Only syntax is read (createSourceFile); no program, no config.
-import { closeSync, constants as fsConstants, fstatSync, openSync, readSync } from "node:fs";
+import { closeSync, fstatSync, openSync } from "node:fs";
 import { createHash } from "node:crypto";
 import ts from "typescript";
 import type { HttpMethod, LocatorState, Selector, SourceLocator, SymbolDeclaration } from "@vcv/core";
@@ -498,7 +498,7 @@ function findTests(
             fingerprint: nodesFingerprint(sf, [n]),
           });
         const next = title === null ? null : [...path!, t.title!];
-        n.arguments.forEach((a) => visit(a, next));
+        for (const a of n.arguments) visit(a, next);
         return;
       }
     }

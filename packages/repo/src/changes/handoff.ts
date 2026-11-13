@@ -12,25 +12,25 @@
 // same bytes and the same `digest`. Redacted: only repository-relative paths; the checkout's
 // absolute path and the home directory never appear (free text is scrubbed too).
 import type { Id } from "@vcv/ir";
-import { canonicalJson, proposalDigest, proposedChangeSchema, sha256Hex, digestOf } from "@vcv/core";
+import { canonicalJson, proposalDigest, proposedChangeSchema, digestOf } from "@vcv/core";
 import type { ChangeRecord, ImplementationRequest } from "@vcv/core";
-import { verifyBinding } from "./bindings.ts";
-import { formatLocator } from "./locator.ts";
+import { verifyBinding } from "../bindings/bindings.ts";
+import { formatLocator } from "../bindings/locator.ts";
 import { approvalCheck } from "./integrity.ts";
 import { TRUST_VERIFICATION, readAttestation } from "./approval.ts";
-import { changedFilesSince } from "./git.ts";
-import { VCV_DIR } from "./project.ts";
-import { worktreeState } from "./worktree.ts";
-import type { WorktreeState } from "./worktree.ts";
-import { failFinal, finish, observed } from "./shared/observation.ts";
-import type { Observation, ObserveHooks } from "./shared/observation.ts";
-import type { RepoResult } from "./shared/result.ts";
-import { readClaims } from "./shared/claims.ts";
-import { describeOperation, diffModels, impactOf } from "./shared/model-diff.ts";
-import type { ObjectChange } from "./shared/model-diff.ts";
-import { redact } from "./shared/redact.ts";
-import type { ModelImpact } from "./shared/model-diff.ts";
-import { readRevision } from "./shared/observation.ts";
+import { changedFilesSince } from "../git/git.ts";
+import { VCV_DIR } from "../project.ts";
+import { worktreeState } from "../git/worktree.ts";
+import type { WorktreeState } from "../git/worktree.ts";
+import { failFinal, finish, observed } from "../shared/observation.ts";
+import type { Observation, ObserveHooks } from "../shared/observation.ts";
+import type { RepoResult } from "../shared/result.ts";
+import { readClaims } from "../shared/claims.ts";
+import { describeOperation, diffModels, impactOf } from "../shared/model-diff.ts";
+import type { ObjectChange } from "../shared/model-diff.ts";
+import { redact } from "../shared/redact.ts";
+import type { ModelImpact } from "../shared/model-diff.ts";
+import { readRevision } from "../shared/observation.ts";
 
 export const HANDOFF_LIMITS = {
   delta: 50,

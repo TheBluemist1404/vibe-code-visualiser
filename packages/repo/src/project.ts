@@ -10,8 +10,8 @@ import { join, resolve } from "node:path";
 import type { Model } from "@vcv/ir";
 import { FileStore, FileStoreReader, StoreError, inspectStore, readHeadRevision, revisionFileDigest } from "@vcv/core";
 import type { StoreInspection } from "@vcv/core";
-import { findWorkTreeRoot, observeGit } from "./git.ts";
-import type { GitObservation } from "./git.ts";
+import { findWorkTreeRoot, observeGit } from "./git/git.ts";
+import type { GitObservation } from "./git/git.ts";
 
 /** The store directory, relative to the repository root. Fixed so every clone agrees. */
 export const VCV_DIR = ".vcv";

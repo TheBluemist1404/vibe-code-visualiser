@@ -22,15 +22,15 @@ import { z } from "zod";
 import { buildIndex, refId } from "@vcv/ir";
 import type { Criterion, Id } from "@vcv/ir";
 import { canonicalJson, sha256Hex } from "@vcv/core";
-import { verifyBinding, verifyMemo } from "./bindings.ts";
-import type { ClaimEntry, Verification } from "./bindings.ts";
-import { redact } from "./shared/redact.ts";
-import { readClaims } from "./shared/claims.ts";
-import { moduleOf } from "./shared/model-diff.ts";
-import { failFinal, finish, observed } from "./shared/observation.ts";
-import type { ObserveHooks } from "./shared/observation.ts";
-import type { RepoResult } from "./shared/result.ts";
-import { worktreeState } from "./worktree.ts";
+import { verifyBinding, verifyMemo } from "../bindings/bindings.ts";
+import type { ClaimEntry, Verification } from "../bindings/bindings.ts";
+import { redact } from "../shared/redact.ts";
+import { readClaims } from "../shared/claims.ts";
+import { moduleOf } from "../shared/model-diff.ts";
+import { failFinal, finish, observed } from "../shared/observation.ts";
+import type { ObserveHooks } from "../shared/observation.ts";
+import type { RepoResult } from "../shared/result.ts";
+import { worktreeState } from "../git/worktree.ts";
 import { caseKey } from "./junit.ts";
 import {
   candidateIdentityOf,
@@ -41,7 +41,7 @@ import {
   testRunRecordSchema,
 } from "./testruns.ts";
 import type { CandidateIdentity, TestRunRecord } from "./testruns.ts";
-import { invalidRequest } from "./shared/result.ts";
+import { invalidRequest } from "../shared/result.ts";
 
 export const CRITERIA_LIMITS = {
   criteria: 200,
@@ -343,13 +343,16 @@ export function criteriaEvidence(
       const hits: { i: number; status: JUnitStatus; message?: string }[] = [];
       let ambiguous = false;
       const staleHits: number[] = [];
-      byRun.forEach((b, i) => {
+      for (const [i, b] of byRun.entries()) {
         const hit = b.cases.get(k);
-        if (!hit) return;
-        if (!runSummaries[i]!.fresh) return void staleHits.push(i);
+        if (!hit) continue;
+        if (!runSummaries[i]!.fresh) {
+          staleHits.push(i);
+          continue;
+        }
         if (b.dup.has(k)) ambiguous = true;
         hits.push({ i, status: hit.status, ...(hit.message ? { message: hit.message } : {}) });
-      });
+      }
       const observedBy = (is: number[]) => [...new Set(is.map((i) => runSummaries[i]!.observedBy))].sort();
       if (ambiguous)
         return { status: "ambiguous", runs: hits.map((h) => h.i), observedBy: observedBy(hits.map((h) => h.i)) };
@@ -514,37 +517,63 @@ function fitBudget(r: CriteriaReport): CriteriaReport | null {
   const size = (x: CriteriaReport) => Buffer.byteLength(JSON.stringify(x, null, 2));
   const most = (xs: number[]) => xs.reduce((a, b) => Math.max(a, b), 0);
   const lists: { get: () => number; set: (n: number) => void }[] = [
-    { get: () => r.criteria.length, set: (n) => ((r.criteria = r.criteria.slice(0, n)), (r.truncated = true)) },
-    { get: () => r.tests.length, set: (n) => ((r.tests = r.tests.slice(0, n)), (r.testsTruncated = true)) },
+    {
+      get: () => r.criteria.length,
+      set: (n) => {
+        r.criteria = r.criteria.slice(0, n);
+        r.truncated = true;
+      },
+    },
+    {
+      get: () => r.tests.length,
+      set: (n) => {
+        r.tests = r.tests.slice(0, n);
+        r.testsTruncated = true;
+      },
+    },
     {
       get: () => r.invalidClaims.items.length,
-      set: (n) => ((r.invalidClaims.items = r.invalidClaims.items.slice(0, n)), (r.invalidClaims.truncated = true)),
+      set: (n) => {
+        r.invalidClaims.items = r.invalidClaims.items.slice(0, n);
+        r.invalidClaims.truncated = true;
+      },
     },
     {
       get: () => most(r.tests.map((t) => t.criteria.length)),
       set: (n) =>
-        r.tests.forEach(
-          (t) => t.criteria.length > n && ((t.criteria = t.criteria.slice(0, n)), (t.criteriaTruncated = true)),
-        ),
+        r.tests.forEach((t) => {
+          if (t.criteria.length > n) {
+            t.criteria = t.criteria.slice(0, n);
+            t.criteriaTruncated = true;
+          }
+        }),
     },
     {
       get: () => most(r.criteria.map((c) => c.mappings.length)),
       set: (n) =>
-        r.criteria.forEach(
-          (c) => c.mappings.length > n && ((c.mappings = c.mappings.slice(0, n)), (c.mappingsTruncated = true)),
-        ),
+        r.criteria.forEach((c) => {
+          if (c.mappings.length > n) {
+            c.mappings = c.mappings.slice(0, n);
+            c.mappingsTruncated = true;
+          }
+        }),
     },
     {
       get: () => most(r.criteria.map((c) => c.problems.length)),
       set: (n) =>
-        r.criteria.forEach(
-          (c) => c.problems.length > n && ((c.problems = c.problems.slice(0, n)), (c.problemsTruncated = true)),
-        ),
+        r.criteria.forEach((c) => {
+          if (c.problems.length > n) {
+            c.problems = c.problems.slice(0, n);
+            c.problemsTruncated = true;
+          }
+        }),
     },
     // alsoMapsTo has its own total; cutting it is visible as alsoMapsTo.length < alsoMapsToTotal.
     {
       get: () => most(r.criteria.flatMap((c) => c.mappings.map((m) => m.alsoMapsTo.length))),
-      set: (n) => r.criteria.forEach((c) => c.mappings.forEach((m) => (m.alsoMapsTo = m.alsoMapsTo.slice(0, n)))),
+      set: (n) => {
+        for (const c of r.criteria) for (const m of c.mappings) m.alsoMapsTo = m.alsoMapsTo.slice(0, n);
+      },
     },
   ];
   let bytes = size(r);

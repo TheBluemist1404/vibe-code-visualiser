@@ -43,8 +43,8 @@ import {
   signatureValid,
 } from "./approval.ts";
 import type { LoadedTrust, TrustSource } from "./approval.ts";
-import { fileAtCommit, filesAtCommit, isAncestor, resolveCommit } from "./git.ts";
-import { VCV_DIR, projectStatus } from "./project.ts";
+import { fileAtCommit, filesAtCommit, isAncestor, resolveCommit } from "../git/git.ts";
+import { VCV_DIR, projectStatus } from "../project.ts";
 
 export type IntegrityProblem = {
   code: string;

@@ -17,7 +17,6 @@
 import {
   appendFileSync,
   closeSync,
-  constants as fsConstants,
   existsSync,
   fstatSync,
   fsyncSync,

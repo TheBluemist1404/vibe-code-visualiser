@@ -11,7 +11,7 @@
 // a truncated, spliced or hand-edited report whose totals no longer add up is refused, not
 // silently read as "fewer tests". This catches accidents and careless edits, not a deliberate
 // forgery with consistent numbers; provenance (who ran it) is recorded separately (testruns.ts).
-import { pathProblem } from "./locator.ts";
+import { pathProblem } from "../bindings/locator.ts";
 import { sha256Hex } from "@vcv/core";
 
 export const JUNIT_LIMITS = {

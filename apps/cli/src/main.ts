@@ -3,16 +3,7 @@
 //
 // The CLI acts as the trusted host for a local single user: identity and permissions come
 // from flags here, standing in for what a real session or OAuth token would supply.
-import {
-  closeSync,
-  constants as fsConstants,
-  fstatSync,
-  openSync,
-  readFileSync,
-  readSync,
-  realpathSync,
-  writeFileSync,
-} from "node:fs";
+import { closeSync, fstatSync, openSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { resolve as resolvePath, sep as pathSep } from "node:path";
 import { parseArgs } from "node:util";
 import { loadModel, parseYaml, ownershipTree } from "@vcv/ir";
