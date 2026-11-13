@@ -17,7 +17,7 @@ import { resolve as resolvePath, sep as pathSep } from "node:path";
 import { parseArgs } from "node:util";
 import { loadModel, parseYaml, ownershipTree } from "@vcv/ir";
 import type { Diagnostic, TreeNode } from "@vcv/ir";
-import { FileStore, ModelEngine, StoreError } from "@vcv/core";
+import { FileStore, ModelEngine, StoreError, OPEN_READ, readUpTo } from "@vcv/core";
 import { createQueryApi } from "@vcv/query";
 import {
   ApprovalError,
@@ -623,7 +623,7 @@ function readBounded(file: string, limit: number): Buffer {
   let fd: number;
   try {
     // Nonblocking, so a FIFO or device is refused by its type below instead of blocking the open.
-    fd = openSync(file, fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0));
+    fd = openSync(file, OPEN_READ);
   } catch (e) {
     throw new InputError(`cannot read ${file}: ${(e as Error).message.split("\n")[0]}`);
   }
@@ -631,11 +631,9 @@ function readBounded(file: string, limit: number): Buffer {
     const st = fstatSync(fd);
     if (!st.isFile()) throw new InputError(`${file} is not a regular file`);
     if (st.size > limit) throw new InputError(`${file} is ${st.size} bytes, more than the ${limit} read`);
-    const buf = Buffer.alloc(limit + 1);
-    let n = 0;
-    for (let r; n < buf.length && (r = readSync(fd, buf, n, buf.length - n, n)) > 0; ) n += r;
-    if (n > limit) throw new InputError(`${file} grew past ${limit} bytes while it was read`);
-    return buf.subarray(0, n);
+    const read = readUpTo(fd, limit);
+    if (read.length > limit) throw new InputError(`${file} grew past ${limit} bytes while it was read`);
+    return read;
   } finally {
     closeSync(fd);
   }

@@ -18,7 +18,6 @@
 //
 // Previews and listings never write anything, not even store recovery (FileStoreReader).
 import { z } from "zod";
-import { createHash } from "node:crypto";
 import { buildIndex, persistedIdProblem } from "@vcv/ir";
 import type { Diagnostic, Id, Model } from "@vcv/ir";
 import {
@@ -32,6 +31,8 @@ import {
   proposalDigest,
   proposedChangeSchema,
   storeFingerprint,
+  sha256Hex,
+  digestOf,
 } from "@vcv/core";
 import type {
   ChangeRecord,
@@ -990,8 +991,7 @@ export type Observation = {
   recordsKey: string;
 };
 
-const recordsKeyOf = (records: ChangeRecordEntry[]) =>
-  createHash("sha256").update(canonicalJson(records)).digest("hex");
+const recordsKeyOf = (records: ChangeRecordEntry[]) => digestOf(records);
 const commitOf = (status: ProjectStatus) => (status.git ? headCommit(status.root) : null);
 
 export function observed<T>(

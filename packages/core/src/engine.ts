@@ -6,8 +6,8 @@ import { applyOperations, proposedChangeSchema } from "./operations.ts";
 import type { ProposedModelChange } from "./operations.ts";
 import { StoreError } from "./store.ts";
 import type { ChangeGuard, ModelStore, StoreSnapshot } from "./store.ts";
-import { branchSafeRevisionId, canonicalJson } from "./revisions.ts";
-import { createHash } from "node:crypto";
+import { canonicalJson, sha256Hex } from "./digest.ts";
+import { branchSafeRevisionId } from "./revisions.ts";
 
 /** Supplied by the trusted host (session, OAuth token, local user), never by the caller's payload. */
 export type HostContext = {
@@ -358,9 +358,7 @@ export function checkChange(change: ProposedModelChange, current: Model): Change
  * edited after the preview no longer matches what was reviewed.
  */
 export function proposalDigest(change: ProposedModelChange): string {
-  return createHash("sha256")
-    .update(`vcv-proposal-v1\0${canonicalJson(change)}`)
-    .digest("hex");
+  return sha256Hex(`vcv-proposal-v1\0${canonicalJson(change)}`);
 }
 
 /**

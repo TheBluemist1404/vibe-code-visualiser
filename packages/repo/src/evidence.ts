@@ -16,10 +16,9 @@
 // Nothing is inferred, cached, written or proposed. Every call observes the working tree as it is
 // now; `refreshEvidence` is the explicit "recheck everything" call and returns a token that
 // changes when any reported evidence changes. Results never contain source text or absolute paths.
-import { createHash } from "node:crypto";
 import { z } from "zod";
 import { buildIndex, persistedIdProblem } from "@vcv/ir";
-import { BINDING_RELATIONS, canonicalJson, readHeadRevision, storeFingerprint } from "@vcv/core";
+import { BINDING_RELATIONS, canonicalJson, readHeadRevision, storeFingerprint, sha256Hex, digestOf } from "@vcv/core";
 import type { BindingClaim, BindingRelation, Selector } from "@vcv/core";
 import { BindingError, FINGERPRINT_ALGORITHM, listBindings, readBinding, verifyBinding } from "./bindings.ts";
 import type { ClaimEntry, Verification } from "./bindings.ts";
@@ -514,7 +513,7 @@ function countsOf(vs: readonly Verification[]): Counts {
 // filters AND the claim set it paged over (IDs and digests), so a cursor cannot skip or repeat
 // claims after one was added, removed or edited.
 
-const scopeOf = (parts: unknown) => createHash("sha256").update(JSON.stringify(parts)).digest("hex").slice(0, 16);
+const scopeOf = (parts: unknown) => sha256Hex(JSON.stringify(parts)).slice(0, 16);
 
 function claimSet(entries: readonly ClaimEntry[]) {
   return entries.map((e) => [e.bindingId, e.digest]);
@@ -658,15 +657,11 @@ function refresh(req: z.output<typeof refreshEvidenceRequest>, obs: Observation)
       });
     pairs = pairs.filter(([v]) => ids.includes(v.bindingId));
   }
-  const token = createHash("sha256")
-    .update(
-      canonicalJson({
-        revision: obs.status.model!.revision,
-        revisionFile: obs.status.model!.fileDigest,
-        evidence: pairs.map(([v, e]) => ({ ...evidenceOf(v, e) })),
-      }),
-    )
-    .digest("hex");
+  const token = digestOf({
+    revision: obs.status.model!.revision,
+    revisionFile: obs.status.model!.fileDigest,
+    evidence: pairs.map(([v, e]) => ({ ...evidenceOf(v, e) })),
+  });
   const scope = scopeOf([
     "refresh",
     req.bindingIds ? [...new Set(req.bindingIds)].sort() : null,

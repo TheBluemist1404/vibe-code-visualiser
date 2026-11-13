@@ -31,15 +31,21 @@ import {
   unlinkSync,
   writeSync,
 } from "node:fs";
-import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { persistedIdProblem, persistedIdSchema } from "@vcv/ir";
-import { implementationRequestSchema, proposalDigest } from "@vcv/core";
+import {
+  implementationRequestSchema,
+  proposalDigest,
+  sha256Hex,
+  digestOf,
+  OPEN_READ_NOFOLLOW,
+  readUpTo,
+} from "@vcv/core";
 import type { HostContext, ImplementationRequest } from "@vcv/core";
 import { isAncestor, resolveCommit } from "./git.ts";
 import { VCV_DIR } from "./project.ts";
-import { affectedBindings, approvedChange, attestationKey, digestOf, guardOf, redact, worktreeOf } from "./handoff.ts";
+import { affectedBindings, approvedChange, attestationKey, guardOf, redact, worktreeOf } from "./handoff.ts";
 import type { ApprovedChange, HandoffBinding } from "./handoff.ts";
 import { describeOperation, failFinal, finish, observed, readClaims } from "./proposals.ts";
 import type { Observation, ProposalError, ProposalHooks, ProposalResult } from "./proposals.ts";
@@ -258,16 +264,16 @@ export function recordImplementation(
       return failFinal(
         {
           code: "REPORT_EXISTS",
-          message: `${VCV_DIR}/${IMPLEMENTATIONS_DIR}/${req.changeId}.json exists (digest ${digestBytes(existing.bytes)}); pass --expect <digest> to replace it`,
+          message: `${VCV_DIR}/${IMPLEMENTATIONS_DIR}/${req.changeId}.json exists (digest ${sha256Hex(existing.bytes)}); pass --expect <digest> to replace it`,
         },
         obs,
         hooks,
       );
-    if (existing.kind === "file" && expected !== digestBytes(existing.bytes))
+    if (existing.kind === "file" && expected !== sha256Hex(existing.bytes))
       return failFinal(
         {
           code: "REPORT_CHANGED",
-          message: `the existing report's digest is ${digestBytes(existing.bytes)}, not ${expected}`,
+          message: `the existing report's digest is ${sha256Hex(existing.bytes)}, not ${expected}`,
         },
         obs,
         hooks,
@@ -305,7 +311,7 @@ export function recordImplementation(
     // The report file is part of the guard too: re-read it right before writing, so a report
     // written since it was checked is never overwritten (exclusive link for a new one).
     const now = readPlain(file);
-    if (existing.kind === "file" && (now.kind !== "file" || digestBytes(now.bytes) !== digestBytes(existing.bytes))) {
+    if (existing.kind === "file" && (now.kind !== "file" || sha256Hex(now.bytes) !== sha256Hex(existing.bytes))) {
       return {
         ok: false,
         context: done.context,
@@ -350,7 +356,7 @@ export function recordImplementation(
       context: done.context,
       data: {
         file: `${VCV_DIR}/${IMPLEMENTATIONS_DIR}/${req.changeId}.json`,
-        digest: digestBytes(Buffer.from(body)),
+        digest: sha256Hex(Buffer.from(body)),
         report,
         replaced: existing.kind === "file",
       },
@@ -398,7 +404,7 @@ export function implementationStatus(
       return failFinal(
         {
           code: "INVALID_RECORD",
-          message: `${rel} is not a valid implementation report; record it again with vcv implementation record --expect ${digestBytes(f.bytes)}`,
+          message: `${rel} is not a valid implementation report; record it again with vcv implementation record --expect ${sha256Hex(f.bytes)}`,
           details: issues(parsedReport.error),
         },
         obs,
@@ -420,10 +426,10 @@ export function implementationStatus(
     const nowRedacted = redact(seen.observation, obs.status.root);
     const file = join(obs.status.storeDir, IMPLEMENTATIONS_DIR, `${changeId}.json`);
     const reportGuard = {
-      key: digestBytes(f.bytes),
+      key: sha256Hex(f.bytes),
       again: () => {
         const g = readPlain(file);
-        return g.kind === "file" ? digestBytes(g.bytes) : g.kind;
+        return g.kind === "file" ? sha256Hex(g.bytes) : g.kind;
       },
     };
     const { note: _n, headCommit: _h, dirty: _d, ...recorded } = report.vcvObserved;
@@ -439,7 +445,7 @@ export function implementationStatus(
       hooks,
       {
         file: rel,
-        digest: digestBytes(f.bytes),
+        digest: sha256Hex(f.bytes),
         report,
         now: nowRedacted,
         changedSinceReport: digestOf(recorded) !== digestOf(current),
@@ -671,7 +677,6 @@ export function globMatcher(pattern: string): (path: string) => boolean {
 }
 
 /** sha256 of the file's bytes: what a later replace passes as --expect. */
-const digestBytes = (b: Buffer) => createHash("sha256").update(b).digest("hex");
 
 function lstatOrNull(p: string) {
   try {
@@ -693,15 +698,13 @@ function readPlain(
     return { kind: "unsafe", problem: `${path.slice(path.lastIndexOf(VCV_DIR))} is not a regular file` };
   if (st.size > IMPLEMENTATION_LIMITS.reportBytes)
     return { kind: "unsafe", problem: "the report is larger than its limit" };
-  const fd = openSync(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+  const fd = openSync(path, OPEN_READ_NOFOLLOW);
   try {
     if (!fstatSync(fd).isFile()) return { kind: "unsafe", problem: "the report is not a regular file" };
-    const buf = Buffer.alloc(IMPLEMENTATION_LIMITS.reportBytes + 1);
-    let n = 0;
-    for (let k; (k = readSync(fd, buf, n, buf.length - n, null)) > 0; ) n += k;
-    if (n > IMPLEMENTATION_LIMITS.reportBytes)
+    const bytes = readUpTo(fd, IMPLEMENTATION_LIMITS.reportBytes);
+    if (bytes.length > IMPLEMENTATION_LIMITS.reportBytes)
       return { kind: "unsafe", problem: "the report is larger than its limit" };
-    return { kind: "file", bytes: buf.subarray(0, n) };
+    return { kind: "file", bytes };
   } finally {
     closeSync(fd);
   }

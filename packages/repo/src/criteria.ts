@@ -18,11 +18,10 @@
 // One observation, like every read surface since M2.4: store, HEAD, change records, claim files and
 // the bytes of every mapped test file are rechecked before answering (STATE_CHANGED). Bounded,
 // deterministic, redacted; nothing is written.
-import { createHash } from "node:crypto";
 import { z } from "zod";
 import { buildIndex, refId } from "@vcv/ir";
 import type { Criterion, Id } from "@vcv/ir";
-import { canonicalJson } from "@vcv/core";
+import { canonicalJson, sha256Hex } from "@vcv/core";
 import { verifyBinding, verifyMemo } from "./bindings.ts";
 import type { ClaimEntry, Verification } from "./bindings.ts";
 import { redact } from "./handoff.ts";
@@ -251,11 +250,10 @@ const MEANING =
   "A mapping is an agent's claim that a test case checks a criterion; a result says whether that test case ran and passed in a run of this exact candidate. Neither shows that the test is sufficient. Changing a criterion or its verification policy is a model change (proposal + approval); remapping a renamed test is not.";
 
 const cut = (t: string, max: number = CRITERIA_LIMITS.textChars) => (t.length > max ? `${t.slice(0, max - 1)}…` : t);
-const sha = (t: string) => createHash("sha256").update(t).digest("hex");
 
 function identityOf(path: string, name: string): TestIdentity {
   return name.length > CRITERIA_LIMITS.testNameChars
-    ? { path, name: cut(name, CRITERIA_LIMITS.testNameChars), nameDigest: sha(name) }
+    ? { path, name: cut(name, CRITERIA_LIMITS.testNameChars), nameDigest: sha256Hex(name) }
     : { path, name };
 }
 

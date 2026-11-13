@@ -11,10 +11,9 @@
 // Deterministic: no timestamps, stable ordering, bounded lists; the same checkout state gives the
 // same bytes and the same `digest`. Redacted: only repository-relative paths; the checkout's
 // absolute path and the home directory never appear (free text is scrubbed too).
-import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import type { Id } from "@vcv/ir";
-import { canonicalJson, proposalDigest, proposedChangeSchema } from "@vcv/core";
+import { canonicalJson, proposalDigest, proposedChangeSchema, sha256Hex, digestOf } from "@vcv/core";
 import type { ChangeRecord, ImplementationRequest } from "@vcv/core";
 import { verifyBinding } from "./bindings.ts";
 import { formatLocator } from "./locator.ts";
@@ -430,8 +429,6 @@ function assemble(
   };
   return boundBytes(redact(body, obs.status.root));
 }
-
-export const digestOf = (v: unknown) => createHash("sha256").update(canonicalJson(v)).digest("hex");
 
 /** Replace the checkout's absolute path and the home directory in every string. */
 export function redact<T>(v: T, root: string): T {

@@ -13,6 +13,7 @@ import ts from "typescript";
 import type { HttpMethod, LocatorState, Selector, SourceLocator, SymbolDeclaration } from "@vcv/core";
 import { normalizeRoute, resolveInside, selectorProblem } from "./locator.ts";
 import type { PathResolution } from "./locator.ts";
+import { sha256Hex, OPEN_READ, readUpTo, readChunks } from "@vcv/core";
 
 /** Identifies the fingerprint algorithm. A claim fingerprinted by another version is compared as unknown, not as changed. */
 export const RESOLVER_ID = `vcv-ts-subset-1/typescript-${ts.version}`;
@@ -47,7 +48,7 @@ const CHUNK = 1 << 20;
 
 function openRegular(abs: string): number | null {
   try {
-    const fd = openSync(abs, fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0));
+    const fd = openSync(abs, OPEN_READ);
     if (fstatSync(fd).isFile()) return fd;
     closeSync(fd);
   } catch {
@@ -66,14 +67,14 @@ export function fileFingerprintAt(abs: string): string | null {
   if (fd === null) return null;
   try {
     const h = createHash("sha256");
-    const buf = Buffer.alloc(CHUNK);
     let carry = "";
-    for (let n; (n = readSync(fd, buf, 0, CHUNK, null)) > 0; ) {
-      let text = carry + buf.toString("latin1", 0, n);
+    readChunks(fd, CHUNK, (chunk) => {
+      let text = carry + chunk.toString("latin1");
       carry = text.endsWith("\r") ? "\r" : "";
       if (carry) text = text.slice(0, -1);
       h.update(Buffer.from(text.replace(/\r\n/g, "\n"), "latin1"));
-    }
+      return true;
+    });
     h.update(Buffer.from(carry, "latin1"));
     return h.digest("hex");
   } finally {
@@ -87,17 +88,14 @@ function readBounded(abs: string, max: number): Buffer | "too-large" | null {
   if (fd === null) return null;
   try {
     if (fstatSync(fd).size > max) return "too-large";
-    const buf = Buffer.alloc(max + 1);
-    let n = 0;
-    for (let r; n < buf.length && (r = readSync(fd, buf, n, buf.length - n, null)) > 0; ) n += r;
-    return n > max ? "too-large" : buf.subarray(0, n);
+    const read = readUpTo(fd, max);
+    return read.length > max ? "too-large" : read;
   } finally {
     closeSync(fd);
   }
 }
 
-const sha256 = (text: string, enc: BufferEncoding = "utf8") =>
-  createHash("sha256").update(Buffer.from(text, enc)).digest("hex");
+const sha256 = (text: string, enc: BufferEncoding = "utf8") => sha256Hex(Buffer.from(text, enc));
 
 /** Resolve a locator inside `root`. Read-only and deterministic for the same bytes. */
 export function resolveLocator(root: string, locator: SourceLocator): Resolution {

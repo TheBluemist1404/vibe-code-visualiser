@@ -25,7 +25,7 @@ import {
 } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, relative, sep } from "node:path";
-import { canonicalJson } from "@vcv/core";
+import { canonicalJson, sha256Hex, digestOf, OPEN_READ_NOFOLLOW, readChunks } from "@vcv/core";
 import { EXCLUDED_SEGMENTS, pathProblem, resolveInside } from "./locator.ts";
 
 export const WORKTREE_LIMITS = { files: 5000, fileBytes: 64 * 1024 * 1024, totalBytes: 512 * 1024 * 1024 } as const;
@@ -65,7 +65,7 @@ export function worktreeStateDetail(root: string, paths: Iterable<string>): Work
     return [p, id.id];
   });
   return {
-    digest: createHash("sha256").update(canonicalJson(pairs)).digest("hex"),
+    digest: digestOf(pairs),
     files: sorted.length,
     complete,
     unreadable,
@@ -119,7 +119,7 @@ function identity(root: string, rel: string, budget: number): Identity {
 function throughLink(root: string, rel: string, link: string, budget: number): Identity {
   let text: string;
   try {
-    text = createHash("sha256").update(readlinkSync(link)).digest("hex").slice(0, 16);
+    text = sha256Hex(readlinkSync(link)).slice(0, 16);
   } catch {
     return { id: "link:unreadable", unavailable: true };
   }
@@ -164,21 +164,26 @@ const realRoot = (root: string) => {
 function hashFile(abs: string): { id: string; bytes: number } | null {
   let fd: number;
   try {
-    fd = openSync(abs, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | (fsConstants.O_NONBLOCK ?? 0));
+    fd = openSync(abs, OPEN_READ_NOFOLLOW);
   } catch {
     return null;
   }
   try {
     if (!fstatSync(fd).isFile()) return { id: "not-a-file", bytes: 0 };
     const h = createHash("sha256");
-    const buf = Buffer.alloc(CHUNK);
     let total = 0;
-    for (let n; (n = readSync(fd, buf, 0, CHUNK, null)) > 0; ) {
-      total += n;
+    let grew = false;
+    readChunks(fd, CHUNK, (chunk) => {
+      total += chunk.length;
       // Grew past the per-file budget while being read: identify it as changing, not by a prefix.
-      if (total > WORKTREE_LIMITS.fileBytes) return { id: `growing:${total}`, bytes: total };
-      h.update(buf.subarray(0, n));
-    }
+      if (total > WORKTREE_LIMITS.fileBytes) {
+        grew = true;
+        return false;
+      }
+      h.update(chunk);
+      return true;
+    });
+    if (grew) return { id: `growing:${total}`, bytes: total };
     return { id: `sha256:${h.digest("hex")}`, bytes: total };
   } catch {
     return null;

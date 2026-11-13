@@ -38,7 +38,7 @@ import { join } from "node:path";
 import { z } from "zod";
 import { buildIndex } from "@vcv/ir";
 import type { Id } from "@vcv/ir";
-import { canonicalJson } from "@vcv/core";
+import { canonicalJson, sha256Hex, digestOf, OPEN_READ_NOFOLLOW, readUpTo } from "@vcv/core";
 import { criteriaEvidence } from "./criteria.ts";
 import type { CriteriaReport, CriterionEvidence, RunSummary } from "./criteria.ts";
 import { MAX_CLAIM_BYTES } from "./bindings.ts";
@@ -619,7 +619,7 @@ const safeReadlink = (a: string): string | null => {
 };
 const fileSha = (a: string, max: number): string | null => {
   const b = boundedRead(a, max);
-  return b ? createHash("sha256").update(b).digest("hex") : null;
+  return b ? sha256Hex(b) : null;
 };
 
 type BaseContext = { objects: Set<Id>; complete: boolean; problem: string | null };
@@ -744,14 +744,14 @@ function policyOf(root: string, req: GateRequest): ResolvedPolicy | { error: Pro
           details: p.error.issues.slice(0, 20).map((i) => ({ path: i.path.join("."), message: i.message })),
         },
       };
-    return { policy: p.data, source, digest: sha256(canonicalJson(p.data)), changedByCandidate: false };
+    return { policy: p.data, source, digest: digestOf(p.data), changedByCandidate: false };
   };
   if (req.policy !== undefined) return parse(req.policy, "the host");
   if (req.policyAtBase === undefined)
     return {
       policy: DEFAULT_POLICY,
       source: "default",
-      digest: sha256(canonicalJson(DEFAULT_POLICY)),
+      digest: digestOf(DEFAULT_POLICY),
       changedByCandidate: false,
     };
   const rel = req.policyAtBase;
@@ -780,7 +780,7 @@ function policyOf(root: string, req: GateRequest): ResolvedPolicy | { error: Pro
     return {
       policy: DEFAULT_POLICY,
       source: `default (no ${rel} at the base)`,
-      digest: sha256(canonicalJson(DEFAULT_POLICY)),
+      digest: digestOf(DEFAULT_POLICY),
       changedByCandidate: changed,
     };
   }
@@ -804,17 +804,15 @@ function readCandidate(root: string, rel: string): Buffer | null | "unreadable" 
 function boundedRead(abs: string, max: number): Buffer | null {
   let fd: number;
   try {
-    fd = openSync(abs, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | (fsConstants.O_NONBLOCK ?? 0));
+    fd = openSync(abs, OPEN_READ_NOFOLLOW);
   } catch {
     return null;
   }
   try {
     const st = fstatSync(fd);
     if (!st.isFile() || st.size > max) return null;
-    const buf = Buffer.alloc(max + 1);
-    let n = 0;
-    for (let r; n <= max && (r = readSync(fd, buf, n, max + 1 - n, null)) > 0; ) n += r;
-    return n > max ? null : buf.subarray(0, n);
+    const read = readUpTo(fd, max);
+    return read.length > max ? null : read;
   } catch {
     return null;
   } finally {
@@ -1366,8 +1364,4 @@ function fitBudget(r: GateReport): GateReport | null {
   }
   r.budget.bytes = n;
   return r;
-}
-
-function sha256(s: string): string {
-  return createHash("sha256").update(s).digest("hex");
 }

@@ -19,7 +19,7 @@
 //
 // What this proves: the holder of a key trusted by that source signed exactly this change
 // (content digest, base and resulting revision). It does not prove which person held the key.
-import { createHash, createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
+import { createPrivateKey, createPublicKey, generateKeyPairSync, sign, verify } from "node:crypto";
 import type { KeyObject } from "node:crypto";
 import {
   accessSync,
@@ -49,6 +49,9 @@ import {
   listChangeRecords,
   proposalDigest,
   readStoreFile,
+  sha256Hex,
+  OPEN_READ_NOFOLLOW,
+  readUpTo,
 } from "@vcv/core";
 import type { ChangeRecord, Outcome } from "@vcv/core";
 import { currentBranchRef, fileAtCommit, fullRefName, refsContaining, resolveCommit } from "./git.ts";
@@ -164,14 +167,12 @@ export function readPlainFile(path: string, max: number, what: string): Buffer {
       `${what} ${path} is ${st.isSymbolicLink() ? "a symlink" : "not a regular file"}; it was not read`,
     );
   if (st.size > max) throw new ApprovalError("UNSAFE_PATH", `${what} ${path} is larger than ${max} bytes`);
-  const fd = openSync(path, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0));
+  const fd = openSync(path, OPEN_READ_NOFOLLOW);
   try {
     if (!fstatSync(fd).isFile()) throw new ApprovalError("UNSAFE_PATH", `${what} ${path} is not a regular file`);
-    const buf = Buffer.alloc(max + 1);
-    let n = 0;
-    for (let r; n < buf.length && (r = readSync(fd, buf, n, buf.length - n, n)) > 0; ) n += r;
-    if (n > max) throw new ApprovalError("UNSAFE_PATH", `${what} ${path} is larger than ${max} bytes`);
-    return Buffer.from(buf.subarray(0, n));
+    const read = readUpTo(fd, max);
+    if (read.length > max) throw new ApprovalError("UNSAFE_PATH", `${what} ${path} is larger than ${max} bytes`);
+    return Buffer.from(read);
   } finally {
     closeSync(fd);
   }
@@ -322,10 +323,7 @@ const decodePublic = (s: string): KeyObject =>
 
 /** Short, stable identifier of a public key (sha256 of its DER, first 16 hex). */
 export function keyFingerprint(publicKey: string): string {
-  return createHash("sha256")
-    .update(Buffer.from(publicKey.slice("ed25519:".length), "base64"))
-    .digest("hex")
-    .slice(0, 16);
+  return sha256Hex(Buffer.from(publicKey.slice("ed25519:".length), "base64")).slice(0, 16);
 }
 
 /**

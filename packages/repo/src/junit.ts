@@ -11,8 +11,8 @@
 // a truncated, spliced or hand-edited report whose totals no longer add up is refused, not
 // silently read as "fewer tests". This catches accidents and careless edits, not a deliberate
 // forgery with consistent numbers; provenance (who ran it) is recorded separately (testruns.ts).
-import { createHash } from "node:crypto";
 import { pathProblem } from "./locator.ts";
+import { sha256Hex } from "@vcv/core";
 
 export const JUNIT_LIMITS = {
   bytes: 16 * 1024 * 1024,
@@ -57,9 +57,8 @@ type El = { name: string; attrs: Map<string, string>; children: El[]; text: stri
 
 class XmlError extends Error {}
 
-const sha = (t: string) => createHash("sha256").update(t).digest("hex");
 const cut = (t: string, max: number) => (t.length > max ? `${t.slice(0, max - 1)}…` : t);
-export const caseKey = (path: string, name: string) => sha(`${path}\0${name}`);
+export const caseKey = (path: string, name: string) => sha256Hex(`${path}\0${name}`);
 
 /**
  * Read a JUnit XML report. `root` is the directory the runner's paths are relative to, as a
@@ -145,7 +144,7 @@ export function parseJUnit(bytes: Uint8Array, root: string): JUnitResult {
           key,
           path: rel,
           name: cut(name, JUNIT_LIMITS.nameChars),
-          ...(name.length > JUNIT_LIMITS.nameChars ? { nameDigest: sha(name) } : {}),
+          ...(name.length > JUNIT_LIMITS.nameChars ? { nameDigest: sha256Hex(name) } : {}),
           status,
           ...(message ? { message: cut(message, JUNIT_LIMITS.messageChars) } : {}),
         });
@@ -205,7 +204,7 @@ export function parseJUnit(bytes: Uint8Array, root: string): JUnitResult {
     ok: true,
     report: {
       format: "junit",
-      sha256: createHash("sha256").update(bytes).digest("hex"),
+      sha256: sha256Hex(bytes),
       bytes: bytes.byteLength,
       cases,
       summary: {

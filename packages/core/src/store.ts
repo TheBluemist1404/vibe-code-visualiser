@@ -37,7 +37,9 @@ import { dumpModel, loadModel, persistedIdProblem } from "@vcv/ir";
 import type { Model } from "@vcv/ir";
 import type { AuditEvent, ChangeRecord } from "./engine.ts";
 import { nextRevision } from "./engine.ts";
-import { canonicalJson, isChildRevision, parseRevisionId } from "./revisions.ts";
+import { canonicalJson, sha256Hex } from "./digest.ts";
+import { isChildRevision, parseRevisionId } from "./revisions.ts";
+import { OPEN_READ_NOFOLLOW, readUpTo } from "./fs.ts";
 
 export type StoreErrorCode =
   | "INVALID_ID"
@@ -125,7 +127,7 @@ export function readStoreFile(dir: string, rel: string, max: number): StoreFileR
   if (st.size > max) return { kind: "unsafe", problem: `${rel} is larger than ${max} bytes` };
   let fd: number;
   try {
-    fd = openSync(p, fsConstants.O_RDONLY | (fsConstants.O_NOFOLLOW ?? 0) | (fsConstants.O_NONBLOCK ?? 0));
+    fd = openSync(p, OPEN_READ_NOFOLLOW);
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return { kind: "absent" };
@@ -134,11 +136,9 @@ export function readStoreFile(dir: string, rel: string, max: number): StoreFileR
   }
   try {
     if (!fstatSync(fd).isFile()) return { kind: "unsafe", problem: `${rel} is not a regular file` };
-    const buf = Buffer.alloc(max + 1);
-    let n = 0;
-    for (let r; n < buf.length && (r = readSync(fd, buf, n, buf.length - n, n)) > 0; ) n += r;
-    if (n > max) return { kind: "unsafe", problem: `${rel} is larger than ${max} bytes` };
-    const bytes = Buffer.from(buf.subarray(0, n));
+    const read = readUpTo(fd, max);
+    if (read.length > max) return { kind: "unsafe", problem: `${rel} is larger than ${max} bytes` };
+    const bytes = Buffer.from(read);
     return { kind: "file", bytes, text: bytes.toString("utf8") };
   } finally {
     closeSync(fd);
@@ -959,7 +959,7 @@ export function inspectStore(dir: string): StoreInspection {
 export function revisionFileDigest(dir: string, rev: string): string | null {
   if (persistedIdProblem(rev)) return null;
   const f = readStoreFile(dir, `revisions/${rev}.yaml`, STORE_FILE_LIMITS.revision);
-  return f.kind === "file" ? createHash("sha256").update(f.bytes).digest("hex") : null;
+  return f.kind === "file" ? sha256Hex(f.bytes) : null;
 }
 
 /**
@@ -1018,7 +1018,7 @@ function revisionCacheKey(dir: string, head: Head): string {
   const f = readStoreFile(dir, `revisions/${head.revision}.yaml`, STORE_FILE_LIMITS.revision);
   if (f.kind !== "file") return `missing\0${head.history.join("\0")}`; // readRevisionFile reports it
   const bytes = f.bytes;
-  return `${createHash("sha256").update(bytes).digest("hex")}\0${head.history.join("\0")}`;
+  return `${sha256Hex(bytes)}\0${head.history.join("\0")}`;
 }
 
 const sameRecord = (a: ChangeRecord | null, b: ChangeRecord | null) =>
