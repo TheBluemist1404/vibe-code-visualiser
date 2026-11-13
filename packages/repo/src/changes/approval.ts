@@ -31,7 +31,6 @@ import {
   lstatSync,
   mkdirSync,
   openSync,
-  readSync,
   realpathSync,
   unlinkSync,
   writeFileSync,
@@ -54,8 +53,8 @@ import {
   readUpTo,
 } from "@vcv/core";
 import type { ChangeRecord, Outcome } from "@vcv/core";
-import { currentBranchRef, fileAtCommit, fullRefName, refsContaining, resolveCommit } from "./git.ts";
-import { VCV_DIR, projectStatus } from "./project.ts";
+import { currentBranchRef, fileAtCommit, fullRefName, refsContaining, resolveCommit } from "../git/git.ts";
+import { VCV_DIR, projectStatus } from "../project.ts";
 
 export const REVIEWERS_FILE = "reviewers.json";
 export const APPROVALS_DIR = "approvals";

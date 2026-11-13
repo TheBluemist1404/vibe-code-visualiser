@@ -2,7 +2,7 @@
 import { FileStoreReader, digestOf, listChangeRecords, storeFingerprint } from "@vcv/core";
 import type { ChangeRecordEntry } from "@vcv/core";
 import type { Model } from "@vcv/ir";
-import { GitRefusedError, headCommit } from "../git.ts";
+import { GitRefusedError, headCommit } from "../git/git.ts";
 import { projectStatus } from "../project.ts";
 import type { ProjectStatus } from "../project.ts";
 import { contextOf, notReady } from "./result.ts";

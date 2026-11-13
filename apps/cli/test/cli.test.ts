@@ -394,7 +394,7 @@ test("host gate: a candidate that rewrites its own vcv script, CLI and integrity
       2,
     ),
   );
-  for (const rel of ["apps/cli/src/main.ts", "packages/repo/src/integrity.ts"]) {
+  for (const rel of ["apps/cli/src/main.ts", "packages/repo/src/changes/integrity.ts"]) {
     mkdirSync(join(repo, rel, ".."), { recursive: true });
     writeFileSync(join(repo, rel), 'console.log("integrity: ok"); process.exit(0);\n');
   }
@@ -900,7 +900,7 @@ test("pre-merge gate script: a candidate that rewrites its own gate and ships a 
   );
   assert.equal(rec.status, 0, rec.stdout + rec.stderr);
   // Its own copy of VCV now says "pass" whatever it is given.
-  for (const rel of ["apps/cli/src/main.ts", "packages/repo/src/gate.ts"]) {
+  for (const rel of ["apps/cli/src/main.ts", "packages/repo/src/premerge/gate.ts"]) {
     mkdirSync(join(repo, rel, ".."), { recursive: true });
     writeFileSync(join(repo, rel), 'console.log("vcv gate: PASS"); process.exit(0);\n');
   }

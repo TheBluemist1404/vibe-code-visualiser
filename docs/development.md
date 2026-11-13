@@ -21,6 +21,21 @@ other packages only by name (`@vcv/core`), never by a relative path into their `
 `@vcv/repo` pins TypeScript 6 for its syntax-only compiler API use; the repository's type
 checker is TypeScript 7 (see [bindings](bindings.md#locators)).
 
+### Inside `@vcv/repo`
+
+| Folder | What lives there |
+|---|---|
+| `src/project.ts` | Finding `.vcv/` in a checkout and its readiness |
+| `src/git/` | The read-only Git driver and working-tree identity |
+| `src/bindings/` | Binding claims: locators, the TypeScript resolver, verification, evidence queries |
+| `src/changes/` | The model-first path: proposals, reviewer approval, history integrity, handoff, implementation reports |
+| `src/premerge/` | The code-first path: reconciliation, acceptance criteria, JUnit capture, test runs, the gate |
+| `src/shared/` | What every area uses: the `RepoResult` envelope, consistent observations, model diffs, claim reads, redaction |
+
+Dependencies point one way: `premerge/` builds on `changes/` (integrity) and `bindings/`;
+`changes/` builds on `bindings/`; everything may use `git/`, `shared/` and `project.ts`; nothing
+imports `premerge/`.
+
 ## Scripts
 
 | Command | What it does |

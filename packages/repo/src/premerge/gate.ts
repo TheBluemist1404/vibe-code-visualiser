@@ -24,16 +24,7 @@
 // The gate runs no tests and executes nothing from the candidate. One observation: the candidate's
 // identity is read before anything else and again before answering (STATE_CHANGED).
 import { createHash } from "node:crypto";
-import {
-  closeSync,
-  constants as fsConstants,
-  fstatSync,
-  lstatSync,
-  openSync,
-  readSync,
-  readdirSync,
-  readlinkSync,
-} from "node:fs";
+import { closeSync, fstatSync, lstatSync, openSync, readdirSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
 import { z } from "zod";
 import { buildIndex } from "@vcv/ir";
@@ -41,7 +32,7 @@ import type { Id } from "@vcv/ir";
 import { canonicalJson, sha256Hex, digestOf, OPEN_READ_NOFOLLOW, readUpTo } from "@vcv/core";
 import { criteriaEvidence } from "./criteria.ts";
 import type { CriteriaReport, CriterionEvidence, RunSummary } from "./criteria.ts";
-import { MAX_CLAIM_BYTES } from "./bindings.ts";
+import { MAX_CLAIM_BYTES } from "../bindings/bindings.ts";
 import {
   currentBranchRef,
   entryAtCommit,
@@ -51,20 +42,20 @@ import {
   headCommit,
   mergeBase,
   resolveCommit,
-} from "./git.ts";
-import { redact } from "./shared/redact.ts";
+} from "../git/git.ts";
+import { redact } from "../shared/redact.ts";
 import { caseKey } from "./junit.ts";
-import { pathProblem, resolveInside } from "./locator.ts";
-import { finish, observed } from "./shared/observation.ts";
-import type { Observation, ObserveHooks } from "./shared/observation.ts";
-import type { RepoError, RepoResult } from "./shared/result.ts";
-import { worktreeState } from "./worktree.ts";
+import { pathProblem, resolveInside } from "../bindings/locator.ts";
+import { finish, observed } from "../shared/observation.ts";
+import type { Observation, ObserveHooks } from "../shared/observation.ts";
+import type { RepoError, RepoResult } from "../shared/result.ts";
+import { worktreeState } from "../git/worktree.ts";
 import { reconcile } from "./reconcile.ts";
-import { resolveLocator } from "./resolver.ts";
+import { resolveLocator } from "../bindings/resolver.ts";
 import type { Reconciliation, ReconcileFinding } from "./reconcile.ts";
 import { candidateIdentityOf, captureTestRun, identityDigest } from "./testruns.ts";
 import type { TestRunHost, TestRunRecord } from "./testruns.ts";
-import { invalidRequest } from "./shared/result.ts";
+import { invalidRequest } from "../shared/result.ts";
 
 export const GATE_LIMITS = {
   reasons: 300,
@@ -966,6 +957,8 @@ const BINDING_CODES = new Set([
   "CLAIM_DISPUTED",
 ]);
 
+type AddReason = (severity: GateSeverity | "off", r: Omit<GateReason, "severity">) => void;
+
 function decide(
   rec: Reconciliation,
   findings: ReconcileFinding[],
@@ -978,217 +971,20 @@ function decide(
 ): GateReport {
   const p = pol.policy;
   const reasons: GateReason[] = [];
-  const add = (severity: GateSeverity | "off", r: Omit<GateReason, "severity">) => {
+  const add: AddReason = (severity, r) => {
     if (severity !== "off") reasons.push({ severity, ...r, message: cut(r.message) });
   };
 
-  // Integrity: fixed. Invalid or unattested history never merges.
-  for (const e of rec.model.integrity.errors)
-    add("block", { code: e.code, rule: "integrity", basis: "checked", message: e.message });
-  if (!rec.model.integrity.ok && rec.model.integrity.errors.length === 0) {
-    add("block", {
-      code: "INTEGRITY_FAILED",
-      rule: "integrity",
-      basis: "checked",
-      message: "the model history is not consistent and attested under the base's trust list",
-    });
-  } else if (rec.model.integrity.errorsTotal > rec.model.integrity.errors.length) {
-    add("block", {
-      code: "INTEGRITY_FAILED",
-      rule: "integrity",
-      basis: "checked",
-      message: `${rec.model.integrity.errorsTotal - rec.model.integrity.errors.length} more integrity errors (list cut)`,
-    });
-  }
-
-  // Reconciliation findings: every one of them, before the report's lists are cut, so adding
-  // lower-severity findings can never push a blocking one out of view.
-  for (const f of findings) {
-    const base = findingReason(f);
-    if (f.category === "structural") add(p.structural, { ...base, rule: "structural" });
-    else if (f.category === "binding" && BINDING_CODES.has(f.code))
-      add(f.related ? p.bindings.related : p.bindings.unrelated, {
-        ...base,
-        rule: f.related ? "bindings.related" : "bindings.unrelated",
-      });
-    else if (f.category === "coverage") add(p.coverage, { ...base, rule: "coverage" });
-    else if (f.category === "unsupported") add(p.unsupported, { ...base, rule: "unsupported" });
-    else if (f.code === "BASE_NOT_CONTAINED") add(p.baseNotContained, { ...base, rule: "baseNotContained" });
-  }
-  if (!rec.bindings.available) {
-    add("block", {
-      code: "BINDINGS_UNAVAILABLE",
-      rule: "integrity",
-      basis: "not-checked",
-      message: `the claim store cannot be read${rec.bindings.problem ? `: ${rec.bindings.problem}` : ""}; no claim or mapping can be assessed`,
-    });
-  }
-
-  // Criteria.
+  // Every finding is weighed before any list is cut, so a lower-severity reason can never push a
+  // blocking one out of view.
+  integrityReasons(rec, add);
+  findingReasons(rec, findings, p, add);
+  criteriaReasons(crit, p, add);
+  mappingReasons(rec, crit.criteria, p, add);
+  requiredEvidenceReasons(rec, baseContext, crit.criteria, p, add);
+  observationReasons(observations, p, add);
+  pendingAndPolicyReasons(pending, pol, add);
   const criteria = crit.criteria;
-  if (crit.counts.criteria === 0)
-    add(p.noCriteria, {
-      code: "NO_CRITERIA",
-      rule: "noCriteria",
-      basis: "observed",
-      message: "the approved model has no acceptance criteria, so test evidence gates nothing",
-    });
-  if (crit.truncated)
-    add("block", {
-      code: "CRITERIA_NOT_ALL_ASSESSED",
-      rule: "integrity",
-      basis: "not-checked",
-      message: `${crit.total - criteria.length} criteria could not be assessed within the report limits`,
-    });
-  for (const c of criteria) {
-    const set = c.verification === "required" ? REQUIRED_EVIDENCE : p.optional;
-    const prefix = c.verification;
-    if (c.result === "passed") {
-      if (c.resultObservedBy !== "host")
-        add(set.claimed, {
-          code: "RESULT_CLAIMED",
-          rule: `${prefix}.claimed`,
-          basis: "claim",
-          criterionId: c.id,
-          objectIds: c.verifies,
-          message: `${c.id} (${prefix}) passed only in runs that were not captured here: a claim, not host-observed evidence`,
-        });
-      continue;
-    }
-    const tests = c.problems.filter(
-      (x) =>
-        x.code === "TEST_FAILED" ||
-        x.code === "TEST_ERRORED" ||
-        x.code === "TEST_SKIPPED" ||
-        x.code === "TEST_NOT_RUN" ||
-        x.code === "RESULT_AMBIGUOUS" ||
-        x.code === "RESULT_STALE",
-    );
-    const failing = c.mappings.filter((m) => m.result && m.result.status !== "passed" && m.test);
-    const head = `${c.id} (${prefix}) is ${c.result}`;
-    const detail = tests.length
-      ? tests.map((t) => t.message).join("; ")
-      : c.problems.map((x) => x.message).join("; ") || "no runs were supplied";
-    if (failing.length) {
-      for (const m of failing) {
-        add(set[c.result], {
-          code: codeFor(c.result, m.result!.status),
-          rule: `${prefix}.${c.result}`,
-          basis: "checked",
-          criterionId: c.id,
-          objectIds: c.verifies,
-          test: { path: m.test!.path, name: m.test!.name },
-          bindingId: m.bindingId,
-          message: `${head}: "${m.test!.name}" in ${m.test!.path} ${m.result!.status}${m.result!.message ? `: ${m.result!.message}` : ""}`,
-        });
-      }
-    } else {
-      add(set[c.result], {
-        code: codeFor(c.result, null),
-        rule: `${prefix}.${c.result}`,
-        basis: c.result === "unknown" ? "not-checked" : "checked",
-        criterionId: c.id,
-        objectIds: c.verifies,
-        message: `${head}: ${detail}`,
-      });
-    }
-  }
-
-  // Mappings the candidate touched: routine upkeep, no approval needed, so a reviewer should look.
-  const criterionIds = new Set(criteria.map((c) => c.id));
-  for (const b of rec.bindings.items) {
-    if (b.relation !== "tests" || !b.modelObjectId || !criterionIds.has(b.modelObjectId)) continue;
-    if (b.atBase === "unchanged" && !b.boundFileChanged) continue;
-    const what =
-      b.atBase === "removed"
-        ? "was removed"
-        : b.atBase === "added"
-          ? "was added"
-          : b.atBase === "reasserted"
-            ? "was reasserted"
-            : "is unchanged, but its test file changed";
-    add(p.mappingChanged, {
-      code: "MAPPING_CHANGED",
-      rule: "mappingChanged",
-      basis: "observed",
-      criterionId: b.modelObjectId,
-      objectIds: [b.modelObjectId],
-      bindingId: b.bindingId,
-      message: `the mapping ${b.bindingId} of ${b.modelObjectId} (${b.locator ?? "?"}) ${what} in this candidate; mappings change without approval, so check the test still checks the criterion`,
-    });
-  }
-  if (rec.bindings.truncated && p.mappingChanged !== "off") {
-    add(p.mappingChanged, {
-      code: "MAPPING_CHANGED",
-      rule: "mappingChanged",
-      basis: "not-checked",
-      message: `the claim list was cut at ${rec.bindings.items.length} of ${rec.bindings.total}; mappings beyond it may have changed`,
-    });
-  }
-
-  // Objects the policy says need evidence whenever a change touches them.
-  const touched = touchedObjects(rec, baseContext);
-  for (const r of p.requireEvidence) {
-    if (!touched.all && !touched.ids.has(r.object)) continue;
-    // Every criterion is assessed here (a cut criteria list blocks above), so this sees all of them.
-    const verifying = criteria.filter((c) => c.verification === "required" && c.verifies.includes(r.object));
-    const ok = verifying.some((c) => c.result === "passed" && c.resultObservedBy === "host");
-    if (!ok) {
-      add("block", {
-        code: "EVIDENCE_REQUIRED",
-        rule: "requireEvidence",
-        basis: "checked",
-        objectIds: [r.object],
-        message: `${r.object} is touched by this change${touched.all ? " (or may be: the impact list was cut)" : ""} and the policy requires a host-observed pass of a required criterion that verifies it${verifying.length ? ` (${verifying.map((c) => c.id).join(", ")} did not pass)` : "; none verifies it"}${r.reason ? `. ${r.reason}` : ""}`,
-      });
-    }
-  }
-
-  // Agent observations: claims, checked for what they cite.
-  for (const o of observations) {
-    if (o.references !== "verified") {
-      add(p.observations.invalidReferences, {
-        code:
-          o.references === "unsupported"
-            ? "OBSERVATION_WITHOUT_LOCATION"
-            : o.references === "not-checked"
-              ? "OBSERVATION_REFERENCES_NOT_CHECKED"
-              : "OBSERVATION_REFERENCES_INVALID",
-        rule: "observations.invalidReferences",
-        basis: "claim",
-        observationId: o.id,
-        message: `${o.id}: ${o.problems.join("; ")}`,
-      });
-    }
-    if (o.kind === "note") continue;
-    add(p.observations[o.kind], {
-      code: o.kind === "contradiction" ? "AGENT_CONTRADICTION" : "AGENT_CONCERN",
-      rule: `observations.${o.kind}`,
-      basis: "claim",
-      observationId: o.id,
-      ...(o.objects.length ? { objectIds: o.objects.map((x) => x.id) } : {}),
-      ...(o.locations[0] ? { path: o.locations[0].path } : {}),
-      message: `${o.id} (agent claim, not checked by VCV; proposes ${o.resolution}): ${cut(o.statement, 600)}`,
-    });
-  }
-
-  // A proposal the candidate carries but nobody has approved: the approved model (and so this
-  // check) does not include it. Shown so the reviewer knows an intent change is waiting on M3.
-  for (const id of pending.slice(0, GATE_LIMITS.reasons)) {
-    add("warn", {
-      code: "PROPOSAL_PENDING",
-      rule: "integrity",
-      basis: "observed",
-      message: `the candidate carries the pending proposal ${id}; it is not part of the approved model this check used. If the code depends on it, a separate reviewer approves it through M3 (vcv review approve)`,
-    });
-  }
-  if (pol.changedByCandidate)
-    add(p.policyChanged, {
-      code: "POLICY_CHANGED",
-      rule: "policyChanged",
-      basis: "observed",
-      message: `the candidate changes the gate policy (${pol.source}); this check used the base's, and the change applies only after the merge`,
-    });
 
   const order = { block: 0, warn: 1 };
   reasons.sort((a, b) => order[a.severity] - order[b.severity]);
@@ -1270,6 +1066,237 @@ function decide(
   };
 }
 
+/** Integrity: fixed. Invalid or unattested history never merges. */
+function integrityReasons(rec: Reconciliation, add: AddReason): void {
+  for (const e of rec.model.integrity.errors)
+    add("block", { code: e.code, rule: "integrity", basis: "checked", message: e.message });
+  if (!rec.model.integrity.ok && rec.model.integrity.errors.length === 0) {
+    add("block", {
+      code: "INTEGRITY_FAILED",
+      rule: "integrity",
+      basis: "checked",
+      message: "the model history is not consistent and attested under the base's trust list",
+    });
+  } else if (rec.model.integrity.errorsTotal > rec.model.integrity.errors.length) {
+    add("block", {
+      code: "INTEGRITY_FAILED",
+      rule: "integrity",
+      basis: "checked",
+      message: `${rec.model.integrity.errorsTotal - rec.model.integrity.errors.length} more integrity errors (list cut)`,
+    });
+  }
+}
+
+/** Reconciliation findings (all of them, before any list is cut), and an unreadable claim store. */
+function findingReasons(rec: Reconciliation, findings: ReconcileFinding[], p: GatePolicy, add: AddReason): void {
+  for (const f of findings) {
+    const base = findingReason(f);
+    if (f.category === "structural") add(p.structural, { ...base, rule: "structural" });
+    else if (f.category === "binding" && BINDING_CODES.has(f.code))
+      add(f.related ? p.bindings.related : p.bindings.unrelated, {
+        ...base,
+        rule: f.related ? "bindings.related" : "bindings.unrelated",
+      });
+    else if (f.category === "coverage") add(p.coverage, { ...base, rule: "coverage" });
+    else if (f.category === "unsupported") add(p.unsupported, { ...base, rule: "unsupported" });
+    else if (f.code === "BASE_NOT_CONTAINED") add(p.baseNotContained, { ...base, rule: "baseNotContained" });
+  }
+  if (!rec.bindings.available) {
+    add("block", {
+      code: "BINDINGS_UNAVAILABLE",
+      rule: "integrity",
+      basis: "not-checked",
+      message: `the claim store cannot be read${rec.bindings.problem ? `: ${rec.bindings.problem}` : ""}; no claim or mapping can be assessed`,
+    });
+  }
+}
+
+/** Criteria without a host-observed pass, and passes that are only claimed. */
+function criteriaReasons(crit: CriteriaReport, p: GatePolicy, add: AddReason): void {
+  const criteria = crit.criteria;
+  if (crit.counts.criteria === 0)
+    add(p.noCriteria, {
+      code: "NO_CRITERIA",
+      rule: "noCriteria",
+      basis: "observed",
+      message: "the approved model has no acceptance criteria, so test evidence gates nothing",
+    });
+  if (crit.truncated)
+    add("block", {
+      code: "CRITERIA_NOT_ALL_ASSESSED",
+      rule: "integrity",
+      basis: "not-checked",
+      message: `${crit.total - criteria.length} criteria could not be assessed within the report limits`,
+    });
+  for (const c of criteria) {
+    const set = c.verification === "required" ? REQUIRED_EVIDENCE : p.optional;
+    const prefix = c.verification;
+    if (c.result === "passed") {
+      if (c.resultObservedBy !== "host")
+        add(set.claimed, {
+          code: "RESULT_CLAIMED",
+          rule: `${prefix}.claimed`,
+          basis: "claim",
+          criterionId: c.id,
+          objectIds: c.verifies,
+          message: `${c.id} (${prefix}) passed only in runs that were not captured here: a claim, not host-observed evidence`,
+        });
+      continue;
+    }
+    const tests = c.problems.filter(
+      (x) =>
+        x.code === "TEST_FAILED" ||
+        x.code === "TEST_ERRORED" ||
+        x.code === "TEST_SKIPPED" ||
+        x.code === "TEST_NOT_RUN" ||
+        x.code === "RESULT_AMBIGUOUS" ||
+        x.code === "RESULT_STALE",
+    );
+    const failing = c.mappings.filter((m) => m.result && m.result.status !== "passed" && m.test);
+    const head = `${c.id} (${prefix}) is ${c.result}`;
+    const detail = tests.length
+      ? tests.map((t) => t.message).join("; ")
+      : c.problems.map((x) => x.message).join("; ") || "no runs were supplied";
+    if (failing.length) {
+      for (const m of failing) {
+        add(set[c.result], {
+          code: codeFor(c.result, m.result!.status),
+          rule: `${prefix}.${c.result}`,
+          basis: "checked",
+          criterionId: c.id,
+          objectIds: c.verifies,
+          test: { path: m.test!.path, name: m.test!.name },
+          bindingId: m.bindingId,
+          message: `${head}: "${m.test!.name}" in ${m.test!.path} ${m.result!.status}${m.result!.message ? `: ${m.result!.message}` : ""}`,
+        });
+      }
+    } else {
+      add(set[c.result], {
+        code: codeFor(c.result, null),
+        rule: `${prefix}.${c.result}`,
+        basis: c.result === "unknown" ? "not-checked" : "checked",
+        criterionId: c.id,
+        objectIds: c.verifies,
+        message: `${head}: ${detail}`,
+      });
+    }
+  }
+}
+
+/** Mappings the candidate touched: routine upkeep, no approval needed, so a reviewer should look. */
+function mappingReasons(rec: Reconciliation, criteria: CriterionEvidence[], p: GatePolicy, add: AddReason): void {
+  const criterionIds = new Set(criteria.map((c) => c.id));
+  for (const b of rec.bindings.items) {
+    if (b.relation !== "tests" || !b.modelObjectId || !criterionIds.has(b.modelObjectId)) continue;
+    if (b.atBase === "unchanged" && !b.boundFileChanged) continue;
+    const what =
+      b.atBase === "removed"
+        ? "was removed"
+        : b.atBase === "added"
+          ? "was added"
+          : b.atBase === "reasserted"
+            ? "was reasserted"
+            : "is unchanged, but its test file changed";
+    add(p.mappingChanged, {
+      code: "MAPPING_CHANGED",
+      rule: "mappingChanged",
+      basis: "observed",
+      criterionId: b.modelObjectId,
+      objectIds: [b.modelObjectId],
+      bindingId: b.bindingId,
+      message: `the mapping ${b.bindingId} of ${b.modelObjectId} (${b.locator ?? "?"}) ${what} in this candidate; mappings change without approval, so check the test still checks the criterion`,
+    });
+  }
+  if (rec.bindings.truncated && p.mappingChanged !== "off") {
+    add(p.mappingChanged, {
+      code: "MAPPING_CHANGED",
+      rule: "mappingChanged",
+      basis: "not-checked",
+      message: `the claim list was cut at ${rec.bindings.items.length} of ${rec.bindings.total}; mappings beyond it may have changed`,
+    });
+  }
+}
+
+/** Objects the policy says need evidence whenever a change touches them. */
+function requiredEvidenceReasons(
+  rec: Reconciliation,
+  baseContext: BaseContext,
+  criteria: CriterionEvidence[],
+  p: GatePolicy,
+  add: AddReason,
+): void {
+  const touched = touchedObjects(rec, baseContext);
+  for (const r of p.requireEvidence) {
+    if (!touched.all && !touched.ids.has(r.object)) continue;
+    // Every criterion is assessed here (a cut criteria list blocks above), so this sees all of them.
+    const verifying = criteria.filter((c) => c.verification === "required" && c.verifies.includes(r.object));
+    const ok = verifying.some((c) => c.result === "passed" && c.resultObservedBy === "host");
+    if (!ok) {
+      add("block", {
+        code: "EVIDENCE_REQUIRED",
+        rule: "requireEvidence",
+        basis: "checked",
+        objectIds: [r.object],
+        message: `${r.object} is touched by this change${touched.all ? " (or may be: the impact list was cut)" : ""} and the policy requires a host-observed pass of a required criterion that verifies it${verifying.length ? ` (${verifying.map((c) => c.id).join(", ")} did not pass)` : "; none verifies it"}${r.reason ? `. ${r.reason}` : ""}`,
+      });
+    }
+  }
+}
+
+/** Agent observations: claims, checked for what they cite. */
+function observationReasons(observations: VerifiedObservation[], p: GatePolicy, add: AddReason): void {
+  for (const o of observations) {
+    if (o.references !== "verified") {
+      add(p.observations.invalidReferences, {
+        code:
+          o.references === "unsupported"
+            ? "OBSERVATION_WITHOUT_LOCATION"
+            : o.references === "not-checked"
+              ? "OBSERVATION_REFERENCES_NOT_CHECKED"
+              : "OBSERVATION_REFERENCES_INVALID",
+        rule: "observations.invalidReferences",
+        basis: "claim",
+        observationId: o.id,
+        message: `${o.id}: ${o.problems.join("; ")}`,
+      });
+    }
+    if (o.kind === "note") continue;
+    add(p.observations[o.kind], {
+      code: o.kind === "contradiction" ? "AGENT_CONTRADICTION" : "AGENT_CONCERN",
+      rule: `observations.${o.kind}`,
+      basis: "claim",
+      observationId: o.id,
+      ...(o.objects.length ? { objectIds: o.objects.map((x) => x.id) } : {}),
+      ...(o.locations[0] ? { path: o.locations[0].path } : {}),
+      message: `${o.id} (agent claim, not checked by VCV; proposes ${o.resolution}): ${cut(o.statement, 600)}`,
+    });
+  }
+}
+
+/**
+ * A proposal the candidate carries but nobody has approved: the approved model (and so this
+ * check) does not include it. Shown so the reviewer knows an intent change is waiting on M3.
+ * Also: a candidate that changes the gate policy itself.
+ */
+function pendingAndPolicyReasons(pending: string[], pol: ResolvedPolicy, add: AddReason): void {
+  const p = pol.policy;
+  for (const id of pending.slice(0, GATE_LIMITS.reasons)) {
+    add("warn", {
+      code: "PROPOSAL_PENDING",
+      rule: "integrity",
+      basis: "observed",
+      message: `the candidate carries the pending proposal ${id}; it is not part of the approved model this check used. If the code depends on it, a separate reviewer approves it through M3 (vcv review approve)`,
+    });
+  }
+  if (pol.changedByCandidate)
+    add(p.policyChanged, {
+      code: "POLICY_CHANGED",
+      rule: "policyChanged",
+      basis: "observed",
+      message: `the candidate changes the gate policy (${pol.source}); this check used the base's, and the change applies only after the merge`,
+    });
+}
+
 function findingReason(f: ReconcileFinding): Omit<GateReason, "severity" | "rule"> {
   return {
     code: f.code,
@@ -1341,14 +1368,26 @@ function fitBudget(r: GateReport): GateReport | null {
   let n = size(r);
   while (n > GATE_LIMITS.bytes) {
     const lists = [
-      { len: r.reasons.length, cut: (k: number) => ((r.reasons = r.reasons.slice(0, k)), (r.reasonsTruncated = true)) },
+      {
+        len: r.reasons.length,
+        cut: (k: number) => {
+          r.reasons = r.reasons.slice(0, k);
+          r.reasonsTruncated = true;
+        },
+      },
       {
         len: r.criteria.items.length,
-        cut: (k: number) => ((r.criteria.items = r.criteria.items.slice(0, k)), (r.criteria.truncated = true)),
+        cut: (k: number) => {
+          r.criteria.items = r.criteria.items.slice(0, k);
+          r.criteria.truncated = true;
+        },
       },
       {
         len: r.observations.length,
-        cut: (k: number) => ((r.observations = r.observations.slice(0, k)), (r.observationsTruncated = true)),
+        cut: (k: number) => {
+          r.observations = r.observations.slice(0, k);
+          r.observationsTruncated = true;
+        },
       },
     ].sort((a, b) => b.len - a.len);
     if (lists[0]!.len <= 1) return null;

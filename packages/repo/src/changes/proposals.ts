@@ -18,7 +18,7 @@
 //
 // Previews and listings never write anything, not even store recovery (FileStoreReader).
 import { z } from "zod";
-import { buildIndex, persistedIdProblem } from "@vcv/ir";
+import { persistedIdProblem } from "@vcv/ir";
 import type { Diagnostic, Id, Model } from "@vcv/ir";
 import {
   FileStore,
@@ -27,36 +27,21 @@ import {
   applyOperations,
   canonicalJson,
   checkChange,
-  listChangeRecords,
   proposalDigest,
   proposedChangeSchema,
-  storeFingerprint,
-  sha256Hex,
-  digestOf,
 } from "@vcv/core";
-import type {
-  ChangeRecord,
-  ChangeRecordEntry,
-  ChangeStatus,
-  HostContext,
-  ImplementationRequest,
-  ProposedModelChange,
-} from "@vcv/core";
-import { LIMITS as QUERY_LIMITS, createQueryApi } from "@vcv/query";
+import type { ChangeRecord, ChangeStatus, HostContext, ImplementationRequest, ProposedModelChange } from "@vcv/core";
 import type { ImpactCandidate } from "@vcv/query";
-import { listBindings } from "./bindings.ts";
-import type { ClaimEntry } from "./bindings.ts";
-import { GitRefusedError, headCommit } from "./git.ts";
-import { formatLocator } from "./locator.ts";
-import { projectStatus } from "./project.ts";
-import type { ProjectStatus } from "./project.ts";
-import { invalidRequest, notReady, okWith } from "./shared/result.ts";
-import type { RepoResult } from "./shared/result.ts";
-import { failFinal, finish, observed, readRevision } from "./shared/observation.ts";
-import type { ObserveHooks } from "./shared/observation.ts";
-import { DIFF_LIMITS, describeOperation, diffModels, impactOf } from "./shared/model-diff.ts";
-import type { ModelImpact, ObjectChange } from "./shared/model-diff.ts";
-import { readClaims } from "./shared/claims.ts";
+import type { ClaimEntry } from "../bindings/bindings.ts";
+import { formatLocator } from "../bindings/locator.ts";
+import { projectStatus } from "../project.ts";
+import { invalidRequest, notReady, okWith } from "../shared/result.ts";
+import type { RepoResult } from "../shared/result.ts";
+import { failFinal, finish, observed, readRevision } from "../shared/observation.ts";
+import type { ObserveHooks } from "../shared/observation.ts";
+import { DIFF_LIMITS, describeOperation, diffModels, impactOf } from "../shared/model-diff.ts";
+import type { ModelImpact, ObjectChange } from "../shared/model-diff.ts";
+import { readClaims } from "../shared/claims.ts";
 
 export const PROPOSAL_LIMITS = {
   /** Operations per proposal accepted by this surface. */

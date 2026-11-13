@@ -52,7 +52,7 @@ echo "== 4. the recorded implementation, as agent:implementer"
 git -C "$repo" apply "$sample/3-implement/source.diff"
 for f in "$sample/3-implement/bindings-changed/"*.json; do
   node --experimental-strip-types --no-warnings -e '
-    import("'"$vcv_home"'/packages/repo/src/locator.ts").then(({ formatLocator }) => {
+    import("'"$vcv_home"'/packages/repo/src/bindings/locator.ts").then(({ formatLocator }) => {
       const c = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
       console.log([c.bindingId, c.modelObjectId, c.relation, formatLocator(c.locator), c.provenance.rationale ?? ""].join("\t"));
     });' "$f"

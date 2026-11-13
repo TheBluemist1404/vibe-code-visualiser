@@ -209,7 +209,8 @@ function applyOne(m: Model, op: ModelOperation): void {
     }
     case "createCriterion":
       fresh(op.criterion.id);
-      (m.criteria ??= []).push(op.criterion);
+      m.criteria ??= [];
+      m.criteria.push(op.criterion);
       return;
     case "reviseCriterion": {
       const c =

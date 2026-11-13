@@ -113,7 +113,7 @@ an `invalid` item, not an error: it is counted, listed, and reported to object q
 
 ## Where it lives
 
-`packages/repo/src/evidence.ts` (with the request schemas). Git and source inspection stay in
+`packages/repo/src/bindings/evidence.ts` (with the request schemas). Git and source inspection stay in
 `@vcv/repo`; `@vcv/query` stays model-only. `apps/cli` and `apps/mcp` only forward requests;
 the MCP input schemas are generated from the same zod contracts, and
 `apps/mcp/test/evidence.test.ts` checks that both give identical results for the same requests.

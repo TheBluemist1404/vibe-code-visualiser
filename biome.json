@@ -33,11 +33,11 @@
       },
       "suspicious": {
         "noImplicitAnyLet": "off",
-        "noAssignInExpressions": "warn",
-        "useIterableCallbackReturn": "warn"
+        "noAssignInExpressions": "error",
+        "useIterableCallbackReturn": "off"
       },
       "complexity": {
-        "noCommaOperator": "warn"
+        "noCommaOperator": "error"
       }
     }
   },
@@ -48,6 +48,12 @@
         "rules": {
           "style": {
             "noNonNullAssertion": "off"
+          },
+          "suspicious": {
+            "noAssignInExpressions": "warn"
+          },
+          "complexity": {
+            "noCommaOperator": "warn"
           }
         }
       }

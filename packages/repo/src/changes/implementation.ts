@@ -19,14 +19,12 @@
 // moved. Code changes never become model operations; recording a report changes no model state.
 import {
   closeSync,
-  constants as fsConstants,
   fstatSync,
   fsyncSync,
   linkSync,
   lstatSync,
   mkdirSync,
   openSync,
-  readSync,
   renameSync,
   unlinkSync,
   writeSync,
@@ -43,18 +41,18 @@ import {
   readUpTo,
 } from "@vcv/core";
 import type { HostContext, ImplementationRequest } from "@vcv/core";
-import { isAncestor, resolveCommit } from "./git.ts";
-import { VCV_DIR } from "./project.ts";
+import { isAncestor, resolveCommit } from "../git/git.ts";
+import { VCV_DIR } from "../project.ts";
 import { affectedBindings, approvedChange, attestationKey, guardOf, worktreeOf } from "./handoff.ts";
 import type { ApprovedChange, HandoffBinding } from "./handoff.ts";
-import { readClaims } from "./shared/claims.ts";
-import { describeOperation } from "./shared/model-diff.ts";
-import { failFinal, finish, observed } from "./shared/observation.ts";
-import type { Observation, ObserveHooks } from "./shared/observation.ts";
-import type { RepoError, RepoResult } from "./shared/result.ts";
-import type { WorktreeState } from "./worktree.ts";
-import { invalidRequest } from "./shared/result.ts";
-import { redact } from "./shared/redact.ts";
+import { readClaims } from "../shared/claims.ts";
+import { describeOperation } from "../shared/model-diff.ts";
+import { failFinal, finish, observed } from "../shared/observation.ts";
+import type { Observation, ObserveHooks } from "../shared/observation.ts";
+import type { RepoError, RepoResult } from "../shared/result.ts";
+import type { WorktreeState } from "../git/worktree.ts";
+import { invalidRequest } from "../shared/result.ts";
+import { redact } from "../shared/redact.ts";
 
 export const IMPLEMENTATIONS_DIR = "implementations";
 export const IMPLEMENTATION_LIMITS = { files: 500, reportBytes: 256 * 1024 } as const;

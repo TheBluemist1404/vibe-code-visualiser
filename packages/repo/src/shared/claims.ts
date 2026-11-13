@@ -1,7 +1,7 @@
 // The checkout's binding claim files, read once with a key for exactly that set.
 import { canonicalJson } from "@vcv/core";
-import { listBindings } from "../bindings.ts";
-import type { ClaimEntry } from "../bindings.ts";
+import { listBindings } from "../bindings/bindings.ts";
+import type { ClaimEntry } from "../bindings/bindings.ts";
 
 /** The checkout's claim files and a key for exactly this set (IDs and digests). */
 export function readClaims(root: string): { entries: ClaimEntry[]; key: string } {

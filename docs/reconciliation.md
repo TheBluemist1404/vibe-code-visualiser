@@ -100,7 +100,7 @@ context while producing no stale claim and no contradiction.
 
 The report is one observation. Before answering, VCV reads again the model store, Git HEAD, the
 base ref, every claim file and the bytes of every changed or bound file
-([worktree.ts](../packages/repo/src/worktree.ts)). It also rereads every input of the integrity
+([worktree.ts](../packages/repo/src/git/worktree.ts)). It also rereads every input of the integrity
 result: each attestation file, the checkout's trust list, every changed `.vcv/` file, and the
 trust source (an external trust file's bytes, a trust ref's commit). If any of them moved (a branch switch, a
 same-path edit in the working tree, a moved ref), the call fails with `STATE_CHANGED` instead of
