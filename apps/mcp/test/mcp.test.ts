@@ -15,13 +15,7 @@ import { loadModel, parseYaml } from "@vcv/ir";
 import type { Model } from "@vcv/ir";
 import { FileStore, ModelEngine } from "@vcv/core";
 import { contextRequest, impactRequest, overviewRequest, searchRequest } from "@vcv/query";
-import type {
-  ImpactAnalysis,
-  ObjectContext,
-  ProjectOverview,
-  QueryResult,
-  SearchResults,
-} from "@vcv/query";
+import type { ImpactAnalysis, ObjectContext, ProjectOverview, QueryResult, SearchResults } from "@vcv/query";
 
 const ROOT = join(import.meta.dirname, "../../..");
 const MAIN = join(ROOT, "apps/mcp/src/main.ts");

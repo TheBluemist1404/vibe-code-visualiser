@@ -15,13 +15,7 @@ import { z } from "zod";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { CallToolRequestSchema, ListToolsRequestSchema } from "@modelcontextprotocol/sdk/types.js";
 import type { CallToolResult, Tool } from "@modelcontextprotocol/sdk/types.js";
-import {
-  LIMITS,
-  contextRequest,
-  impactRequest,
-  overviewRequest,
-  searchRequest,
-} from "@vcv/query";
+import { LIMITS, contextRequest, impactRequest, overviewRequest, searchRequest } from "@vcv/query";
 import type { QueryApi, QueryResult } from "@vcv/query";
 import {
   EVIDENCE_LIMITS,
