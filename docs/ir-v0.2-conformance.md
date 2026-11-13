@@ -23,7 +23,7 @@ README, which now describes the project as a whole.
 | 12 | ChangeRecord outcomes with host-verified proposer/approver | core `AC12` (×2) |
 | 13 | Revalidate approvals; reject stale and replayed changes | core `AC13` (×2) |
 | 14 | Rename/remove with referential integrity, incl. nested | core `AC14` |
-| 15 | Bindings carry modelRevision + commit; stale, not disputed | core `AC15` |
+| 15 | Bindings carry modelRevision + commit; stale, not disputed | repo `bindings.test.ts` (claims record revision and commit; a moved commit alone is not drift, a changed source is stale; ADR 0007 §5) |
 | 16 | Layout edits never create revisions | core `AC16` |
 
 Not covered yet: detecting a divergent code change (needs the repository indexer, M2/M4).

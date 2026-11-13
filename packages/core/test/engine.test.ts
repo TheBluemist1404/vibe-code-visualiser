@@ -5,8 +5,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadModel, parseYaml, checkModel } from "@vcv/ir";
 import type { Model } from "@vcv/ir";
-import { FileStore, LayoutStore, MemoryStore, ModelEngine, assessBinding } from "../src/index.ts";
-import type { Binding, HostContext, ProposedModelChange } from "../src/index.ts";
+import { FileStore, LayoutStore, MemoryStore, ModelEngine } from "../src/index.ts";
+import type { HostContext, ProposedModelChange } from "../src/index.ts";
 import { assertRev } from "./helpers.ts";
 
 const FIXTURES = join(import.meta.dirname, "../../../examples/enrollment");
@@ -216,31 +216,6 @@ test("AC10: a draft with unresolved references cannot be approved until they are
   assert.equal(done.status, "applied", JSON.stringify(done.diagnostics));
   assert.equal(e.current().project.status, "approved");
   assert.equal(checkModel(e.current()).diagnostics.length, 0);
-});
-
-test("AC15: bindings record model revision and commit; moving either marks them stale, not disputed", () => {
-  const b: Binding = {
-    modelObjectId: "tr-timeout",
-    modelRevision: "rev-2",
-    repositoryId: "lms-backend",
-    commit: "a1b2c3d",
-    locator: "src/enrollment/enrollment.scheduler.ts#expirePending",
-    relation: "implements",
-    provenance: "human",
-    status: "confirmed",
-  };
-  assert.equal(assessBinding(b, { modelRevision: "rev-2", commits: { "lms-backend": "a1b2c3d" } }), "confirmed");
-  assert.equal(assessBinding(b, { modelRevision: "rev-2", commits: { "lms-backend": "ffff000" } }), "stale");
-  assert.equal(assessBinding(b, { modelRevision: "rev-3", commits: { "lms-backend": "a1b2c3d" } }), "stale");
-  assert.equal(
-    assessBinding(b, {
-      modelRevision: "rev-3",
-      commits: { "lms-backend": "a1b2c3d" },
-      changedObjectIds: new Set(["st-pending"]),
-    }),
-    "confirmed",
-    "an unrelated model change does not invalidate the binding",
-  );
 });
 
 test("AC16: canvas layout edits never create a model revision", () => {

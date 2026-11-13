@@ -892,7 +892,3 @@ function criterionOf(
       verdict === "passed" ? (agentOnly ? "claimed" : passedBy.includes("host") ? "host" : "claimed") : null,
   };
 }
-
-/** A criterion is an IR object; `buildIndex` lists it with kind "criterion". */
-export const isCriterion = (model: Parameters<typeof buildIndex>[0], id: Id) =>
-  buildIndex(model).byId.get(id)?.kind === "criterion";
