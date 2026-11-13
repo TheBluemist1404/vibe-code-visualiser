@@ -172,8 +172,6 @@ export const COLLECTIONS = {
 
 export type CollectionName = keyof typeof COLLECTIONS;
 
-export type TopLevelObject = NonNullable<Model[CollectionName]>[number];
-
 /** A top-level collection of a model; `criteria` may be absent. */
 export const collectionOf = <C extends CollectionName>(model: Model, coll: C): NonNullable<Model[C]> =>
   (model[coll] ?? []) as NonNullable<Model[C]>;

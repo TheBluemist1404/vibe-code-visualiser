@@ -4,8 +4,8 @@ import { hasErrors, persistedIdProblem, validateModel } from "@vcv/ir";
 import type { Diagnostic, Model } from "@vcv/ir";
 import { applyOperations, proposedChangeSchema } from "./operations.ts";
 import type { ProposedModelChange } from "./operations.ts";
-import { StoreError } from "./store.ts";
-import type { ChangeGuard, ModelStore, StoreSnapshot } from "./store.ts";
+import { StoreError } from "./store/files.ts";
+import type { ChangeGuard, ModelStore, StoreSnapshot } from "./store/model-store.ts";
 import { canonicalJson, sha256Hex } from "./digest.ts";
 import { branchSafeRevisionId } from "./revisions.ts";
 
