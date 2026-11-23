@@ -19,6 +19,7 @@ const WEB = join(import.meta.dirname, "../dist");
 const SHOTS = process.env.VCV_UI_SHOTS;
 let browser: Browser;
 const hosts: Host[] = [];
+const pages: Page[] = [];
 
 before(async () => {
   assert.ok(existsSync(join(WEB, "index.html")), "build the client first: npm run build -w @vcv/ui");
@@ -26,6 +27,7 @@ before(async () => {
   if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 });
 after(async () => {
+  await Promise.all(pages.map((p) => p.close()));
   await Promise.all(hosts.map((h) => h.close()));
   await browser?.close();
 });
@@ -37,7 +39,10 @@ async function open(repo: string, hash = "", protectedBase?: string) {
     ...(protectedBase ? { protectedBase } : {}),
   });
   hosts.push(h);
+  // The hosts share this process's event loop: earlier pages stop polling before a new one opens.
+  await Promise.all(pages.splice(0).map((p) => p.close()));
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  pages.push(page);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   await page.goto(h.url + hash);
