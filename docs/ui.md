@@ -177,8 +177,10 @@ The dialog shows both, with Copy and Download and the CLI command to check the f
      No attestation is a failure, whatever approver the record names.
   3. *Integrity under protected base*: `checkIntegrity` with `--base <ref>` and the trust list
      from `<ref>`, only when the host was started with `--protected-base <ref>`. Otherwise
-     **unknown**, never green. When checked, it says the local ref is caller-asserted and that
-     CI's check against the hosting service's protected branch is the authority.
+     **unknown**, never green. When it passes, the step is relabelled *Integrity, checked locally
+     (caller-asserted base)*, and its detail says the ref was named by whoever started the
+     explorer and can be moved locally. It is not the hosting service's verdict; CI's check
+     against the protected branch is the authority.
   4. *Model applied*: the resulting revision is in this checkout's history.
   5. *Implementation*: always unknown here (reconciliation is M4's `vcv reconcile`).
 - The engine's check and delta, as for drafts. An applied change is shown against its base and
@@ -190,6 +192,19 @@ The dialog shows both, with Copy and Download and the CLI command to check the f
   from the hosting service, not from this checkout.
 - **Stale, rejected or unreadable**: "Back to an agent", with what the agent reads. Nothing
   offers a rebase, a retry or an edit of the recorded proposal.
+
+Each answer (the list, or one review) is composed from one observed state (`src/observe.ts`).
+An identity of the checkout is taken before the first read and after the last, and the reads
+are discarded and retried if the two differ. The identity covers:
+- the model key;
+- the Git commit, branch and dirty state;
+- every byte under `.vcv/` except `cache/`: records, attestations, the trust list, HEAD and
+  revisions;
+- the protected base's resolved commit.
+
+A checkout that keeps moving is `409 STATE_CHANGED`, so a review never shows a pending preview
+next to an applied summary or a signature from another state. The revision ID alone is not
+trusted, because two branches can share it and records change without HEAD moving.
 
 When a reviewer approves in their terminal, the page follows on its next poll: the record turns
 applied, the signature step verifies, and the pending count drops.
@@ -252,6 +267,11 @@ The browser is not a trust boundary, and neither is this host for anything beyon
   (`POST`/`PUT`/`DELETE` → 405, no `approve`); stale and rejected proposals with agent hand-offs;
   a wrong digest refused by the CLI; after the reviewer's approval, applied + signed with
   integrity unknown, then checked under `main`; an untrusted key never shown as attested.
+  Consistency is tested with a hook between the reads:
+  - an approval landing between them yields a wholly applied review;
+  - records changing on every read, or a branch switch, are `STATE_CHANGED`.
+
+  With the identity check removed, that test fails.
 - `apps/ui/e2e/proposals.e2e.ts`: the same in Chromium, with the page open while the reviewer
   approves in a terminal (20 to 25), keyboard reachability, and a check that no button on the
   page approves, signs, submits, applies, rejects or rebases.

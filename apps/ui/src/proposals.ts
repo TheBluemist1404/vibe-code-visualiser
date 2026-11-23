@@ -7,6 +7,7 @@
 // its digest instead of a button.
 import { checkIntegrity, listProposals, previewProposal } from "@vcv/repo";
 import type { IntegrityReport, ProposalPreview, ProposalSummary, RevisionCheck } from "@vcv/repo";
+import { consistentRead } from "./observe.ts";
 import type { ProjectSession } from "./session.ts";
 import type { Inbox, InboxItem, ProposalReview, ReviewStep } from "./types.ts";
 
@@ -19,7 +20,11 @@ export class InboxUnavailable extends Error {
 }
 
 /** Where integrity is checked from, if the person who started the host named a protected base. */
-export type InboxOptions = { protectedBase?: string };
+export type InboxOptions = {
+  protectedBase?: string;
+  /** Test hook: called between the reads that make up one answer. */
+  betweenReads?: (step: "after-preview" | "after-list" | "after-integrity") => void;
+};
 
 const LIST_LIMIT = 200;
 
@@ -32,7 +37,24 @@ export class ProposalInbox {
     this.opts = opts;
   }
 
+  /**
+   * Every answer is composed from one observed state: the reads run between two identity checks
+   * (model, Git, every .vcv/ record and attestation, the protected base's commit) and are retried
+   * if anything moved, then refused with STATE_CHANGED (src/observe.ts).
+   */
   list(): Inbox {
+    return consistentRead(this.session.path, () => this.listOnce(), this.observe());
+  }
+
+  review(changeId: string): ProposalReview {
+    return consistentRead(this.session.path, () => this.reviewOnce(changeId), this.observe());
+  }
+
+  private observe() {
+    return this.opts.protectedBase ? { ref: this.opts.protectedBase } : {};
+  }
+
+  private listOnce(): Inbox {
     const s = this.session.ready();
     const r = listProposals(this.session.path, { limit: LIST_LIMIT });
     if (!r.ok) throw new InboxUnavailable(r.error.code, r.error.message);
@@ -47,12 +69,14 @@ export class ProposalInbox {
     };
   }
 
-  review(changeId: string): ProposalReview {
+  private reviewOnce(changeId: string): ProposalReview {
     const s = this.session.ready();
     const path = this.session.path;
     const r = previewProposal(path, { changeId, limit: 50 });
     if (!r.ok) throw new InboxUnavailable(r.error.code, r.error.message);
+    this.opts.betweenReads?.("after-preview");
     const listed = listProposals(path, { limit: LIST_LIMIT });
+    this.opts.betweenReads?.("after-list");
     const summary = listed.ok ? listed.data.proposals.find((p) => p.changeId === changeId) : undefined;
     const p = r.data;
     const current = r.context.modelRevision;
@@ -61,6 +85,14 @@ export class ProposalInbox {
     // and matches the record, never that the key belongs to a trusted reviewer.
     const local = summary?.resultingRevision ? checkIntegrity(path, {}) : null;
     const base = summary?.resultingRevision && this.opts.protectedBase ? this.protectedCheck() : null;
+    this.opts.betweenReads?.("after-integrity");
+    // The parts must describe one change in one state; the identity check around this read
+    // covers the checkout, this covers the answers themselves.
+    if (
+      r.context.modelRevision !== s.model.project.modelRevision ||
+      (summary?.proposalDigest && summary.proposalDigest !== r.data.proposal.proposalDigest)
+    )
+      throw new InboxUnavailable("STATE_CHANGED", "the proposal changed between reads; try again");
     return {
       changeId: p.proposal.changeId,
       lifecycle: p.proposal.lifecycle === "unsubmitted" ? "invalid" : p.proposal.lifecycle,
@@ -84,8 +116,9 @@ export class ProposalInbox {
     };
   }
 
-  private protectedCheck(): { report: IntegrityReport } {
-    const ref = this.opts.protectedBase!;
+  private protectedCheck(): { report: IntegrityReport } | null {
+    const ref = this.opts.protectedBase;
+    if (!ref) return null;
     return { report: checkIntegrity(this.session.path, { base: ref, trust: { kind: "git-ref", ref } }) };
   }
 }
@@ -222,9 +255,9 @@ function steps(
       c?.approval.state === "attested" && errors.length === 0
         ? {
             id: "integrity",
-            label: "Integrity under protected base",
+            label: "Integrity, checked locally (caller-asserted base)",
             state: "done",
-            detail: `Checked here against ${anchor}: ${c.approval.detail}. A local ref is caller-asserted; CI's check against the hosting service's protected branch is the authority.`,
+            detail: `Checked on this computer against ${anchor}, a ref named when the explorer was started: ${c.approval.detail}. That ref is caller-asserted and can be moved by anyone with a shell here, so this is not the hosting service's verdict; CI's check against the protected branch is the authority.`,
           }
         : {
             id: "integrity",

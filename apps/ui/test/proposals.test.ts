@@ -9,9 +9,10 @@ import { projectStatus } from "@vcv/repo";
 import { LayoutFileStore } from "../src/layout-store.ts";
 import { startHost } from "../src/server.ts";
 import type { Host } from "../src/server.ts";
-import { ProjectSession } from "../src/session.ts";
+import { ProposalInbox } from "../src/proposals.ts";
+import { ProjectSession, modelKey } from "../src/session.ts";
 import type { Inbox, ProposalReview, ReviewStep } from "../src/types.ts";
-import { approve, cliPreview, describeWeb, setup, submit, tempDir, tree, vcv, clean } from "./fixtures.ts";
+import { approve, cliPreview, clean, describeWeb, git, setup, submit, tempDir, tree, vcv } from "./fixtures.ts";
 
 const hosts: Host[] = [];
 after(() => Promise.all(hosts.map((h) => h.close())));
@@ -176,4 +177,66 @@ test("an untrusted key never shows as verified: signed with a key the protected 
   assert.equal(step(r, "signed").state, "done", "the signature itself verifies");
   assert.equal(step(r, "integrity").state, "failed");
   assert.match(step(r, "integrity").detail, /untrusted-key|not listed/);
+});
+
+test("one review is one state: an approval landing between the reads is never stitched in; a checkout that keeps moving is STATE_CHANGED", async () => {
+  const { repo, key, mainSha } = setup();
+  submit(repo, "chg-web", describeWeb("Approved mid-read."));
+  const digest = cliPreview(repo, "chg-web").proposal.proposalDigest;
+  const session = new ProjectSession(repo, new LayoutFileStore(tempDir("vcv-ui-state-")));
+
+  // The reviewer approves in their terminal after the preview was read and before the list and
+  // integrity reads. The first composition is discarded; the answer is entirely the applied state.
+  let once = true;
+  const inbox = new ProposalInbox(session, {
+    protectedBase: "main",
+    betweenReads: (step) => {
+      if (step !== "after-preview" || !once) return;
+      once = false;
+      const r = approve(repo, "chg-web", digest, key, "--trust-ref", "main", "--trust-commit", mainSha);
+      assert.equal(r.status, 0, r.stderr);
+    },
+  });
+  const r = inbox.review("chg-web");
+  assert.equal(once, false, "the approval did land mid-read");
+  assert.equal(r.lifecycle, "applied");
+  assert.equal(r.currentRevision, projectStatus(repo).model!.revision);
+  assert.equal(r.modelKey, modelKey(projectStatus(repo)));
+  assert.equal(step(r, "signed").state, "done");
+  assert.equal(step(r, "model").state, "done");
+  assert.equal(r.reviewer, null, "no approval instructions for an applied change");
+
+  // Records that change on every read (another process submitting again and again) are refused.
+  let n = 0;
+  const restless = new ProposalInbox(session, {
+    betweenReads: (step) => {
+      if (step === "after-list") submit(repo, `chg-noise-${n++}`, describeWeb(`noise ${n}`));
+    },
+  });
+  assert.throws(
+    () => restless.review("chg-web"),
+    (e: { code?: string }) => e.code === "STATE_CHANGED",
+  );
+  assert.ok(n >= 2, "it retried before giving up");
+
+  // A branch switch between reads: same rule.
+  git(repo, "checkout", "-qb", "elsewhere", "main");
+  git(repo, "checkout", "-q", "feature");
+  let flips = 0;
+  const switching = new ProposalInbox(session, {
+    betweenReads: (step) => {
+      if (step === "after-preview") git(repo, "checkout", "-q", flips++ % 2 ? "feature" : "elsewhere");
+    },
+  });
+  assert.throws(
+    () => switching.review("chg-web"),
+    (e: { code?: string }) => e.code === "STATE_CHANGED",
+  );
+  git(repo, "checkout", "-q", "feature");
+
+  // Over HTTP the refusal is a 409 the page retries on its next poll.
+  const ui = await open(repo, "main");
+  const ok = await ui.review("chg-web");
+  assert.equal(ok.lifecycle, "applied");
+  assert.equal(step(ok, "integrity").label, "Integrity, checked locally (caller-asserted base)");
 });
