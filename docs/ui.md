@@ -2,12 +2,14 @@
 
 `apps/ui` is the local explorer from M5 ([Issue #39](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/39)):
 one canvas of the project's modules beside a structured inspector, where edits can be staged
-into local drafts and handed off to a coding agent ([Issue #41](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/41)).
+into local drafts and handed off to a coding agent ([Issue #41](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/41)),
+and a read-only proposal inbox shows recorded proposals and how a reviewer approves one
+([Issue #44](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/44)).
 This page explains how it is built and what it deliberately does not do. For running it, see
 the [README](../README.md).
 
 ```sh
-npm run ui -- <checkout> [--port N]   # default port 4870, bound to 127.0.0.1 only
+npm run ui -- <checkout> [--port N] [--protected-base <ref>]   # default port 4870, bound to 127.0.0.1 only
 ```
 
 ## Shape
@@ -159,7 +161,44 @@ empty name) comes back as a `SCHEMA` error on that operation; it stays in the dr
 
 The dialog shows both, with Copy and Download and the CLI command to check the file.
 
-## Trust boundary## Trust boundary
+## The proposal inbox
+
+`#/proposals` (the **Proposals** tab, with the pending count) lists what `listProposals` finds in
+`.vcv/changes/`, whoever submitted it, polled every 3 s. Selecting one shows
+`previewProposal` and `checkIntegrity` results and nothing else (`src/proposals.ts`):
+
+- Header: change ID, lifecycle, the full `proposalDigest`, proposer and approver **as recorded**
+  (labelled as not proof), base revision and the model now.
+- **Where it stands**, five facts from five sources, each `done`, `not yet`, `failed` or
+  `unknown`, and none implying another:
+  1. *Submitted*: the record exists (rejected records say they are final).
+  2. *Reviewer signature*: `checkIntegrity` without a trust source. Done means an attestation for
+     this digest verifies and matches the record; whether the key is trusted is not checked.
+     No attestation is a failure, whatever approver the record names.
+  3. *Integrity under protected base*: `checkIntegrity` with `--base <ref>` and the trust list
+     from `<ref>`, only when the host was started with `--protected-base <ref>`. Otherwise
+     **unknown**, never green. When checked, it says the local ref is caller-asserted and that
+     CI's check against the hosting service's protected branch is the authority.
+  4. *Model applied*: the resulting revision is in this checkout's history.
+  5. *Implementation*: always unknown here (reconciliation is M4's `vcv reconcile`).
+- The engine's check and delta, as for drafts. An applied change is shown against its base and
+  not rechecked (a recheck would always say `STALE_REVISION`).
+- Binding claims on changed or impacted objects, and what the integrity check cannot establish.
+- **Pending**: "Approve in your own terminal" with `vcv proposal preview` and `vcv review approve
+  … --digest <this digest> --key <your reviewer key file> --trust-commit <protected base commit>`.
+  The key path and the commit are placeholders: the host knows neither, and the commit must come
+  from the hosting service, not from this checkout.
+- **Stale, rejected or unreadable**: "Back to an agent", with what the agent reads. Nothing
+  offers a rebase, a retry or an edit of the recorded proposal.
+
+When a reviewer approves in their terminal, the page follows on its next poll: the record turns
+applied, the signature step verifies, and the pending count drops.
+
+There is no browser submit in this version. Issue #44 allows one only after the writer lock
+(#43) is merged; when it comes, it must go through `submitProposal` (proposal-only, `model:propose`)
+and so through the same lock as the CLI (ADR 0010).
+
+## Trust boundary
 
 The browser is not a trust boundary, and neither is this host for anything beyond reading.
 
@@ -168,11 +207,12 @@ The browser is not a trust boundary, and neither is this host for anything beyon
 - Every write takes a JSON body (a cross-site form cannot send one) and writes only files in
   the UI state directory: the layout file and draft files. Nothing under the checkout, `.vcv/`
   or Git is written; tests compare the checkout byte for byte.
-- There is no submit, apply or approve route. Recording a proposal is the agent's step (`vcv
-  proposal submit`); approval stays the reviewer's `vcv review approve` with their own key
-  ([approvals](approvals.md)).
-- `FileStore`'s fingerprint and HEAD check is not an inter-process lock. Serialized canonical
-  writes are M5.6, and no endpoint that writes the model may be added before them.
+- There is no submit, apply or approve route. `/api/proposals` answers GET only; any other
+  method is `405 READ_ONLY`. Recording a proposal is the agent's step (`vcv proposal submit`);
+  approval stays the reviewer's `vcv review approve` with their own key
+  ([approvals](approvals.md)). The host never reads, receives or stores a private key.
+- Cooperating VCV writers are serialized by the store's writer lock (ADR 0010). A future
+  browser-triggered write must use the `@vcv/repo` functions that take it, never its own mutex.
 
 ## What the canvas shows
 
@@ -207,6 +247,14 @@ The browser is not a trust boundary, and neither is this host for anything beyon
 - `apps/ui/e2e/editing.e2e.ts`: in Chromium, the golden path from inspector edits across two
   modules to the handoff (10), an error and a warning (11), reload, host restart and a second
   tab (12), a stale draft (13), and an unreadable draft file (14).
+- `apps/ui/test/proposals.test.ts`: the inbox over HTTP with the real CLI and a test-only
+  reviewer key: an agent's proposal with the CLI's digest and operations; no write route
+  (`POST`/`PUT`/`DELETE` → 405, no `approve`); stale and rejected proposals with agent hand-offs;
+  a wrong digest refused by the CLI; after the reviewer's approval, applied + signed with
+  integrity unknown, then checked under `main`; an untrusted key never shown as attested.
+- `apps/ui/e2e/proposals.e2e.ts`: the same in Chromium, with the page open while the reviewer
+  approves in a terminal (20 to 25), keyboard reachability, and a check that no button on the
+  page approves, signs, submits, applies, rejects or rebases.
 - `apps/ui/e2e/explorer.e2e.ts`: the built client in Chromium (Playwright), covering the first
   PR's acceptance tests 1 to 5, plus: no mixed-model inspector across a branch switch, cross-module
   object links, the viewport surviving refreshes, and reduced motion. `npm run test:ui`; set
@@ -216,7 +264,7 @@ The browser is not a trust boundary, and neither is this host for anything beyon
 ## Not yet
 
 Editing purpose, contracts, nested elements and creating or removing objects from the
-inspector; submitting, reviewing and approving proposals (M5.4); serialized canonical writes
-(M5.6); source and test evidence (M5.5); and opening a
+inspector; submitting from the browser (after #43 merges, if at all) and approving in it (never:
+approval stays the reviewer's CLI step); source and test evidence (M5.5); and opening a
 different checkout from the browser. Projects with more than
 1000 modules show the first 1000 and say so.

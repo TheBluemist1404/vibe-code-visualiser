@@ -13,6 +13,28 @@ import { ProjectBar } from "./components/ProjectBar.tsx";
 import { HostDown, LoadingScreen, StateScreen } from "./components/StateScreen.tsx";
 import { DraftsProvider } from "./drafts/DraftsProvider.tsx";
 import { Icon } from "./icons.tsx";
+import { ProposalsView, useInbox } from "./proposals/ProposalsView.tsx";
+
+/** Which page is open, from the URL hash: `#/proposals` or `#/proposals/<changeId>`; anything else is the explorer. */
+type Route = { page: "explorer" } | { page: "proposals"; changeId: string | null };
+function parseRoute(hash: string): Route {
+  const m = /^#\/proposals(?:\/([^/]+))?$/.exec(hash);
+  return m ? { page: "proposals", changeId: m[1] ? decodeURIComponent(m[1]) : null } : { page: "explorer" };
+}
+function useRoute(): [Route, (r: Route) => void] {
+  const [route, setRoute] = useState<Route>(() => parseRoute(window.location.hash));
+  useEffect(() => {
+    const on = () => setRoute(parseRoute(window.location.hash));
+    window.addEventListener("hashchange", on);
+    return () => window.removeEventListener("hashchange", on);
+  }, []);
+  const go = useCallback((r: Route) => {
+    const hash = r.page === "explorer" ? "#/" : `#/proposals${r.changeId ? `/${encodeURIComponent(r.changeId)}` : ""}`;
+    if (window.location.hash !== hash) window.location.hash = hash;
+    setRoute(r);
+  }, []);
+  return [route, go];
+}
 
 const POLL_MS = 3000;
 
@@ -27,6 +49,7 @@ export function App() {
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());
   const seenChange = useRef<number | null>(null);
   const busy = useRef(false);
+  const [route, go] = useRoute();
 
   const load = useCallback(async (manual = false) => {
     if (busy.current) return;
@@ -66,6 +89,7 @@ export function App() {
   }, [load]);
 
   const graph = view?.graph ?? null;
+  const { inbox, error: inboxError } = useInbox(graph ? graph.modelKey : null, route.page === "proposals");
   const selected = target.kind === "module" ? target.id : target.kind === "object" ? target.moduleId : null;
 
   // Drop a selection whose module no longer exists after a refresh.
@@ -104,6 +128,15 @@ export function App() {
     if (down) return <HostDown message={down} onRetry={() => load(true)} />;
     if (!view) return <LoadingScreen />;
     if (!graph) return <StateScreen observation={view.observation} onRefresh={() => load(true)} />;
+    if (route.page === "proposals")
+      return (
+        <ProposalsView
+          inbox={inbox}
+          error={inboxError}
+          selected={route.changeId}
+          onSelect={(id) => go({ page: "proposals", changeId: id })}
+        />
+      );
     return (
       <div className="body">
         <ModuleList graph={graph} selected={selected} fresh={fresh} onSelect={(id) => selectModule(id, true)} />
@@ -145,7 +178,23 @@ export function App() {
         />
       </div>
     );
-  }, [down, view, graph, selected, fresh, focus, banner, target, load, selectModule, layoutCall]);
+  }, [
+    down,
+    view,
+    graph,
+    selected,
+    fresh,
+    focus,
+    banner,
+    target,
+    load,
+    selectModule,
+    layoutCall,
+    route,
+    go,
+    inbox,
+    inboxError,
+  ]);
 
   return (
     <div className="app">
@@ -155,6 +204,9 @@ export function App() {
         refreshing={refreshing}
         pulse={pulse}
         onRefresh={() => load(true)}
+        page={route.page}
+        pending={graph ? (inbox?.counts.pending ?? 0) : null}
+        onPage={(page) => go(page === "explorer" ? { page } : { page, changeId: null })}
       />
       <DraftsProvider projectId={graph?.project.id ?? null} modelKey={graph?.modelKey ?? null}>
         {content}

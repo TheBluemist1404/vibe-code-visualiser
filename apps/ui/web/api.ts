@@ -4,10 +4,12 @@ import type {
   DraftList,
   DraftPreview,
   DraftView,
+  Inbox,
   ModuleView,
   ObjectView,
   Position,
   ProjectView,
+  ProposalReview,
   StagedEdit,
 } from "../src/types.ts";
 
@@ -53,6 +55,11 @@ export const api = {
   pin: (id: string, x: number, y: number) => post<Positions>("/api/layout/pin", { id, x, y }),
   unpin: (id: string) => post<Positions>("/api/layout/unpin", { id }),
   tidy: () => post<Positions>("/api/layout/tidy", {}),
+  /** Read-only: there is no submit or approve call (approval is the reviewer's CLI step). */
+  proposals: {
+    list: () => call<Inbox>("/api/proposals"),
+    review: (id: string) => call<ProposalReview>(`/api/proposals/${encodeURIComponent(id)}`),
+  },
   drafts: {
     list: () => call<DraftList>("/api/drafts"),
     create: () => post<DraftView>("/api/drafts", {}),

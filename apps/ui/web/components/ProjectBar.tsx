@@ -20,12 +20,19 @@ export function ProjectBar({
   refreshing,
   pulse,
   onRefresh,
+  page,
+  pending,
+  onPage,
 }: {
   title: string;
   observation: Observation | null;
   refreshing: boolean;
   pulse: number;
   onRefresh(): void;
+  page: "explorer" | "proposals";
+  /** Pending proposals in this checkout; null while there is no model to show. */
+  pending: number | null;
+  onPage(page: "explorer" | "proposals"): void;
 }) {
   const s = observation ? STATE[observation.state] : null;
   const git = observation?.git;
@@ -42,6 +49,33 @@ export function ProjectBar({
           <Icon name={observation?.state === "ready" ? "ok" : "alert"} small />
           {s.label}
         </span>
+      )}
+      {pending !== null && (
+        <nav className="tabs" aria-label="Pages">
+          <button
+            type="button"
+            className="tab"
+            aria-current={page === "explorer" ? "page" : undefined}
+            onClick={() => onPage("explorer")}
+          >
+            <Icon name="grid" /> Explorer
+          </button>
+          <button
+            type="button"
+            className="tab"
+            aria-current={page === "proposals" ? "page" : undefined}
+            onClick={() => onPage("proposals")}
+            data-testid="tab-proposals"
+          >
+            <Icon name="inbox" /> Proposals
+            {pending > 0 && (
+              <span className="tab-badge" data-testid="pending-count">
+                {pending}
+                <span className="sr-only"> pending</span>
+              </span>
+            )}
+          </button>
+        </nav>
       )}
       <div className="bar-meta">
         {observation?.model && (

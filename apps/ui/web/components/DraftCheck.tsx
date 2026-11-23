@@ -1,7 +1,7 @@
 // The engine's dry run of a draft, as the draft panel shows it: a status badge and the body
 // (errors and warnings with hints, operations, the delta, modules touched, and what nobody checked).
 import { useState } from "react";
-import type { DraftPreview, ProposalDiagnostic } from "../../src/types.ts";
+import type { DraftPreview, EngineCheck, ProposalDiagnostic } from "../../src/types.ts";
 import { Icon } from "../icons.tsx";
 
 export type Check =
@@ -38,7 +38,7 @@ export function CheckBadge({ check, stale }: { check: Check | null; stale: boole
   );
 }
 
-function Diagnostics({ items, tone }: { items: ProposalDiagnostic[]; tone: "danger" | "warn" }) {
+export function Diagnostics({ items, tone }: { items: ProposalDiagnostic[]; tone: "danger" | "warn" }) {
   return (
     <ul className="diag" data-testid={tone === "danger" ? "check-errors" : "check-warnings"}>
       {items.map((d) => (
@@ -55,7 +55,7 @@ function Diagnostics({ items, tone }: { items: ProposalDiagnostic[]; tone: "dang
   );
 }
 
-export function CheckBody({ check }: { check: Check | null }) {
+export function CheckBody({ check, note }: { check: Check | null; note?: string }) {
   if (!check || check.state === "checking")
     return (
       <div aria-busy="true" className="col-gap">
@@ -70,7 +70,16 @@ export function CheckBody({ check }: { check: Check | null }) {
         <div className="notice-body">{check.message}</div>
       </div>
     );
-  const p = check.preview;
+  return (
+    <CheckDetails
+      p={check.preview}
+      note={note ?? `Unsubmitted draft. Dry run on ${check.preview.expectedRevision}; nothing was recorded.`}
+    />
+  );
+}
+
+/** Errors, warnings, operations, the before/after delta, modules touched and what nobody checked. */
+export function CheckDetails({ p, note }: { p: EngineCheck; note: string }) {
   return (
     <div className="col-gap" data-testid="check-body">
       {p.validation.errors.length > 0 && <Diagnostics items={p.validation.errors} tone="danger" />}
@@ -82,12 +91,12 @@ export function CheckBody({ check }: { check: Check | null }) {
           </li>
         ))}
       </ol>
-      <div className="small muted">Unsubmitted draft. Dry run on {p.expectedRevision}; nothing was recorded.</div>
+      <div className="small muted">{note}</div>
       {p.delta && (
         <div className="delta" data-testid="check-delta">
           <span className="small muted">
             Before and after, against {p.delta.revision}
-            {p.delta.against === "base" ? " (the draft's base, not the current model)" : ""}
+            {p.delta.against === "base" ? " (its base, not the current model)" : ""}
           </span>
           <ul className="delta-list">
             {p.delta.changes.map((c) => (

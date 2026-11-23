@@ -143,9 +143,13 @@ export type StagedEdit = { objectId: string; field: EditableFieldName; value: st
 export type ProposalDiagnostic = { code: string; severity?: string; path?: string; message: string; hint?: string };
 
 /** A dry run of the draft: the engine's own validation, delta and impact. Nothing is written. */
-export type DraftPreview = {
+export type DraftPreview = EngineCheck & {
   /** Always "unsubmitted": a dry run of a local draft, never a pending or approved proposal. */
   origin: "unsubmitted";
+};
+
+/** The engine's check of a change against the current model (previewProposal): validation, delta, impact. */
+export type EngineCheck = {
   operations: { index: number; type: string; summary: string }[];
   expectedRevision: string;
   currentRevision: string;
@@ -241,4 +245,75 @@ export type DraftExport = {
   /** A file name to save the change under (JSON, which the CLI reads as YAML). */
   fileName: string;
   commands: { preview: string };
+};
+
+// Proposal inbox (M5.4). Read-only views of recorded proposals; see src/proposals.ts.
+
+export type ProposalLifecycle = "pending" | "stale" | "rejected" | "applied" | "invalid";
+
+export type InboxItem = {
+  changeId: string;
+  lifecycle: ProposalLifecycle;
+  proposerId: string | null;
+  baseRevision: string | null;
+  proposalDigest: string | null;
+  operations: number;
+  /** What the record says about how it was applied; never who really decided. */
+  approval: "none" | "applied-by-host" | "approved-by-separate-reviewer";
+  rationale?: string;
+  stale?: { reason: "superseded" | "other-line"; detail: string };
+  resultingRevision?: string;
+  resultInThisCheckout?: boolean;
+  /** As written in the record: not proof of who approved. */
+  recordedApproverId?: string;
+  problem?: string;
+};
+
+export type Inbox = {
+  modelKey: string;
+  revision: string;
+  items: InboxItem[];
+  counts: Record<ProposalLifecycle, number>;
+  total: number;
+  truncated: boolean;
+  /** The protected base this host checks integrity against, or null (integrity then unknown here). */
+  protectedBase: string | null;
+};
+
+/** One fact about a proposal, from one source. "unknown" is never shown as success. */
+export type ReviewStep = {
+  id: "recorded" | "signed" | "integrity" | "model" | "implementation";
+  label: string;
+  state: "done" | "not-yet" | "failed" | "unknown";
+  detail: string;
+};
+
+export type ProposalReview = {
+  changeId: string;
+  lifecycle: ProposalLifecycle;
+  proposalDigest: string;
+  proposerId: string | null;
+  projectId: string;
+  baseRevision: string;
+  currentRevision: string;
+  modelKey: string;
+  rationale?: string;
+  stale?: { reason: "superseded" | "other-line"; detail: string };
+  resultingRevision?: string;
+  recordedApproverId?: string;
+  check: EngineCheck;
+  /** Diagnostics stored on the record when it was submitted. */
+  atSubmission: ProposalDiagnostic[];
+  bindings: {
+    items: { bindingId: string; modelObjectId: string; relation: string; locator: string; why: string }[];
+    total: number;
+    truncated: boolean;
+    note: string;
+  };
+  steps: ReviewStep[];
+  /** For a pending proposal: how a reviewer approves it outside this host. */
+  reviewer: { digest: string; commands: { label: string; text: string }[]; notes: string[] } | null;
+  /** For a stale, rejected or invalid proposal: what goes back to an agent. */
+  agent: { note: string; commands: { label: string; text: string }[] } | null;
+  integrityLimits: string[];
 };
