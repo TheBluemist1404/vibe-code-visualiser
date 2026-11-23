@@ -8,11 +8,13 @@
   ],
   "scripts": {
     "test": "node --test --experimental-strip-types \"packages/*/test/*.test.ts\" \"apps/*/test/*.test.ts\"",
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json && tsc -p apps/ui/web/tsconfig.json",
     "lint": "biome lint",
     "format": "biome format --write",
     "check": "biome ci --diagnostic-level=error",
-    "vcv": "node --experimental-strip-types apps/cli/src/main.ts"
+    "vcv": "node --experimental-strip-types apps/cli/src/main.ts",
+    "ui": "npm run build -w @vcv/ui && node --experimental-strip-types apps/ui/src/main.ts",
+    "test:ui": "npm run build -w @vcv/ui && node --test --experimental-strip-types \"apps/ui/e2e/*.e2e.ts\""
   },
   "engines": {
     "node": ">=22.18"

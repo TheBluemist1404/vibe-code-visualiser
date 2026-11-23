@@ -1,2 +1,3 @@
 node_modules/
 .vcv-store/
+apps/ui/dist/

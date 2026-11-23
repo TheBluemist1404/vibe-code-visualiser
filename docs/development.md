@@ -4,7 +4,7 @@ Notes for working on VCV itself. For using VCV, start at the [README](../README.
 
 ## Workspace
 
-An npm workspace with no build step: Node 22.18+ runs the TypeScript sources directly
+An npm workspace with no build step except the explorer's browser client: Node 22.18+ runs the TypeScript sources directly
 (`--experimental-strip-types`), and each package's `exports` points at `src/index.ts`.
 
 | Package | Depends on | Role |
@@ -15,6 +15,7 @@ An npm workspace with no build step: Node 22.18+ runs the TypeScript sources dir
 | `@vcv/repo` | core, ir, query | `.vcv/` in a Git checkout: bindings, proposals, review, pre-merge |
 | `@vcv/cli` (`apps/cli`) | all packages | The `vcv` command |
 | `@vcv/mcp` (`apps/mcp`) | core, query, repo | The stdio MCP server |
+| `@vcv/ui` (`apps/ui`) | core, ir, query, repo | The local architecture explorer ([ui.md](ui.md)): a Node host plus a React client built with Vite |
 | `@vcv/testkit` | – | Private test helpers (dev dependency only) |
 
 Every package lists the `@vcv/*` packages it imports in its `package.json`, and code imports
@@ -46,6 +47,8 @@ imports `premerge/`.
 | `npm run lint` | Biome lint, warnings included |
 | `npm run format` | Format with Biome (2 spaces, 120 columns) |
 | `npm run check` | What CI runs: formatting and lint errors |
+| `npm run ui -- <checkout>` | Build the explorer client and serve it for one checkout |
+| `npm run test:ui` | Build the client and run the browser tests (`apps/ui/e2e`, Playwright Chromium) |
 
 ## Tests
 
