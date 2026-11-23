@@ -9,6 +9,8 @@ import { useDraft } from "../draft.tsx";
 import { Icon } from "../icons.tsx";
 
 type Check = { state: "checking" } | { state: "done"; preview: DraftPreview } | { state: "failed"; message: string };
+/** A check result, stamped with the draft and model it was made for. */
+type Stamped = Check & { key: string };
 
 const request = (d: Draft): DraftRequest => ({
   expectedRevision: d.base.expectedRevision,
@@ -21,22 +23,26 @@ export function ChangeTray({ graph }: { graph: GraphView }) {
   const draftApi = useDraft();
   const { draft } = draftApi;
   const [open, setOpen] = useState(true);
-  const [check, setCheck] = useState<Check | null>(null);
+  const [stamped, setStamped] = useState<Stamped | null>(null);
   const [result, setResult] = useState<SubmitView | null>(null);
   const [sending, setSending] = useState(false);
   const seq = useRef(0);
 
   // What the dry run depends on: the edits and the model they are staged on, and the model now.
   const editsKey = draft ? JSON.stringify([request({ ...draft, rationale: "" }), graph.modelKey]) : null;
+  // A result is shown only for the draft and model it was made for. Effects run after paint, so
+  // without the stamp the previous result would show (and enable submit) for a newer draft.
+  const check: Check | null = stamped && stamped.key === editsKey ? stamped : editsKey ? { state: "checking" } : null;
+  const setCheck = (c: Check | null) => setStamped(c && editsKey ? { ...c, key: editsKey } : null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: `editsKey` names everything the dry run reads
   useEffect(() => {
-    if (!draft) return setCheck(null);
+    if (!draft || !editsKey) return;
     const mine = ++seq.current;
-    setCheck({ state: "checking" });
+    const key = editsKey;
     const t = setTimeout(() => {
       api.preview(request(draft)).then(
-        (preview) => mine === seq.current && setCheck({ state: "done", preview }),
-        (e: Error) => mine === seq.current && setCheck({ state: "failed", message: e.message }),
+        (preview) => mine === seq.current && setStamped({ state: "done", preview, key }),
+        (e: Error) => mine === seq.current && setStamped({ state: "failed", message: e.message, key }),
       );
     }, 250);
     return () => clearTimeout(t);
