@@ -1,0 +1,29 @@
+{
+  "name": "@vcv/ui",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "vite build --config web/vite.config.ts",
+    "start": "node --experimental-strip-types src/main.ts"
+  },
+  "dependencies": {
+    "@vcv/core": "*",
+    "@vcv/ir": "*",
+    "@vcv/query": "*",
+    "@vcv/repo": "*"
+  },
+  "devDependencies": {
+    "@fontsource/ibm-plex-mono": "5.3.0",
+    "@fontsource/ibm-plex-sans": "5.3.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vcv/testkit": "*",
+    "@vitejs/plugin-react": "6.2.1",
+    "@xyflow/react": "12.12.1",
+    "playwright": "1.63.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "vite": "8.3.7"
+  }
+}

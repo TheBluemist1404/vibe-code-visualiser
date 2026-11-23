@@ -40,7 +40,7 @@ The IR is approved intent; source code and verification evidence remain distinct
 Early and pre-release. The engine works from the command line and from coding agents over MCP.
 A model lives in a `.vcv/` folder inside your Git repository, is bound to the source code it
 describes, changes only through reviewed proposals, and is checked against every pull request
-before it merges. There is no visual interface yet.
+before it merges. A first, read-only architecture explorer runs locally in the browser.
 
 | Milestone | What it delivers | Status |
 |---|---|---|
@@ -49,14 +49,14 @@ before it merges. There is no visual interface yet.
 | **M2** Repository integration | `.vcv/` in the repo, branch-safe revisions, a reference app, agent-drafted first models, portable model↔code binding claims resolved for TypeScript, source evidence queries | ✅ Done ([#6](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/6)) |
 | **M3** Approved model → code | Agent proposes model changes, a reviewer approves with a signed attestation, a coding agent implements from a bounded handoff, VCV records what was implemented | ✅ Done ([#17](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/17)) |
 | **M4** Code → model reconciliation | Pre-merge reconciliation of a PR against its base, acceptance criteria mapped to tests, per-test runner evidence, a policy gate for CI | ✅ Done ([#22](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/22)) |
-| **M5** Local visual product | Module graph, change review and evidence panels in a local UI | Planned |
+| **M5** Local visual product | Module graph, change review and evidence panels in a local UI | In progress: read-only explorer ([#39](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/39)) |
 
 M0 to M4 make up the technical MVP; M5 makes it usable without reading code. Everything is
 single-user and local for now. The file store assumes one writer at a time.
 
 ## Quick start
 
-Requires **Node 22.18 or newer**. TypeScript runs directly; there is no build step.
+Requires **Node 22.18 or newer**. TypeScript runs directly; only the explorer's browser client is built (by `npm run ui`).
 
 ```sh
 git clone https://github.com/TheBluemist1404/vibe-code-visualiser.git
@@ -104,6 +104,21 @@ absent, conflicted, diverged or invalid, along with the checkout's commit, branc
 state. It never creates or repairs anything. A merged or half-merged `.vcv/` is refused rather
 than silently reset. See [ADR 0007](docs/adr/0007-repository-projects.md).
 
+### Explore the architecture in the browser
+
+```sh
+npm run ui -- <checkout>            # builds the client, then serves http://127.0.0.1:4870/
+```
+
+The explorer shows the checkout's modules on one canvas, with an arrow from each module to the
+modules it depends on. Select a module to see its purpose, dependencies and what it owns, and
+drill into any capability, rule, data or criterion. Drag a module to pin it; positions are kept
+on your computer (not in `.vcv/`) and survive restarts and branch switches. The explorer keeps
+watching the checkout: when the model changes on disk it says so, keeps your layout, and places
+new modules in free space. An absent, conflicted or invalid project is reported as it is; the
+explorer never creates, repairs or writes anything in the checkout. It is read-only for now:
+editing, approval and evidence views come in later M5 slices. See [docs/ui.md](docs/ui.md).
+
 ### Connect a coding agent
 
 ```sh
@@ -143,11 +158,12 @@ packages/repo      .vcv/ in a Git checkout: bindings, proposals, review, handoff
 packages/testkit   Private helpers shared by the test suites
 apps/cli           `vcv` command-line tool, a thin layer over the engine
 apps/mcp           Local stdio MCP server for coding agents
+apps/ui            Local architecture explorer: a host on 127.0.0.1 and a React client
 examples/          Sample Enrollment model, and the Course Desk reference app
 docs/              Guides, design notes and architecture decision records
 ```
 
-Every interface (CLI, MCP, and the future canvas) calls the same engine operations. None of
+Every interface (CLI, MCP and the explorer) calls the same engine operations. None of
 them holds its own copy of the model or its own rules.
 
 ## Documentation
@@ -161,7 +177,8 @@ them holds its own copy of the model or its own rules.
   [handoff and implementation reports](docs/implementation.md) ·
   [pre-merge reconciliation](docs/reconciliation.md) · [acceptance criteria](docs/criteria.md) ·
   [test evidence](docs/test-evidence.md) (what the tests returned on a candidate) ·
-  [the pre-merge gate](docs/premerge-gate.md) · [the reference app](docs/reference-app.md)
+  [the pre-merge gate](docs/premerge-gate.md) · [the reference app](docs/reference-app.md) ·
+  [the architecture explorer](docs/ui.md)
 - **Architecture decisions** in [docs/adr](docs/adr), 0001 to 0009
 - [IR v0.2 conformance](docs/ir-v0.2-conformance.md): which tests cover the spec's acceptance
   cases, extra hardening, and decisions the spec left open

@@ -6,7 +6,15 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["packages/*/src/**/*.ts", "packages/*/test/**/*.ts", "apps/*/src/**/*.ts", "apps/*/test/**/*.ts"]
+    "includes": [
+      "packages/*/src/**/*.ts",
+      "packages/*/test/**/*.ts",
+      "apps/*/src/**/*.ts",
+      "apps/*/test/**/*.ts",
+      "apps/*/web/**/*.ts",
+      "apps/*/web/**/*.tsx",
+      "apps/*/e2e/**/*.ts"
+    ]
   },
   "formatter": {
     "enabled": true,
@@ -43,7 +51,7 @@
   },
   "overrides": [
     {
-      "includes": ["packages/*/test/**", "apps/*/test/**"],
+      "includes": ["packages/*/test/**", "apps/*/test/**", "apps/*/e2e/**"],
       "linter": {
         "rules": {
           "style": {
