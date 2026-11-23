@@ -5,11 +5,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ModelChange, Position, ProjectView } from "../src/types.ts";
 import { api, HostError } from "./api.ts";
 import { Canvas } from "./components/Canvas.tsx";
+import { ChangeTray } from "./components/ChangeTray.tsx";
 import { Inspector } from "./components/Inspector.tsx";
 import type { InspectorTarget } from "./components/Inspector.tsx";
 import { ModuleList } from "./components/ModuleList.tsx";
 import { ProjectBar } from "./components/ProjectBar.tsx";
 import { HostDown, LoadingScreen, StateScreen } from "./components/StateScreen.tsx";
+import { DraftProvider } from "./draft.tsx";
 import { Icon } from "./icons.tsx";
 
 const POLL_MS = 3000;
@@ -129,6 +131,7 @@ export function App() {
               onTidy={() => layoutCall(api.tidy())}
               focusRequest={focus}
             />
+            <ChangeTray graph={graph} />
           </div>
         </ReactFlowProvider>
         <Inspector
@@ -153,7 +156,7 @@ export function App() {
         pulse={pulse}
         onRefresh={() => load(true)}
       />
-      {content}
+      <DraftProvider graph={graph}>{content}</DraftProvider>
     </div>
   );
 }

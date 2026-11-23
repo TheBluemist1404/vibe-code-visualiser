@@ -15,6 +15,7 @@ import type { Edge, EdgeProps, Node, NodeChange, NodeProps } from "@xyflow/react
 import { applyNodeChanges } from "@xyflow/react";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { GraphView, ModuleEdgeView, ModuleNodeView, Position } from "../../src/types.ts";
+import { useDraft } from "../draft.tsx";
 import { Icon } from "../icons.tsx";
 import { kindLabel, kindVar } from "../kinds.ts";
 
@@ -32,13 +33,21 @@ type DependencyFlowEdge = Edge<EdgeData, "dependency">;
 const ModuleNode = memo(function ModuleNode({ data }: NodeProps<ModuleFlowNode>) {
   const { module: m, pinned, isNew, role, index } = data;
   const counts = Object.entries(m.owned).filter(([k]) => k !== "attribute" && k !== "state" && k !== "transition");
-  const cls = ["node", role !== "none" ? `is-${role}` : "", isNew ? "is-new" : ""].filter(Boolean).join(" ");
+  const staged = useDraft().draft?.edits.some((e) => e.objectId === m.id) ?? false;
+  const cls = ["node", role !== "none" ? `is-${role}` : "", isNew ? "is-new" : "", staged ? "is-staged" : ""]
+    .filter(Boolean)
+    .join(" ");
   return (
     <div className={cls} style={{ "--i": index } as React.CSSProperties} data-module={m.id} data-pinned={pinned}>
       <Handle type="target" position={Side.Top} isConnectable={false} />
       <div className="node-name">
         {m.name}
         {isNew && <span className="chip chip-new">New</span>}
+        {staged && (
+          <span className="chip chip-staged" title="You staged an edit to this module; it is not in the model yet">
+            Staged
+          </span>
+        )}
         {pinned && (
           <span className="node-pin" title="Pinned: you placed it">
             <Icon name="pin" small />

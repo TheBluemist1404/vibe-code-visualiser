@@ -1,5 +1,5 @@
-// The inspector: project summary, a module with what it owns, or one object. Read-only in this
-// slice; every value shown is read from the current model revision.
+// The inspector: project summary, a module with what it owns, or one object. Values shown are
+// read from the current model revision; edits are only staged here (Fields.tsx, ChangeTray.tsx).
 import { useEffect, useState } from "react";
 import type {
   GraphView,
@@ -11,8 +11,10 @@ import type {
   Position,
 } from "../../src/types.ts";
 import { api } from "../api.ts";
+import { useDraft } from "../draft.tsx";
 import { Icon } from "../icons.tsx";
 import { KIND_ORDER, kindLabel, kindTitle, kindVar } from "../kinds.ts";
+import { Fields } from "./Fields.tsx";
 
 export type InspectorTarget =
   | { kind: "project" }
@@ -235,9 +237,41 @@ function ProjectPanel({ graph, observation, change, onSelectModule }: Props) {
             </dd>
           </dl>
         </section>
+        <PendingProposals modelKey={graph.modelKey} />
         <Diagnostics observation={observation} />
       </div>
     </>
+  );
+}
+
+/** Proposals recorded in this checkout and waiting for a reviewer. Read-only: no approve here. */
+function PendingProposals({ modelKey }: { modelKey: string }) {
+  const { submitted } = useDraft();
+  const { data, error } = useRead(() => api.proposals(), `proposals:${submitted}`, modelKey);
+  if (error || !data || data.total === 0) return null;
+  return (
+    <section className="sec" data-testid="pending-proposals">
+      <h2 className="sec-head">
+        <Icon name="send" /> Waiting for review<span className="count">{data.total}</span>
+      </h2>
+      <ul className="list">
+        {data.proposals.map((p) => (
+          <li key={p.changeId} className="pending">
+            <span className="item-main">
+              <span className="item-title mono">{p.changeId}</span>
+              <span className="item-sub">
+                {p.lifecycle === "stale" ? "stale, " : ""}
+                {p.operations} operation{p.operations === 1 ? "" : "s"} on {p.baseRevision} by {p.proposerId}
+                {p.rationale ? `: ${p.rationale}` : ""}
+              </span>
+            </span>
+          </li>
+        ))}
+      </ul>
+      <p className="small muted" style={{ margin: "var(--space-2) 0 0" }}>
+        A reviewer approves with <span className="mono">vcv review approve</span> and their own key. The browser cannot.
+      </p>
+    </section>
   );
 }
 
@@ -372,6 +406,9 @@ function ModulePanel({ id, graph, onSelectModule, onOpenObject, onUnpin }: Props
         {data.module.purpose ? (
           <p className="declared" data-testid="inspector-purpose">
             {data.module.purpose}
+            <span className="ro-mark" title="Read-only: no typed operation changes a module's purpose yet">
+              <Icon name="lock" small />
+            </span>
           </p>
         ) : (
           <p className="small muted" style={{ margin: 0 }}>
@@ -382,6 +419,13 @@ function ModulePanel({ id, graph, onSelectModule, onOpenObject, onUnpin }: Props
         <PinPanel position={graph.positions[id]} onUnpin={() => onUnpin(id)} />
       </div>
       <div className="insp-scroll">
+        <Fields
+          access={data.access}
+          objectId={data.module.id}
+          objectName={data.module.name}
+          objectKind="module"
+          graph={graph}
+        />
         <LinkList
           title="Depends on"
           icon="arrowRight"
@@ -464,6 +508,7 @@ function ObjectPanel({ id, graph, onSelectModule, onOpenObject }: Props & { id: 
         {typeof r.description === "string" && <p className="note">{r.description}</p>}
       </div>
       <div className="insp-scroll">
+        <Fields access={data.access} objectId={o.id} objectName={o.name} objectKind={o.kind} graph={graph} />
         {r.attributes && (
           <section className="sec">
             <h2 className="sec-head">

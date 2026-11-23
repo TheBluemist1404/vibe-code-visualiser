@@ -3,6 +3,7 @@
 import { buildIndex, isUnresolved, refId } from "@vcv/ir";
 import type { Model } from "@vcv/ir";
 import type { QueryApi } from "@vcv/query";
+import { fieldAccess } from "./edits.ts";
 import type { DependencyKind, ModuleView, ObjectRef, ObjectView, OwnedObject } from "./types.ts";
 
 export class NotFoundError extends Error {
@@ -133,6 +134,7 @@ export function moduleView(model: Model, query: QueryApi, moduleId: string, mode
     },
     ...moduleLinks(model, moduleId),
     owned: ownedSummary(model, names, moduleId),
+    access: fieldAccess("module", focus.record as Record<string, unknown>),
     truncated: ctx.data.truncated,
   };
 }
@@ -171,6 +173,7 @@ export function objectView(model: Model, query: QueryApi, id: string, modelKey: 
       record: focus.record as Record<string, unknown>,
     },
     relations,
+    access: fieldAccess(focus.kind, focus.record as Record<string, unknown>),
     truncated: ctx.data.truncated,
   };
 }

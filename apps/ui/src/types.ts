@@ -93,6 +93,22 @@ export type OwnedObject = ObjectRef & {
   facts: string[];
 };
 
+/** Fields the inspector may stage edits for; each maps to one typed operation (src/edits.ts). */
+export type EditableFieldName = "name" | "description" | "statement" | "dependsOn";
+
+/** What the host lets the inspector edit on one object, and why the rest is read-only. */
+export type FieldAccess = {
+  editable: {
+    field: EditableFieldName;
+    label: string;
+    /** The typed operation an edit of this field becomes. */
+    operation: string;
+    input: "line" | "text" | "modules";
+    value: string | string[] | null;
+  }[];
+  readOnly: { field: string; label: string; reason: string }[];
+};
+
 export type ModuleView = {
   revision: string;
   /** Same as GraphView.modelKey for the model this answer was read from. */
@@ -102,6 +118,7 @@ export type ModuleView = {
   usedBy: (ObjectRef & { kind: DependencyKind; via: string[] })[];
   /** Owned objects grouped by kind, in IR order. */
   owned: Record<string, OwnedObject[]>;
+  access: FieldAccess;
   truncated: boolean;
 };
 
@@ -116,7 +133,84 @@ export type ObjectView = {
     other: ObjectRef & { moduleId?: string };
     declaredAt: string;
   }[];
+  access: FieldAccess;
   truncated: boolean;
 };
+
+/** One staged edit: a new value for one editable field of one object. */
+export type StagedEdit = { objectId: string; field: EditableFieldName; value: string | string[] };
+
+/**
+ * A draft the browser holds until it is submitted. `expectedRevision` and `modelKey` are the
+ * model the edits were staged on; the host never moves them to a newer model on its own.
+ */
+export type DraftRequest = {
+  expectedRevision: string;
+  modelKey: string;
+  rationale?: string;
+  edits: StagedEdit[];
+};
+
+/** A diagnostic from the engine about a draft, with the field path and a hint when there is one. */
+export type ProposalDiagnostic = { code: string; severity?: string; path?: string; message: string; hint?: string };
+
+/** A dry run of the draft: the engine's own validation, delta and impact. Nothing is written. */
+export type DraftPreview = {
+  operations: { index: number; type: string; summary: string }[];
+  expectedRevision: string;
+  currentRevision: string;
+  validation: { appliesToCurrent: boolean; errors: ProposalDiagnostic[]; warnings: ProposalDiagnostic[] };
+  delta: {
+    /** "base": the draft is stale, so the delta is against the revision it was staged on. */
+    against: "current" | "base";
+    revision: string;
+    changes: {
+      id: string;
+      kind: string;
+      name: string;
+      moduleId: string | null;
+      change: "added" | "removed" | "modified";
+      fields: { field: string; before?: string; after?: string; truncated?: true }[];
+    }[];
+    total: number;
+    truncated: boolean;
+  } | null;
+  impact: {
+    modules: { id: string; name: string; via: "changed" | "impacted" }[];
+    crossModule: "yes" | "no" | "not-determined";
+    total: number;
+    note: string;
+  } | null;
+  bindings: { total: number; note: string };
+  assumptions: string[];
+};
+
+/** The answer to a submit: a pending proposal, or why nothing was recorded. */
+export type SubmitView = {
+  status: "pending" | "rejected" | "denied" | "not-submitted";
+  recorded: boolean;
+  changeId: string | null;
+  proposalDigest: string | null;
+  proposerId: string;
+  /** .vcv/HEAD before and after: always equal; the browser never moves the model. */
+  modelRevision: { before: string; after: string };
+  diagnostics: ProposalDiagnostic[];
+  preview: DraftPreview;
+  /** What a person runs next. The browser shows these; it never approves. */
+  commands: { preview: string; approve: string } | null;
+  next: string;
+};
+
+export type PendingProposal = {
+  changeId: string;
+  lifecycle: string;
+  proposerId: string | null;
+  baseRevision: string | null;
+  operations: number;
+  rationale?: string;
+  proposalDigest: string | null;
+};
+
+export type ProposalsView = { proposals: PendingProposal[]; total: number; modelKey: string };
 
 export type ApiError = { error: { code: string; message: string } };

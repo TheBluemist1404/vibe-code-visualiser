@@ -1,5 +1,14 @@
 // Calls to the local UI host. Same origin only; every write sends a JSON body.
-import type { ModuleView, ObjectView, Position, ProjectView } from "../src/types.ts";
+import type {
+  DraftPreview,
+  DraftRequest,
+  ModuleView,
+  ObjectView,
+  Position,
+  ProjectView,
+  ProposalsView,
+  SubmitView,
+} from "../src/types.ts";
 
 export class HostError extends Error {
   readonly code: string;
@@ -11,7 +20,7 @@ export class HostError extends Error {
   }
 }
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
+async function call<T>(path: string, init?: RequestInit, accept: number[] = []): Promise<T> {
   let res: Response;
   try {
     res = await fetch(path, { cache: "no-store", ...init });
@@ -19,12 +28,17 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     throw new HostError(0, "HOST_UNREACHABLE", "the VCV host is not answering; is `npm run ui` still running?");
   }
   const body = (await res.json().catch(() => null)) as { error?: { code: string; message: string } } | null;
-  if (!res.ok) throw new HostError(res.status, body?.error?.code ?? "HTTP", body?.error?.message ?? res.statusText);
+  if (!res.ok && !accept.includes(res.status))
+    throw new HostError(res.status, body?.error?.code ?? "HTTP", body?.error?.message ?? res.statusText);
   return body as T;
 }
 
-const post = <T>(path: string, body: unknown) =>
-  call<T>(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+const post = <T>(path: string, body: unknown, accept: number[] = []) =>
+  call<T>(
+    path,
+    { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) },
+    accept,
+  );
 
 type Positions = { positions: Record<string, Position> };
 
@@ -35,4 +49,8 @@ export const api = {
   pin: (id: string, x: number, y: number) => post<Positions>("/api/layout/pin", { id, x, y }),
   unpin: (id: string) => post<Positions>("/api/layout/unpin", { id }),
   tidy: () => post<Positions>("/api/layout/tidy", {}),
+  proposals: () => call<ProposalsView>("/api/proposals"),
+  preview: (draft: DraftRequest) => post<DraftPreview>("/api/proposals/preview", draft),
+  /** 422 is an answer, not a failure: the draft was checked and nothing was recorded. */
+  submit: (draft: DraftRequest) => post<SubmitView>("/api/proposals/submit", draft, [422]),
 };
