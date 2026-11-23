@@ -19,7 +19,6 @@ import {
   openSync,
   readFileSync,
   realpathSync,
-  renameSync,
   unlinkSync,
   writeSync,
 } from "node:fs";
@@ -55,8 +54,6 @@ export type LockOptions = {
 
 /** A lock file whose owner cannot be read is assumed to be a torn write after this long. */
 const UNREADABLE_GRACE_MS = 10_000;
-/** The break guard is held for a few file operations; one older than this was left by a crash. */
-const BREAK_GUARD_STALE_MS = 30_000;
 
 type Held = { token: string; depth: number };
 // Per process, shared by every copy of this module (several import paths can load it twice).
@@ -169,39 +166,63 @@ function isStale(holder: LockOwner | null, lockPath: string): boolean {
 }
 
 /**
- * Remove a stale lock without racing another breaker: under a short-lived break guard, the lock
- * is renamed aside and only discarded if it is still exactly the stale file that was judged; if a
- * live writer's lock was moved by mistake it is put back.
+ * Remove a stale lock without ever displacing a live one.
+ *
+ * Every removal of someone else's lock happens under the break guard (`writer.lock.break`,
+ * created exclusively like the lock itself), and the lock is re-read and re-judged *inside* the
+ * guard. While the guard is held the lock path cannot change under us: its stale owner cannot
+ * release it (it is not running), no other breaker can act (they need the guard), and an
+ * acquirer only creates the file when it is absent. So if the content is still exactly the
+ * stale owner record we judged, unlinking it removes that file and nothing else. If it changed
+ * (another breaker already removed it and a live writer took the lock) we touch nothing and the
+ * caller re-evaluates from scratch. Nothing is renamed, so there is no window in which a live
+ * lock is moved aside.
+ *
+ * The guard itself is never broken automatically: breaking it would need the same guarantee one
+ * level up. A guard left by a breaker that died mid-cleanup (a few file operations) fails closed
+ * with LOCKED and tells the person what to delete.
  */
 function breakStale(dir: string, lockPath: string, judged: string): void {
+  lockTestHooks.beforeBreak?.();
   const guard = join(dir, "writer.lock.break");
-  if (!tryCreate(guard, `${process.pid}\n`)) {
-    if (ageMs(guard) > BREAK_GUARD_STALE_MS) rmQuiet(guard);
-    else sleep(5);
-    return;
-  }
-  try {
-    const aside = `${lockPath}.stale-${randomBytes(4).toString("hex")}`;
-    try {
-      renameSync(lockPath, aside);
-    } catch (e) {
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") return;
-      throw e;
-    }
-    if (readOrNull(aside) === judged) {
-      rmQuiet(aside);
+  const token = randomBytes(12).toString("hex");
+  const mine: LockOwner = {
+    format: 1,
+    token,
+    pid: process.pid,
+    thread: threadId,
+    host: hostname(),
+    ...(BOOT_ID ? { boot: BOOT_ID } : {}),
+    acquiredAt: new Date().toISOString(),
+    purpose: "break a stale writer lock",
+  };
+  if (!tryCreate(guard, `${JSON.stringify(mine)}\n`)) {
+    const other = parseOwner(readOrNull(guard));
+    if (other && !isStale(other, guard)) {
+      sleep(5); // another breaker is at work; the caller re-evaluates
       return;
     }
-    try {
-      linkSync(aside, lockPath); // not the file we judged: restore it
-    } catch {
-      // someone took the free lock in between; the moved lock's owner will find it is no longer theirs
+    if (!other && ageMs(guard) <= UNREADABLE_GRACE_MS) {
+      sleep(5);
+      return;
     }
-    rmQuiet(aside);
+    throw new StoreError(
+      "LOCKED",
+      `a stale-lock cleanup was interrupted (${guard}${other ? `, left by ${describe(other)}` : ""}, which is not running); nothing was written. If no VCV process is running, delete that file and retry.`,
+    );
+  }
+  try {
+    const now = readOrNull(lockPath);
+    if (now === null || now !== judged) return; // released, or already replaced by a live writer
+    if (!isStale(parseOwner(now), lockPath)) return;
+    rmQuiet(lockPath);
   } finally {
-    rmQuiet(guard);
+    if (parseOwner(readOrNull(guard))?.token === token) rmQuiet(guard);
   }
 }
+
+/** Test-only hooks (not exported from the package index). */
+export const lockTestHooks: { beforeBreak?: () => void } = {};
 
 /** Exclusive create with complete content: write a temp file, then hard-link it into place. */
 function tryCreate(path: string, text: string): boolean {

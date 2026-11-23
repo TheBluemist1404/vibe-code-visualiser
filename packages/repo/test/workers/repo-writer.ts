@@ -2,13 +2,16 @@
 // approval (engine commit + attestation) and the proposal surface, as the CLI runs them.
 // Usage: node --experimental-strip-types repo-writer.ts '<json task>'; prints JSON lines.
 import { existsSync } from "node:fs";
-import { reviewApprove, submitProposal } from "../../src/index.ts";
+import { initProject, reviewApprove, submitProposal } from "../../src/index.ts";
+import type { Model } from "@vcv/ir";
 import type { ReviewApproveInput } from "../../src/index.ts";
 import type { HostContext } from "../../../core/src/index.ts";
 
 type Task = {
   repo: string;
-  action: "approve" | "submit";
+  action: "approve" | "submit" | "init";
+  /** For "init": the initial model. */
+  model?: Model;
   approve?: ReviewApproveInput;
   change?: unknown;
   host?: HostContext;
@@ -23,7 +26,9 @@ const out = (v: unknown) => process.stdout.write(`${JSON.stringify(v)}\n`);
 out({ ready: true });
 if (task.barrier) while (!existsSync(task.barrier)) Atomics.wait(sleeper, 0, 0, 1);
 try {
-  if (task.action === "approve") {
+  if (task.action === "init") {
+    out({ init: initProject(task.repo, task.model!).state });
+  } else if (task.action === "approve") {
     const r = reviewApprove(task.repo, {
       ...task.approve!,
       ...(task.crashAfterCommit ? { afterCommit: () => process.exit(137) } : {}),

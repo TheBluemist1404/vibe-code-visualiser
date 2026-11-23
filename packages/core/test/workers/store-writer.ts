@@ -5,10 +5,13 @@
 import { existsSync } from "node:fs";
 import { FileStore, ModelEngine, withStoreLock } from "../../src/index.ts";
 import type { CommitStep, HostContext, ProposedModelChange } from "../../src/index.ts";
+import type { Model } from "@vcv/ir";
 
 type Task = {
   dir: string;
-  action: "propose" | "approve" | "hold" | "open";
+  action: "propose" | "approve" | "hold" | "open" | "init";
+  /** For "init": the initial model. */
+  model?: Model;
   ctx?: HostContext;
   change?: ProposedModelChange;
   changeId?: string;
@@ -30,7 +33,17 @@ out({ ready: true });
 if (task.barrier) while (!existsSync(task.barrier)) sleep(1);
 
 try {
-  if (task.action === "hold") {
+  if (task.action === "init") {
+    FileStore.init(task.dir, task.model!, {
+      beforeStep: (step) => {
+        if (task.pauseAt?.step === step) {
+          out({ paused: step });
+          sleep(task.pauseAt.ms);
+        }
+      },
+    });
+    out({ init: "ok" });
+  } else if (task.action === "hold") {
     withStoreLock(
       task.dir,
       () => {

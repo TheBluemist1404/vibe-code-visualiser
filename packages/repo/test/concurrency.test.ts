@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tempDir } from "@vcv/testkit";
 import { LOCK_FILE, proposalDigest } from "../../core/src/index.ts";
@@ -17,7 +17,9 @@ import {
   submitProposal,
 } from "../src/index.ts";
 import type { TrustSource } from "../src/index.ts";
-import { baseline, git } from "./course-desk.ts";
+import { VCV_GITIGNORE } from "../src/project.ts";
+import { DRAFT, baseline, git } from "./course-desk.ts";
+import { loadModel } from "@vcv/ir";
 
 const WORKER = join(import.meta.dirname, "workers", "repo-writer.ts");
 const agent: HostContext = { principalId: "agent:coder", permissions: ["model:propose"] };
@@ -161,4 +163,25 @@ test("the writer lock never shows in Git: cache/ is ignored by .vcv/.gitignore",
   assert.ok(existsSync(join(repo, ".vcv/cache")), "the lock directory was created");
   const status = git(repo, "status", "--porcelain", "--ignored=no", ".vcv");
   assert.ok(!/cache/.test(status), status);
+});
+
+test("vcv init racing on one uninitialized checkout: exactly one initializes; the others get ALREADY_INITIALIZED and leave the winner's model and .gitignore intact", async () => {
+  const repo = join(realpathSync(tempDir("vcv-init-")), "checkout");
+  mkdirSync(repo);
+  git(repo, "init", "-q", "-b", "main");
+  const models = [0, 1, 2, 3].map((i) => {
+    const m = loadModel(readFileSync(DRAFT, "utf8")).model!;
+    m.project.name = `Course Desk ${i}`;
+    return m;
+  });
+  const out = await race(models.map((model) => ({ repo, action: "init", model })));
+  const winners = out.filter((o) => o.init === "ready");
+  assert.equal(winners.length, 1, JSON.stringify(out));
+  assert.equal(out.filter((o) => o.error === "ALREADY_INITIALIZED").length, 3, JSON.stringify(out));
+  const st = projectStatus(repo);
+  assert.equal(st.state, "ready");
+  assert.match(st.model!.revision, /^rev-1/);
+  assert.deepEqual(readdirSync(join(repo, ".vcv", "revisions")).length, 1);
+  assert.equal(readFileSync(join(repo, ".vcv", ".gitignore"), "utf8"), VCV_GITIGNORE);
+  assert.ok(!existsSync(join(repo, LOCK_FILE)));
 });

@@ -2,7 +2,8 @@
 // propose/approve paths on one FileStore, crash injection, and the lock's own rules.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
+import { Worker as Thread } from "node:worker_threads";
 import { cpSync, existsSync, readFileSync, readdirSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
@@ -18,6 +19,7 @@ import {
   withStoreLock,
 } from "../src/index.ts";
 import type { ChangeRecord, CommitStep, HostContext, ProposedModelChange } from "../src/index.ts";
+import { lockTestHooks } from "../src/store/lock.ts";
 import { baseModel, mcpAgent, owner, reviewer } from "./helpers.ts";
 
 const WORKER = join(import.meta.dirname, "workers", "store-writer.ts");
@@ -388,4 +390,126 @@ test("a branch swap while a writer validates (lock held) is still refused by the
   assert.equal(readFileSync(join(base, "HEAD"), "utf8"), otherHead, "the other line's HEAD is untouched");
   assert.equal(readdirSync(join(base, "revisions")).length, 2, "no revision written");
   assert.ok(lockFree(base));
+});
+
+/** A lock owner record for a process on this host that has exited: provably stale. */
+function deadOwner(purpose: string) {
+  const child = spawnSync(process.execPath, ["-e", "0"]);
+  return {
+    format: 1,
+    token: `dead-${child.pid}`,
+    pid: child.pid,
+    thread: 0,
+    host: hostname(),
+    acquiredAt: "",
+    purpose,
+  };
+}
+
+test("stale takeover never displaces a live lock: A is stale, B breaks it and holds a live lock, then a delayed breaker C must not remove B", async () => {
+  const dir = freshStore();
+  const lock = join(dir, LOCK_FILE);
+  const a = `${JSON.stringify(deadOwner("crashed writer A"))}\n`;
+  writeFileSync(lock, a);
+
+  const flags = new SharedArrayBuffer(8);
+  const f = new Int32Array(flags);
+  let b: Thread | undefined;
+  // C (this thread) has read A and judged it stale. Before C acts on that judgment, B (another
+  // thread) breaks A itself and takes the lock as a live writer.
+  lockTestHooks.beforeBreak = () => {
+    lockTestHooks.beforeBreak = undefined;
+    b = new Thread(join(import.meta.dirname, "workers", "lock-thread.ts"), { workerData: { dir, flags } });
+    const until = Date.now() + 10_000;
+    while (Atomics.load(f, 0) === 0 && Date.now() < until) Atomics.wait(f, 0, 0, 50);
+    assert.equal(Atomics.load(f, 0), 1, "B took the lock");
+  };
+  try {
+    assert.throws(
+      () => withStoreLock(dir, () => assert.fail("C must not run while B holds the lock"), { timeoutMs: 400 }),
+      (e: { code: string; message: string }) => {
+        assert.equal(e.code, "LOCKED");
+        assert.match(e.message, /live writer B/);
+        return true;
+      },
+    );
+    const bOwner = readLockOwner(dir);
+    assert.equal(bOwner?.purpose, "live writer B", "B's lock is still in place, untouched");
+    assert.notEqual(readFileSync(lock, "utf8"), a);
+    // A third writer arriving now waits on B too: the vacated-path window does not exist.
+    assert.throws(() => withStoreLock(dir, () => 0, { timeoutMs: 200 }), { code: "LOCKED" });
+    assert.equal(readLockOwner(dir)?.token, bOwner?.token);
+  } finally {
+    lockTestHooks.beforeBreak = undefined;
+    Atomics.store(f, 1, 1);
+    Atomics.notify(f, 1);
+    await new Promise((r) => b?.once("exit", r) ?? r(null));
+  }
+  assert.ok(lockFree(dir), "B released its own lock");
+  assert.equal(
+    withStoreLock(dir, () => 1, { timeoutMs: 1000 }),
+    1,
+  );
+});
+
+test("a stale lock is broken exactly once by racing breakers; an interrupted break guard fails closed instead of being broken", async () => {
+  const dir = freshStore();
+  const lock = join(dir, LOCK_FILE);
+  writeFileSync(lock, JSON.stringify(deadOwner("crashed writer")));
+  // Several processes find the same stale lock at once: all of them end up writing in turn.
+  const out = await race(
+    Array.from({ length: 4 }, (_, i) => ({ dir, action: "propose", ctx: owner, change: rename(`chg-${i}`, `N${i}`) })),
+  );
+  assert.equal(out.filter((o) => o.status === "applied").length, 1, JSON.stringify(out));
+  assert.ok(out.every((o) => o.status === "applied" || (o.codes as string[]).includes("STALE_REVISION")));
+  assert.ok(lockFree(dir));
+  assertHealthy(dir);
+
+  // A breaker that died inside its guard leaves writer.lock.break: never broken automatically.
+  writeFileSync(lock, JSON.stringify(deadOwner("crashed writer")));
+  writeFileSync(join(dir, "cache", "writer.lock.break"), JSON.stringify(deadOwner("break a stale writer lock")));
+  const before = storeFingerprint(dir);
+  assert.throws(
+    () => withStoreLock(dir, () => 0, { timeoutMs: 500 }),
+    (e: { code: string; message: string }) => {
+      assert.equal(e.code, "LOCKED");
+      assert.match(e.message, /stale-lock cleanup was interrupted.*delete that file/);
+      return true;
+    },
+  );
+  assert.equal(storeFingerprint(dir), before);
+  rmSync(join(dir, "cache", "writer.lock.break"));
+  assert.equal(
+    withStoreLock(dir, () => 2, { timeoutMs: 1000 }),
+    2,
+  );
+});
+
+test("initialization is under the lock: of concurrent initializers with different models exactly one writes; the others get ALREADY_INITIALIZED and wrote nothing", async () => {
+  const dir = join(tempDir("vcv-init-race-"), "store");
+  const models = [0, 1, 2, 3].map((i) => {
+    const m = baseModel();
+    m.project.name = `Model ${i}`;
+    return m;
+  });
+  // The first initializer pauses after its HEAD check, holding the lock; the rest start then.
+  let paused!: () => void;
+  const pausedP = new Promise<void>((r) => {
+    paused = r;
+  });
+  const first = worker({ dir, action: "init", model: models[0], pauseAt: { step: "init.checked", ms: 800 } }, (l) => {
+    if (l.paused) paused();
+  });
+  await pausedP;
+  const rest = models.slice(1).map((m) => worker({ dir, action: "init", model: m }));
+  const results = [await first.done, ...(await Promise.all(rest.map((w) => w.done)))].map((r) => r.lines.at(-1)!);
+  assert.deepEqual(
+    results.map((r) => r.init ?? r.error),
+    ["ok", "ALREADY_INITIALIZED", "ALREADY_INITIALIZED", "ALREADY_INITIALIZED"],
+  );
+  const store = new FileStore(dir);
+  assert.equal(store.current().project.name, "Model 0", "the winner's model, never a mix");
+  assert.deepEqual(readdirSync(join(dir, "revisions")), ["rev-1.yaml"]);
+  assertHealthy(dir);
+  assert.ok(lockFree(dir));
 });
