@@ -8,7 +8,6 @@ import {
   MiniMap,
   Position as Side,
   ReactFlow,
-  useNodesInitialized,
   useReactFlow,
   useViewport,
 } from "@xyflow/react";
@@ -143,7 +142,8 @@ export type CanvasProps = {
   onSelect(id: string | null): void;
   onPin(id: string, x: number, y: number): void;
   onTidy(): void;
-  focusRequest: { id: string; seq: number } | null;
+  /** Bring these modules into view (module list, inspector link, "Locate new"). */
+  focusRequest: { ids: string[]; seq: number } | null;
 };
 
 export function Canvas({ graph, selected, fresh, onSelect, onPin, onTidy, focusRequest }: CanvasProps) {
@@ -254,7 +254,6 @@ export function Canvas({ graph, selected, fresh, onSelect, onPin, onTidy, focusR
         <Tools onTidy={onTidy} />
         <Zoom />
         <FocusOn request={focusRequest} />
-        <FitOnChange count={graph.modules.length} />
       </ReactFlow>
       <div className="legend" role="note" aria-label="Legend">
         <span>
@@ -333,29 +332,23 @@ function Zoom() {
   );
 }
 
-/** Pan to a module chosen outside the canvas (module list, inspector link). */
-function FocusOn({ request }: { request: { id: string; seq: number } | null }) {
+/**
+ * Move the view only when the user asks: one module is centred, several are fitted. Model
+ * refreshes never move the view, so a user's pan and zoom survive added or removed modules.
+ */
+function FocusOn({ request }: { request: { ids: string[]; seq: number } | null }) {
   const flow = useReactFlow();
   useEffect(() => {
-    if (!request) return;
-    const n = flow.getNode(request.id);
+    if (!request || request.ids.length === 0) return;
+    if (request.ids.length > 1) {
+      flow.fitView({ nodes: request.ids.map((id) => ({ id })), padding: 0.4, maxZoom: 1, duration: 500 });
+      return;
+    }
+    const n = flow.getNode(request.ids[0] as string);
     if (!n) return;
     const w = n.measured?.width ?? 260;
     const h = n.measured?.height ?? 150;
     flow.setCenter(n.position.x + w / 2, n.position.y + h / 2, { zoom: Math.max(flow.getZoom(), 0.8), duration: 500 });
   }, [request, flow]);
-  return null;
-}
-
-/** Fit the view again when modules are added or removed. */
-function FitOnChange({ count }: { count: number }) {
-  const flow = useReactFlow();
-  const ready = useNodesInitialized();
-  const seen = useRef(count);
-  useEffect(() => {
-    if (!ready || seen.current === count) return;
-    seen.current = count;
-    flow.fitView({ padding: 0.3, maxZoom: 1, duration: 600 });
-  }, [count, ready, flow]);
   return null;
 }

@@ -112,7 +112,7 @@ function moduleLinks(model: Model, moduleId: string): { dependsOn: Link[]; usedB
   return { dependsOn, usedBy };
 }
 
-export function moduleView(model: Model, query: QueryApi, moduleId: string): ModuleView {
+export function moduleView(model: Model, query: QueryApi, moduleId: string, modelKey: string): ModuleView {
   const revision = model.project.modelRevision;
   const ctx = query.getContext({ id: moduleId, expectedRevision: revision, depth: 1, maxNodes: 200, maxEdges: 1000 });
   if (!ctx.ok) throw new NotFoundError(ctx.error.code, ctx.error.message);
@@ -122,6 +122,7 @@ export function moduleView(model: Model, query: QueryApi, moduleId: string): Mod
   const names = new Map([...buildIndex(model).byId.values()].map((e) => [e.id, e.name]));
   return {
     revision,
+    modelKey,
     module: {
       id: focus.id,
       kind: focus.kind,
@@ -136,12 +137,14 @@ export function moduleView(model: Model, query: QueryApi, moduleId: string): Mod
   };
 }
 
-export function objectView(model: Model, query: QueryApi, id: string): ObjectView {
+export function objectView(model: Model, query: QueryApi, id: string, modelKey: string): ObjectView {
   const revision = model.project.modelRevision;
   const ctx = query.getContext({ id, expectedRevision: revision, depth: 1, maxNodes: 200, maxEdges: 1000 });
   if (!ctx.ok) throw new NotFoundError(ctx.error.code, ctx.error.message);
   const { focus, edges, nodes } = ctx.data;
-  const refs = new Map<string, ObjectRef>(nodes.map((n) => [n.id, { id: n.id, kind: n.kind, name: n.name }]));
+  const refs = new Map<string, ObjectRef & { moduleId?: string }>(
+    nodes.map((n) => [n.id, { id: n.id, kind: n.kind, name: n.name, ...(n.moduleId ? { moduleId: n.moduleId } : {}) }]),
+  );
   const relations: ObjectView["relations"] = [];
   for (const e of edges) {
     if (typeof e.to !== "string") continue;
@@ -157,6 +160,7 @@ export function objectView(model: Model, query: QueryApi, id: string): ObjectVie
   }
   return {
     revision,
+    modelKey,
     object: {
       id: focus.id,
       kind: focus.kind,

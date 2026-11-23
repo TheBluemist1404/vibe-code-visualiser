@@ -17,7 +17,7 @@ export type Observation = {
     storeChanges: string[];
     operation: string | null;
   } | null;
-  model: { projectId: string; revision: string; status: string; history: string[] } | null;
+  model: { projectId: string; revision: string; status: string; history: string[]; key: string } | null;
   diagnostics: Diagnostic[];
   /** When the host read the checkout (ISO 8601). */
   observedAt: string;
@@ -52,6 +52,8 @@ export type Position = { x: number; y: number; pinned: boolean };
 export type GraphView = {
   project: { id: string; name: string; description?: string };
   revision: string;
+  /** Identity of the model read: the revision plus a digest of its file. Two branches can hold different models under the same revision ID (rev-1), so the revision alone is not enough. */
+  modelKey: string;
   modules: ModuleNodeView[];
   edges: ModuleEdgeView[];
   /** Declared references the graph could not draw (unresolved in a draft, or not a module). */
@@ -93,6 +95,8 @@ export type OwnedObject = ObjectRef & {
 
 export type ModuleView = {
   revision: string;
+  /** Same as GraphView.modelKey for the model this answer was read from. */
+  modelKey: string;
   module: ObjectRef & { purpose?: string; description?: string; irPath: string };
   dependsOn: (ObjectRef & { kind: DependencyKind; via: string[] })[];
   usedBy: (ObjectRef & { kind: DependencyKind; via: string[] })[];
@@ -103,8 +107,15 @@ export type ModuleView = {
 
 export type ObjectView = {
   revision: string;
+  modelKey: string;
   object: ObjectRef & { moduleId?: string; parentId?: string; irPath: string; record: Record<string, unknown> };
-  relations: { direction: "outgoing" | "incoming"; relation: string; other: ObjectRef; declaredAt: string }[];
+  /** `other.moduleId` is the module that owns the related object (absent for project-level objects). */
+  relations: {
+    direction: "outgoing" | "incoming";
+    relation: string;
+    other: ObjectRef & { moduleId?: string };
+    declaredAt: string;
+  }[];
   truncated: boolean;
 };
 

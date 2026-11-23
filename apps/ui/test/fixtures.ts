@@ -66,6 +66,37 @@ export function addAuditModule(repo: string): string {
   ]);
 }
 
+/** A criterion owned by Web that verifies Enrollment's capability: a cross-module reference. */
+export function addWebCriterion(repo: string): string {
+  return propose(repo, "chg-web-criterion", [
+    {
+      type: "createCriterion",
+      criterion: {
+        id: "crt-page-enrolls",
+        kind: "criterion",
+        owner: "mod-web",
+        name: "The page enrolls through the API",
+        statement: "Submitting the form sends one enrollment request and shows the recorded decision.",
+        verifies: ["cap-enroll"],
+        verification: "optional",
+      },
+    },
+  ]);
+}
+
+/** A branch whose own .vcv/ was initialized separately: the same revision ID (rev-1), a different model. */
+export function orphanBranchWithOtherModel(repo: string, branch: string, rename: string): void {
+  git(repo, "checkout", "-q", "--orphan", branch);
+  git(repo, "rm", "-rfq", ".");
+  const parsed = loadModel(readFileSync(DRAFT, "utf8"));
+  if (!parsed.model) throw new Error("the draft model does not load");
+  const web = parsed.model.modules.find((m) => m.id === "mod-web");
+  if (web) web.name = rename;
+  initProject(repo, parsed.model);
+  git(repo, "add", "-A");
+  git(repo, "commit", "-qm", "vcv: another rev-1");
+}
+
 export function renameModule(repo: string, changeId: string, id: string, name: string): string {
   return propose(repo, changeId, [{ type: "renameObject", objectId: id, name }]);
 }

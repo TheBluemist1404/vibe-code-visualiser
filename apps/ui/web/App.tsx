@@ -20,7 +20,7 @@ export function App() {
   const [refreshing, setRefreshing] = useState(false);
   const [pulse, setPulse] = useState(0);
   const [target, setTarget] = useState<InspectorTarget>({ kind: "project" });
-  const [focus, setFocus] = useState<{ id: string; seq: number } | null>(null);
+  const [focus, setFocus] = useState<{ ids: string[]; seq: number } | null>(null);
   const [banner, setBanner] = useState<ModelChange | null>(null);
   const [fresh, setFresh] = useState<ReadonlySet<string>>(new Set());
   const seenChange = useRef<number | null>(null);
@@ -81,7 +81,7 @@ export function App() {
 
   const selectModule = useCallback((id: string | null, pan = false) => {
     setTarget(id ? { kind: "module", id } : { kind: "project" });
-    if (id && pan) setFocus((f) => ({ id, seq: (f?.seq ?? 0) + 1 }));
+    if (id && pan) setFocus((f) => ({ ids: [id], seq: (f?.seq ?? 0) + 1 }));
   }, []);
 
   const applyPositions = useCallback((positions: Record<string, Position>) => {
@@ -111,6 +111,9 @@ export function App() {
               <ChangeBanner
                 change={banner}
                 onShow={() => setTarget({ kind: "project" })}
+                onLocate={
+                  fresh.size > 0 ? () => setFocus((f) => ({ ids: [...fresh], seq: (f?.seq ?? 0) + 1 })) : undefined
+                }
                 onDismiss={() => {
                   setBanner(null);
                   setFresh(new Set());
@@ -170,7 +173,17 @@ const LINE: Record<ModelChange["modelLine"], string> = {
   disappeared: "disappeared",
 };
 
-function ChangeBanner({ change, onShow, onDismiss }: { change: ModelChange; onShow(): void; onDismiss(): void }) {
+function ChangeBanner({
+  change,
+  onShow,
+  onLocate,
+  onDismiss,
+}: {
+  change: ModelChange;
+  onShow(): void;
+  onLocate?: () => void;
+  onDismiss(): void;
+}) {
   const branch =
     change.before.branch !== change.after.branch
       ? `Branch switched from ${change.before.branch ?? "none"} to ${change.after.branch ?? "none"}: `
@@ -192,6 +205,11 @@ function ChangeBanner({ change, onShow, onDismiss }: { change: ModelChange; onSh
             <button type="button" className="btn" onClick={onShow}>
               Show what changed
             </button>
+            {onLocate && (
+              <button type="button" className="btn" onClick={onLocate}>
+                Locate new
+              </button>
+            )}
             <button type="button" className="btn btn-ghost" onClick={onDismiss}>
               Dismiss
             </button>

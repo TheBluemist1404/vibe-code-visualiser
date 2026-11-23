@@ -17,6 +17,36 @@ const MAX_MODULES = 1000;
 
 type Served = { status: ProjectStatus; modules: string[] };
 
+/** A model snapshot that matches the project status it is served with. */
+type Snapshot =
+  | { status: ProjectStatus; model: Model; query: QueryApi; key: string }
+  | { status: ProjectStatus; model: null };
+
+/** Test seam: runs after the model is read and before the checkout is observed again. */
+export type SessionHooks = { afterModelRead?: () => void };
+
+/** How often a read is retried when the checkout moves under it. */
+const READ_ATTEMPTS = 3;
+
+export class StateChangedError extends Error {
+  readonly code = "STATE_CHANGED";
+}
+
+/** Identity of the served model: revision ID plus revision file digest. */
+export function modelKey(status: ProjectStatus): string | null {
+  return status.model ? `${status.model.revision}@${status.model.fileDigest ?? "unknown"}` : null;
+}
+
+/** True when two observations show the same checkout state: model, commit and branch. */
+function sameState(a: ProjectStatus, b: ProjectStatus): boolean {
+  return (
+    a.state === b.state &&
+    modelKey(a) === modelKey(b) &&
+    (a.git?.commit ?? null) === (b.git?.commit ?? null) &&
+    (a.git?.branch ?? null) === (b.git?.branch ?? null)
+  );
+}
+
 export class ProjectSession {
   readonly path: string;
   private readonly layouts: LayoutFileStore;
@@ -24,29 +54,30 @@ export class ProjectSession {
   private last: Served | null = null;
   private change: ModelChange | null = null;
   private seq = 0;
+  private readonly hooks: SessionHooks;
 
-  constructor(path: string, layouts: LayoutFileStore) {
+  constructor(path: string, layouts: LayoutFileStore, hooks: SessionHooks = {}) {
     this.path = path;
     this.layouts = layouts;
+    this.hooks = hooks;
   }
 
   /** Observe the checkout and build the canvas view. */
   view(): ProjectView {
-    const status = projectStatus(this.path);
-    const snapshot = this.snapshot(status);
-    const graph = snapshot ? this.graph(status, snapshot.model, snapshot.query) : null;
-    this.track(status, graph);
-    return { observation: observation(status), graph, lastChange: this.change };
+    const snap = this.read();
+    const graph = snap.model ? this.graph(snap.status, snap.model, snap.query, snap.key) : null;
+    this.track(snap.status, graph);
+    return { observation: observation(snap.status), graph, lastChange: this.change };
   }
 
   module(id: string): ModuleView {
     const s = this.requireReady();
-    return moduleView(s.model, s.query, id);
+    return moduleView(s.model, s.query, id, s.key);
   }
 
   object(id: string): ObjectView {
     const s = this.requireReady();
-    return objectView(s.model, s.query, id);
+    return objectView(s.model, s.query, id, s.key);
   }
 
   /** Pin a module where the user dropped it. Presentation state only. */
@@ -78,7 +109,7 @@ export class ProjectSession {
     ) => Record<string, Position>,
   ): Record<string, Position> {
     const s = this.requireReady();
-    const view = this.graph(s.status, s.model, s.query);
+    const view = this.graph(s.status, s.model, s.query, s.key);
     const ids = view.modules.map((m) => m.id);
     const next = fn(ids, view.positions, view.edges);
     this.layouts.save(s.status.root, s.model.project.id, next);
@@ -86,25 +117,43 @@ export class ProjectSession {
   }
 
   private requireReady() {
-    const status = projectStatus(this.path);
-    const snapshot = this.snapshot(status);
-    if (!snapshot) throw new NotFoundError("NOT_READY", `the project is ${status.state}; nothing can be read from it`);
-    return { status, ...snapshot };
+    const snap = this.read();
+    if (!snap.model)
+      throw new NotFoundError("NOT_READY", `the project is ${snap.status.state}; nothing can be read from it`);
+    return snap;
   }
 
-  /** One model snapshot plus a query API bound to exactly that snapshot. */
-  private snapshot(status: ProjectStatus): { model: Model; query: QueryApi } | null {
-    if (status.state !== "ready") {
-      this.reader = null;
-      return null;
+  /**
+   * Observe the checkout, read the model, and observe again. The model is served only when both
+   * observations agree (same model identity, commit and branch) and the model read is the one
+   * they name; otherwise the checkout moved mid-read (a branch switch, a commit) and the read is
+   * retried, so status, model and Git metadata in one answer always belong together.
+   */
+  private read(): Snapshot {
+    for (let attempt = 0; attempt < READ_ATTEMPTS; attempt++) {
+      const status = projectStatus(this.path);
+      if (status.state !== "ready" || !status.model) {
+        this.reader = null;
+        return { status, model: null };
+      }
+      if (this.reader?.storeDir !== status.storeDir)
+        this.reader = { storeDir: status.storeDir, reader: new FileStoreReader(status.storeDir) };
+      let model: Model;
+      try {
+        model = this.reader.reader.current();
+      } catch {
+        continue; // the store moved under the reader; observe again
+      }
+      this.hooks.afterModelRead?.();
+      const again = projectStatus(this.path);
+      if (sameState(status, again) && model.project.modelRevision === status.model.revision) {
+        return { status, model, query: createQueryApi({ current: () => model }), key: modelKey(status) as string };
+      }
     }
-    if (this.reader?.storeDir !== status.storeDir)
-      this.reader = { storeDir: status.storeDir, reader: new FileStoreReader(status.storeDir) };
-    const model = this.reader.reader.current();
-    return { model, query: createQueryApi({ current: () => model }) };
+    throw new StateChangedError("the checkout kept changing while it was read; try again");
   }
 
-  private graph(status: ProjectStatus, model: Model, query: QueryApi): GraphView {
+  private graph(status: ProjectStatus, model: Model, query: QueryApi, key: string): GraphView {
     const modules = [];
     let cursor: string | undefined;
     let validation = { errors: 0, warnings: 0 };
@@ -131,6 +180,7 @@ export class ProjectSession {
         ...(model.project.description ? { description: model.project.description } : {}),
       },
       revision: model.project.modelRevision,
+      modelKey: key,
       modules: g.modules,
       edges: g.edges,
       unresolved: g.unresolved,
@@ -179,7 +229,13 @@ function observation(s: ProjectStatus): Observation {
         }
       : null,
     model: s.model
-      ? { projectId: s.model.projectId, revision: s.model.revision, status: s.model.status, history: s.model.history }
+      ? {
+          projectId: s.model.projectId,
+          revision: s.model.revision,
+          status: s.model.status,
+          history: s.model.history,
+          key: modelKey(s) as string,
+        }
       : null,
     diagnostics: s.diagnostics,
     observedAt: new Date().toISOString(),

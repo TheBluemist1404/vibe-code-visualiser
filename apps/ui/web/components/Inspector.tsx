@@ -17,7 +17,8 @@ import { KIND_ORDER, kindLabel, kindTitle, kindVar } from "../kinds.ts";
 export type InspectorTarget =
   | { kind: "project" }
   | { kind: "module"; id: string }
-  | { kind: "object"; id: string; moduleId: string };
+  /** `moduleId` is the module that owns the object, or null for project-level objects (actors). */
+  | { kind: "object"; id: string; moduleId: string | null };
 
 type Props = {
   target: InspectorTarget;
@@ -25,7 +26,7 @@ type Props = {
   observation: Observation;
   change: ModelChange | null;
   onSelectModule(id: string | null): void;
-  onOpenObject(id: string, moduleId: string): void;
+  onOpenObject(id: string, moduleId: string | null): void;
   onUnpin(id: string): void;
 };
 
@@ -37,32 +38,44 @@ export function Inspector(props: Props) {
       <div className="insp-anim" key={key}>
         {target.kind === "project" && <ProjectPanel {...props} />}
         {target.kind === "module" && <ModulePanel {...props} id={target.id} />}
-        {target.kind === "object" && <ObjectPanel {...props} id={target.id} moduleId={target.moduleId} />}
+        {target.kind === "object" && <ObjectPanel {...props} id={target.id} />}
       </div>
     </aside>
   );
 }
 
-/** Load something for the current revision; reloads when the revision changes. */
-function useRead<T>(load: () => Promise<T>, key: string) {
-  const [state, set] = useState<{ data?: T; error?: string }>({});
+/**
+ * Load something for one model. The answer is stamped with the key it was requested for and
+ * shown only while that key is current and the host read it from the same model (`modelKey`),
+ * so after a branch switch or a new revision the inspector shows a loading state, never the
+ * previous model's details beside the new canvas.
+ */
+function useRead<T extends { modelKey: string }>(
+  load: () => Promise<T>,
+  id: string,
+  modelKey: string,
+): { data?: T; error?: string } {
+  const key = `${id}@${modelKey}`;
+  const [state, set] = useState<{ key: string; data?: T; error?: string } | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: `key` names everything `load` reads
   useEffect(() => {
     let live = true;
     load().then(
-      (data) => live && set({ data }),
-      (e: Error) => live && set({ error: e.message }),
+      (data) => live && set({ key, data }),
+      (e: Error) => live && set({ key, error: e.message }),
     );
     return () => {
       live = false;
     };
   }, [key]);
+  if (!state || state.key !== key) return {};
+  if (state.data && state.data.modelKey !== modelKey) return {}; // the host already moved on; the next poll catches up
   return state;
 }
 
 function Crumbs({ parts }: { parts: { label: string; onClick?: () => void }[] }) {
   return (
-    <div className="crumbs">
+    <div className="crumbs" data-testid="crumbs">
       {parts.map((p, i) => (
         <span key={p.label} className="row" style={{ gap: 4 }}>
           {i > 0 && <Icon name="right" small />}
@@ -339,7 +352,7 @@ function OwnedSection({ kind, items, onOpen }: { kind: string; items: OwnedObjec
 }
 
 function ModulePanel({ id, graph, onSelectModule, onOpenObject, onUnpin }: Props & { id: string }) {
-  const { data, error } = useRead(() => api.module(id), `${id}@${graph.revision}`);
+  const { data, error } = useRead(() => api.module(id), id, graph.modelKey);
   if (error) return <ReadError message={error} />;
   if (!data) return <Loading />;
   const kinds = [...KIND_ORDER, ...Object.keys(data.owned).filter((k) => !KIND_ORDER.includes(k))].filter(
@@ -411,16 +424,19 @@ function Value({ v }: { v: unknown }) {
   return <code className="code">{JSON.stringify(v, null, 2)}</code>;
 }
 
-function ObjectPanel({ id, moduleId, graph, onSelectModule, onOpenObject }: Props & { id: string; moduleId: string }) {
-  const { data, error } = useRead(() => api.object(id), `${id}@${graph.revision}`);
+function ObjectPanel({ id, graph, onSelectModule, onOpenObject }: Props & { id: string }) {
+  const { data, error } = useRead(() => api.object(id), id, graph.modelKey);
   if (error) return <ReadError message={error} />;
   if (!data) return <Loading />;
   const o = data.object;
   const r = o.record as Record<string, unknown> & {
     attributes?: { id: string; name: string; type: string; nullable?: boolean }[];
   };
-  const moduleName = graph.modules.find((m) => m.id === moduleId)?.name ?? moduleId;
-  const open = (ref: ObjectRef) => (ref.kind === "module" ? onSelectModule(ref.id) : onOpenObject(ref.id, moduleId));
+  // The owner comes from the object itself, never from where the user came from.
+  const moduleId = o.moduleId ?? null;
+  const moduleName = moduleId ? (graph.modules.find((m) => m.id === moduleId)?.name ?? moduleId) : null;
+  const open = (ref: ObjectRef & { moduleId?: string }) =>
+    ref.kind === "module" ? onSelectModule(ref.id) : onOpenObject(ref.id, ref.moduleId ?? null);
   // Attributes are listed in their own table above.
   const relations = data.relations.filter((rel) => !(rel.relation === "contains" && rel.other.kind === "attribute"));
   const fields = Object.entries(r).filter(([k]) => !HIDDEN_FIELDS.has(k) && k !== "attributes");
@@ -430,11 +446,13 @@ function ObjectPanel({ id, moduleId, graph, onSelectModule, onOpenObject }: Prop
         <Crumbs
           parts={[
             { label: "Project", onClick: () => onSelectModule(null) },
-            { label: moduleName, onClick: () => onSelectModule(moduleId) },
+            ...(moduleId && moduleName ? [{ label: moduleName, onClick: () => onSelectModule(moduleId) }] : []),
             { label: kindTitle(o.kind, 1) },
           ]}
         />
-        <h1 className="insp-name">{o.name}</h1>
+        <h1 className="insp-name" data-testid="object-name">
+          {o.name}
+        </h1>
         <div className="row small muted">
           <span className="kind-badge" style={kindVar(o.kind)}>
             {kindLabel(o.kind, 1)}

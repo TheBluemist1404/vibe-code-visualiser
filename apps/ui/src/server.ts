@@ -8,6 +8,7 @@ import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { extname, join, normalize, sep } from "node:path";
 import { NotFoundError } from "./inspector.ts";
+import { StateChangedError } from "./session.ts";
 import type { ProjectSession } from "./session.ts";
 
 const TYPES: Record<string, string> = {
@@ -85,6 +86,7 @@ async function handle(
     return send(res, 404, err("NOT_FOUND", `no API route ${method} ${url.pathname}`));
   } catch (e) {
     if (e instanceof NotFoundError) return send(res, e.code === "NOT_READY" ? 409 : 404, err(e.code, e.message));
+    if (e instanceof StateChangedError) return send(res, 409, err(e.code, e.message));
     if (e instanceof BadRequest) return send(res, 400, err("INVALID_REQUEST", e.message));
     throw e;
   }

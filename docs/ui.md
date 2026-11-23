@@ -38,6 +38,18 @@ snapshot, so a response never mixes two revisions.
 Every `GET /api/project` runs `projectStatus` again, so a branch switch, a merge or a new
 revision shows up on the next read. The client polls every 3 seconds and on window focus.
 
+Each read is consistent: the host observes the checkout, reads the model, and observes again.
+It serves the model only when both observations agree on the model identity, commit and
+branch, and the model read is the revision they name. If the checkout moved in between (a
+branch switch mid-read), the read is retried up to three times, then answered with
+`409 STATE_CHANGED`.
+
+**Model identity** is the revision ID plus a digest of its revision file (`modelKey`), because
+two branches can hold different models under the same initial ID (`rev-1`). Every module and
+object answer carries the `modelKey` it was read from. The inspector shows an answer only when
+it matches the canvas's current `modelKey`; after a branch switch or a new revision it shows a
+loading state until the new details arrive, never the previous model's details.
+
 - **ready**: the model is served, with the Git branch, commit and dirty state.
 - **absent, uninitialized, conflicted, diverged, invalid**: no model is served. The client
   shows the state with the host's diagnostics, verbatim, and the command a person would run.
@@ -65,6 +77,8 @@ Placement is presentation state. It never touches `.vcv/` and never creates a re
   **Tidy layout**, which returns every unpinned module to its automatic slot and leaves pinned
   ones alone.
 - An edge whose straight path would cross another module bows out to the side.
+- **The view never moves on its own** after the first fit: a refresh that adds or removes
+  modules keeps the user's pan and zoom. **Fit** and the banner's **Locate new** move it on request.
 
 `@vcv/core`'s in-memory `LayoutStore` is not used: positions here must survive restarts and
 live outside the checkout, so they have their own small file store.
@@ -88,6 +102,9 @@ The browser is not a trust boundary, and neither is this host for anything beyon
 - One arrow per declared relationship, from the module that declares `dependsOn` (or
   `consumes` a contract) to the module depended on. Direction comes from the declaring field,
   never from where nodes sit.
+- Related objects open under the module that owns them (from the object's own record), so
+  following a criterion in Web to a capability in Enrollment selects Enrollment. Project-level
+  objects such as actors select no module.
 - Selecting a module highlights its relationships (animated, labelled) and dims the rest. The
   module list beside the canvas is the keyboard and screen-reader path: `/` filters, `Esc`
   returns to the project.
@@ -99,9 +116,12 @@ The browser is not a trust boundary, and neither is this host for anything beyon
 - `apps/ui/test/layout.test.ts`: placement, determinism, cycles, reconcile and tidy.
 - `apps/ui/test/host.test.ts`: the HTTP API on real Git checkouts made with `initProject` and
   `ModelEngine`: direction, inspector data, pins across a restart, a later revision on a branch,
-  every non-ready state, and the Host/Origin checks.
+  every non-ready state, the Host/Origin checks, model identity for same-ID revisions, retrying
+  a read when the branch switches mid-read, and owner modules on relations.
 - `apps/ui/e2e/explorer.e2e.ts`: the built client in Chromium (Playwright), covering the first
-  PR's acceptance tests 1 to 5. `npm run test:ui`; set `VCV_UI_SHOTS=<dir>` to keep screenshots.
+  PR's acceptance tests 1 to 5, plus: no mixed-model inspector across a branch switch, cross-module
+  object links, the viewport surviving refreshes, and reduced motion. `npm run test:ui`; set
+  `VCV_UI_SHOTS=<dir>` to keep screenshots (taken once finite animations have finished).
   CI runs it in the `ui` job and uploads the screenshots.
 
 ## Not yet

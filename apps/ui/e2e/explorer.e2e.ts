@@ -13,6 +13,8 @@ import type { Host } from "../src/server.ts";
 import { ProjectSession } from "../src/session.ts";
 import {
   addAuditModule,
+  addWebCriterion,
+  renameModule,
   conflictedRepo,
   courseDesk,
   emptyRepo,
@@ -37,17 +39,32 @@ after(async () => {
   await browser?.close();
 });
 
-async function launch(repo: string, stateDir: string) {
+async function launch(repo: string, stateDir: string, opts: { reducedMotion?: "reduce" | "no-preference" } = {}) {
   const host = await startHost({ session: new ProjectSession(repo, new LayoutFileStore(stateDir)), webDir: WEB });
   hosts.push(host);
-  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 }, ...opts });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   await page.goto(host.url);
   return { host, page, errors };
 }
 
-const shot = (page: Page, name: string) => (SHOTS ? page.screenshot({ path: join(SHOTS, `${name}.png`) }) : null);
+/** Wait until every finite animation (entrances, slides, pulses) has finished. Looping ones keep running. */
+async function settle(page: Page) {
+  await page.evaluate(async () => {
+    const finite = document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity);
+    await Promise.all(finite.map((a) => a.finished.catch(() => undefined)));
+    await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  });
+}
+/** A screenshot of a stable frame; runtime motion stays on. */
+async function shot(page: Page, name: string) {
+  if (!SHOTS) return;
+  await settle(page);
+  await page.screenshot({ path: join(SHOTS, `${name}.png`) });
+}
+const viewport = (page: Page) =>
+  page.locator(".react-flow__viewport").evaluate((el) => (el as HTMLElement).style.transform);
 const node = (page: Page, id: string) => page.locator(`[data-module="${id}"]`);
 /** A node's position in canvas coordinates (independent of zoom and pan). */
 const flowPos = (page: Page, id: string) =>
@@ -162,4 +179,117 @@ test("5: absent, conflicted and invalid checkouts show diagnostics and are never
     assert.deepEqual(tree(repo), before, `${state}: nothing written`);
     await page.close();
   }
+});
+
+test("6: with a module selected, a branch switch never shows the previous model's details in the inspector", async () => {
+  const repo = courseDesk();
+  git(repo, "checkout", "-q", "-b", "renamed");
+  const renamedRev = renameModule(repo, "chg-rename", "mod-enrollment", "Enrollment (renamed)");
+  git(repo, "checkout", "-q", "main");
+  const { page, errors } = await launch(repo, tempDir("vcv-ui-state-"));
+  await node(page, "mod-enrollment").click();
+  await page.getByTestId("inspector-name").getByText("Enrollment", { exact: true }).waitFor();
+
+  // Record any frame where the bar already shows the new revision but the inspector still names the old module.
+  await page.evaluate((rev) => {
+    const w = window as unknown as { mixed: string[] };
+    w.mixed = [];
+    const check = () => {
+      const bar = document.querySelector('[data-testid="revision"]')?.textContent;
+      const name = document.querySelector('[data-testid="inspector-name"]')?.textContent;
+      if (bar === rev && name === "Enrollment") w.mixed.push(`${bar} / ${name}`);
+    };
+    new MutationObserver(check).observe(document.body, { subtree: true, childList: true, characterData: true });
+  }, renamedRev);
+  git(repo, "checkout", "-q", "renamed");
+  await page.getByTestId("inspector-name").getByText("Enrollment (renamed)").waitFor({ timeout: 15_000 });
+  assert.equal(await page.getByTestId("revision").textContent(), renamedRev);
+  assert.deepEqual(await page.evaluate(() => (window as unknown as { mixed: string[] }).mixed), []);
+  assert.equal(await page.getByTestId("change-banner").count(), 1);
+  await shot(page, "6-selected-across-branch-switch");
+  assert.deepEqual(errors, []);
+});
+
+test("7: a related object in another module opens under its own module", async () => {
+  const repo = courseDesk();
+  addWebCriterion(repo);
+  const { page, errors } = await launch(repo, tempDir("vcv-ui-state-"));
+  await node(page, "mod-web").click();
+  await page.getByTestId("owned-criterion").getByText("The page enrolls through the API").click();
+  await page.getByTestId("crumbs").getByText("Web").waitFor();
+  await page.locator(".insp .item").getByText("Enroll in a course").click();
+  await page.getByTestId("object-name").getByText("Enroll in a course").waitFor();
+  const crumbs = await page.getByTestId("crumbs").textContent();
+  assert.match(crumbs ?? "", /Enrollment/, "breadcrumbs name the owning module");
+  assert.doesNotMatch(crumbs ?? "", /Web/);
+  assert.equal(
+    await page
+      .locator('.mod[aria-current="true"]')
+      .textContent()
+      .then((t) => t?.startsWith("Enrollment")),
+    true,
+  );
+  assert.equal(await node(page, "mod-enrollment").evaluate((el) => el.classList.contains("is-sel")), true);
+  // A project-level object (the Student actor) has no module.
+  await page.locator(".insp .item").getByText("Student").click();
+  await page.getByTestId("object-name").getByText("Student").waitFor();
+  assert.equal(await page.locator('.mod[aria-current="true"]').count(), 0);
+  await shot(page, "7-cross-module-object");
+  assert.deepEqual(errors, []);
+});
+
+test("8: a refresh that adds a module keeps the user's pan and zoom; Locate new moves only when asked", async () => {
+  const repo = courseDesk();
+  const { page, errors } = await launch(repo, tempDir("vcv-ui-state-"));
+  await node(page, "mod-web").waitFor();
+  await settle(page);
+  await page.getByRole("button", { name: "Zoom in" }).click();
+  await page.getByRole("button", { name: "Zoom in" }).click();
+  const pane = await page.locator(".react-flow__pane").boundingBox();
+  assert.ok(pane);
+  await page.mouse.move(pane.x + 40, pane.y + pane.height - 120);
+  await page.mouse.down();
+  await page.mouse.move(pane.x + 160, pane.y + pane.height - 200, { steps: 8 });
+  await page.mouse.up();
+  await settle(page);
+  const before = await viewport(page);
+
+  git(repo, "checkout", "-q", "-b", "feature/audit");
+  addAuditModule(repo);
+  await page.getByTestId("change-banner").waitFor({ timeout: 15_000 });
+  await node(page, "mod-audit").waitFor({ state: "attached" });
+  await settle(page);
+  assert.equal(await viewport(page), before, "the view did not pan or zoom on refresh");
+
+  git(repo, "checkout", "-q", "main");
+  await page.getByText("The model went back on disk").waitFor({ timeout: 15_000 });
+  await settle(page);
+  assert.equal(await viewport(page), before, "nor when a module was removed");
+
+  git(repo, "checkout", "-q", "feature/audit");
+  await page.getByRole("button", { name: "Locate new" }).waitFor({ timeout: 15_000 });
+  await page.getByRole("button", { name: "Locate new" }).click();
+  await page.waitForTimeout(700);
+  assert.notEqual(await viewport(page), before, "Locate new brings the new module into view");
+  await node(page, "mod-audit").waitFor({ state: "visible" });
+  assert.deepEqual(errors, []);
+});
+
+test("9: reduced motion switches the animations off; the default keeps them", async () => {
+  const repo = courseDesk();
+  const durations = async (reducedMotion: "reduce" | "no-preference") => {
+    const { page } = await launch(repo, tempDir("vcv-ui-state-"), { reducedMotion });
+    await node(page, "mod-enrollment").click();
+    await page.locator(".edge-path.is-hot").first().waitFor({ state: "attached" });
+    const out = await page.evaluate(() => ({
+      edge: getComputedStyle(document.querySelector(".edge-path.is-hot") as Element).animationDuration,
+      node: getComputedStyle(document.querySelector(".node") as Element).animationDuration,
+    }));
+    await page.close();
+    return out;
+  };
+  assert.deepEqual(await durations("reduce"), { edge: "0.001s", node: "0.001s" });
+  const moving = await durations("no-preference");
+  assert.notEqual(moving.edge, "0.001s");
+  assert.notEqual(moving.node, "0.001s");
 });

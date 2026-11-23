@@ -12,6 +12,9 @@ import { ProjectSession } from "../src/session.ts";
 import type { ModuleView, ObjectView, ProjectView } from "../src/types.ts";
 import {
   addAuditModule,
+  addWebCriterion,
+  orphanBranchWithOtherModel,
+  renameModule,
   conflictedRepo,
   courseDesk,
   DRAFT,
@@ -220,4 +223,61 @@ test("a corrupt layout file reads as no layout", async () => {
   const { get } = await open(repo, stateDir);
   const g = (await get<ProjectView>("/api/project")).body.graph!;
   assert.equal(Object.keys(g.positions).length, 3);
+});
+
+test("model identity: the same revision ID on two branches is told apart, and inspector answers carry it", async () => {
+  const repo = courseDesk();
+  const { get } = await open(repo);
+  const main = (await get<ProjectView>("/api/project")).body;
+  orphanBranchWithOtherModel(repo, "other", "Web (other)");
+  const other = (await get<ProjectView>("/api/project")).body;
+  assert.equal(other.graph!.revision, main.graph!.revision, "both are rev-1");
+  assert.notEqual(other.graph!.modelKey, main.graph!.modelKey);
+  assert.equal(other.observation.model!.key, other.graph!.modelKey);
+  assert.equal(other.lastChange?.modelLine, "switched");
+  const m = await get<ModuleView>("/api/modules/mod-web");
+  assert.equal(m.body.modelKey, other.graph!.modelKey);
+  assert.equal(m.body.module.name, "Web (other)");
+});
+
+test("a checkout that moves mid-read is read again: status, Git and model always belong together", async () => {
+  const repo = courseDesk();
+  git(repo, "checkout", "-q", "-b", "renamed");
+  const renamedRev = renameModule(repo, "chg-rename", "mod-enrollment", "Enrollment (renamed)");
+  git(repo, "checkout", "-q", "main");
+  let switches = 1;
+  const session = new ProjectSession(repo, new LayoutFileStore(tempDir("vcv-ui-state-")), {
+    afterModelRead: () => {
+      if (switches-- > 0) git(repo, "checkout", "-q", "renamed"); // a branch switch between model read and re-check
+    },
+  });
+  const view = session.view();
+  assert.equal(view.observation.git?.branch, "renamed");
+  assert.equal(view.graph!.revision, renamedRev);
+  assert.equal(view.observation.model!.key, view.graph!.modelKey);
+  assert.ok(view.graph!.modules.some((m) => m.name === "Enrollment (renamed)"));
+
+  let forever = 0;
+  const restless = new ProjectSession(repo, new LayoutFileStore(tempDir("vcv-ui-state-")), {
+    afterModelRead: () => git(repo, "checkout", "-q", forever++ % 2 ? "renamed" : "main"),
+  });
+  assert.throws(
+    () => restless.view(),
+    (e: unknown) => (e as { code?: string }).code === "STATE_CHANGED",
+  );
+});
+
+test("object relations name the module that owns the related object", async () => {
+  const repo = courseDesk();
+  addWebCriterion(repo);
+  const { get } = await open(repo);
+  const o = await get<ObjectView>("/api/objects/crt-page-enrolls");
+  assert.equal(o.body.object.moduleId, "mod-web");
+  const verifies = o.body.relations.find((r) => r.relation === "verifies");
+  assert.equal(verifies?.other.id, "cap-enroll");
+  assert.equal(verifies?.other.moduleId, "mod-enrollment", "owned by Enrollment, not by Web");
+  const cap = await get<ObjectView>("/api/objects/cap-enroll");
+  assert.equal(cap.body.object.moduleId, "mod-enrollment");
+  const initiator = cap.body.relations.find((r) => r.other.kind === "actor");
+  assert.equal(initiator?.other.moduleId, undefined, "actors belong to the project");
 });
