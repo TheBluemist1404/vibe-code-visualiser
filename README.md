@@ -25,6 +25,16 @@ them visible:
 When they disagree, VCV reports it and asks for a decision. It never silently rewrites
 approved intent to match the code, or the other way round.
 
+## Architecture
+
+![VCV system architecture](docs/assets/vcv-architecture.svg)
+
+[Open the editable Excalidraw source](docs/assets/vcv-architecture.excalidraw) · [Architecture decision records](docs/adr/)
+
+The diagram shows the implemented M0–M4 engine, agent interfaces, repository-backed model,
+and model-first development loop. The M5 visual canvas is **planned**, not implemented.
+The IR is approved intent; source code and verification evidence remain distinct.
+
 ## Status
 
 Early and pre-release. The engine works from the command line and from coding agents over MCP.
