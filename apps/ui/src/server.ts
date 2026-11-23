@@ -12,6 +12,8 @@ import { DraftRefused, DraftDesk } from "./drafts/service.ts";
 import { DraftConflict, DraftMissing, DraftUnreadable } from "./drafts/store.ts";
 import { PreviewFailed } from "./drafts/preview.ts";
 import { BadEdit } from "./edits.ts";
+import { EvidenceDesk, EvidenceUnavailable } from "./evidence.ts";
+import type { EvidenceOptions } from "./evidence.ts";
 import { NotFoundError } from "./inspector.ts";
 import { InboxUnavailable, ProposalInbox } from "./proposals.ts";
 import { StateChangedError } from "./session.ts";
@@ -36,15 +38,25 @@ export type HostOptions = {
   stateDir?: string;
   /** A Git ref naming the protected base (e.g. origin/main): the inbox checks integrity against it. */
   protectedBase?: string;
+  /** Inputs for the evidence and pre-merge views (base commit, test-run records, policy). */
+  evidence?: EvidenceOptions;
 };
 
 export type Host = { server: Server; url: string; close(): Promise<void> };
 
-export async function startHost({ session, webDir, port = 0, stateDir, protectedBase }: HostOptions): Promise<Host> {
+export async function startHost({
+  session,
+  webDir,
+  port = 0,
+  stateDir,
+  protectedBase,
+  evidence,
+}: HostOptions): Promise<Host> {
   const desk = new DraftDesk(session, stateDir ?? session.stateDir);
   const inbox = new ProposalInbox(session, protectedBase ? { protectedBase } : {});
+  const facts = new EvidenceDesk(session, evidence ?? {});
   const server = createServer((req, res) => {
-    handle(req, res, session, desk, inbox, webDir, server).catch((err: unknown) => {
+    handle(req, res, session, desk, inbox, facts, webDir, server).catch((err: unknown) => {
       send(res, 500, { error: { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) } });
     });
   });
@@ -71,6 +83,7 @@ async function handle(
   session: ProjectSession,
   desk: DraftDesk,
   inbox: ProposalInbox,
+  facts: EvidenceDesk,
   webDir: string,
   server: Server,
 ) {
@@ -114,7 +127,20 @@ async function handle(
           ),
         );
       if (parts.length === 2) return send(res, 200, inbox.list());
+      if (parts.length === 4 && parts[2] && parts[3] === "implementation")
+        return send(res, 200, facts.implementation(parts[2], shown(url)));
       if (parts.length === 3 && parts[2]) return send(res, 200, inbox.review(parts[2]));
+      return send(res, 404, err("NOT_FOUND", `no API route ${method} ${url.pathname}`));
+    }
+    if (parts[1] === "evidence" || parts[1] === "gate") {
+      // Read-only observations (Issue #45): nothing here reasserts a claim, runs a test or writes.
+      if (method !== "GET") return send(res, 405, err("READ_ONLY", "evidence is read-only"));
+      const model = shown(url);
+      if (parts[1] === "gate" && parts.length === 2) return send(res, 200, facts.gate(model));
+      if (parts[2] === "objects" && parts[3] && parts.length === 4)
+        return send(res, 200, facts.object(parts[3], model));
+      if (parts[2] === "modules" && parts[3] && parts.length === 4)
+        return send(res, 200, facts.module(parts[3], model));
       return send(res, 404, err("NOT_FOUND", `no API route ${method} ${url.pathname}`));
     }
     const draft = await draftRoute(desk, method, parts, () => readJson(req));
@@ -125,6 +151,12 @@ async function handle(
     if (e instanceof StateChangedError) return send(res, 409, err(e.code, e.message));
     if (e instanceof BadRequest) return send(res, 400, err("INVALID_REQUEST", e.message));
     if (e instanceof BadEdit) return send(res, 400, err(e.code, e.message));
+    if (e instanceof EvidenceUnavailable)
+      return send(
+        res,
+        e.code === "UNKNOWN_ID" ? 404 : e.code === "INVALID_REQUEST" ? 400 : e.code === "UNSAFE_PATH" ? 422 : 409,
+        err(e.code, e.message),
+      );
     if (e instanceof InboxUnavailable)
       return send(
         res,
@@ -192,3 +224,6 @@ function send(res: ServerResponse, status: number, body: unknown) {
   });
   res.end(JSON.stringify(body));
 }
+
+/** The model key the page says it is showing (`?model=`), if it sent one. */
+const shown = (url: URL): string | undefined => url.searchParams.get("model") ?? undefined;

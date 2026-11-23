@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Inbox, InboxItem, ProposalLifecycle, ProposalReview, ReviewStep } from "../../src/types.ts";
 import { api, HostError } from "../api.ts";
 import { CheckDetails, Command, Diagnostics } from "../components/DraftCheck.tsx";
+import { ImplementationSection } from "../evidence/Evidence.tsx";
 import { Icon } from "../icons.tsx";
 import type { IconName } from "../icons.tsx";
 
@@ -305,6 +306,8 @@ function Review({ changeId, inbox }: { changeId: string; inbox: Inbox | null }) 
           ))}
         </section>
       )}
+
+      {r.lifecycle === "applied" && inbox && <ImplementationSection changeId={r.changeId} modelKey={inbox.modelKey} />}
 
       <section className="review-sec" aria-labelledby="check-title">
         <h3 id="check-title" className="sec-head">

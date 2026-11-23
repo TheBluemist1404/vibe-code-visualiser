@@ -13,6 +13,7 @@ import type {
 import { api } from "../api.ts";
 import { Icon } from "../icons.tsx";
 import { KIND_ORDER, kindLabel, kindTitle, kindVar } from "../kinds.ts";
+import { ModuleEvidence, ObjectEvidence } from "../evidence/Evidence.tsx";
 import { Fields } from "./Fields.tsx";
 
 export type InspectorTarget =
@@ -404,6 +405,7 @@ function ModulePanel({ id, graph, onSelectModule, onOpenObject, onUnpin }: Props
         {kinds.map((k) => (
           <OwnedSection key={k} kind={k} items={data.owned[k] ?? []} onOpen={(oid) => onOpenObject(oid, id)} />
         ))}
+        <ModuleEvidence id={id} modelKey={graph.modelKey} onOpen={(oid) => onOpenObject(oid, id)} />
         {kinds.length === 0 && (
           <section className="sec">
             <p className="small muted">
@@ -532,10 +534,11 @@ function ObjectPanel({ id, graph, onSelectModule, onOpenObject }: Props & { id: 
             ))}
           </ul>
         </section>
+        <ObjectEvidence id={o.id} modelKey={graph.modelKey} />
         <section className="sec">
           <p className="small muted" style={{ margin: 0 }}>
-            Declared at <span className="mono">{o.irPath}</span>. This is the model's intent; code and test evidence for
-            it are not shown in this view.
+            Declared at <span className="mono">{o.irPath}</span>. This is the model's intent; the evidence above is what
+            claims say about the code, checked just now.
           </p>
         </section>
       </div>

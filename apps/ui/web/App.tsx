@@ -12,12 +12,15 @@ import { ModuleList } from "./components/ModuleList.tsx";
 import { ProjectBar } from "./components/ProjectBar.tsx";
 import { HostDown, LoadingScreen, StateScreen } from "./components/StateScreen.tsx";
 import { DraftsProvider } from "./drafts/DraftsProvider.tsx";
+import { GatePage } from "./evidence/GatePage.tsx";
 import { Icon } from "./icons.tsx";
 import { ProposalsView, useInbox } from "./proposals/ProposalsView.tsx";
 
-/** Which page is open, from the URL hash: `#/proposals` or `#/proposals/<changeId>`; anything else is the explorer. */
-type Route = { page: "explorer" } | { page: "proposals"; changeId: string | null };
+/** Which page is open, from the URL hash: `#/proposals[/<changeId>]`, `#/gate`; anything else is the explorer. */
+export type Route = { page: "explorer" } | { page: "gate" } | { page: "proposals"; changeId: string | null };
+export type Page = Route["page"];
 function parseRoute(hash: string): Route {
+  if (hash === "#/gate") return { page: "gate" };
   const m = /^#\/proposals(?:\/([^/]+))?$/.exec(hash);
   return m ? { page: "proposals", changeId: m[1] ? decodeURIComponent(m[1]) : null } : { page: "explorer" };
 }
@@ -29,7 +32,12 @@ function useRoute(): [Route, (r: Route) => void] {
     return () => window.removeEventListener("hashchange", on);
   }, []);
   const go = useCallback((r: Route) => {
-    const hash = r.page === "explorer" ? "#/" : `#/proposals${r.changeId ? `/${encodeURIComponent(r.changeId)}` : ""}`;
+    const hash =
+      r.page === "explorer"
+        ? "#/"
+        : r.page === "gate"
+          ? "#/gate"
+          : `#/proposals${r.changeId ? `/${encodeURIComponent(r.changeId)}` : ""}`;
     if (window.location.hash !== hash) window.location.hash = hash;
     setRoute(r);
   }, []);
@@ -128,6 +136,7 @@ export function App() {
     if (down) return <HostDown message={down} onRetry={() => load(true)} />;
     if (!view) return <LoadingScreen />;
     if (!graph) return <StateScreen observation={view.observation} onRefresh={() => load(true)} />;
+    if (route.page === "gate") return <GatePage modelKey={graph.modelKey} root={view.observation.root} />;
     if (route.page === "proposals")
       return (
         <ProposalsView
@@ -206,7 +215,7 @@ export function App() {
         onRefresh={() => load(true)}
         page={route.page}
         pending={graph ? (inbox?.counts.pending ?? 0) : null}
-        onPage={(page) => go(page === "explorer" ? { page } : { page, changeId: null })}
+        onPage={(page) => go(page === "proposals" ? { page, changeId: null } : { page })}
       />
       <DraftsProvider projectId={graph?.project.id ?? null} modelKey={graph?.modelKey ?? null}>
         {content}

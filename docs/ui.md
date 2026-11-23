@@ -35,6 +35,8 @@ browser (React, @xyflow/react)  ──HTTP JSON──▶  host (Node, apps/ui/sr
 | `src/drafts/preview.ts` | The dry-run adapter over `@vcv/repo` `previewProposal` |
 | `src/drafts/handoff.ts` | The export: a strict proposed change plus separate metadata |
 | `src/drafts/routes.ts` | The `/api/drafts` routes |
+| `src/proposals.ts` | The proposal inbox over `listProposals`, `previewProposal` and `checkIntegrity`, read-only |
+| `src/evidence.ts` | Evidence, implementation and pre-merge views over `@vcv/repo`, read-only |
 | `src/layout.ts` | Pure, deterministic placement: layered auto layout, reconcile with stored positions, tidy |
 | `src/layout-store.ts` | Positions on disk, outside the checkout |
 | `src/types.ts` | The JSON contract shared with the client (types only) |
@@ -213,6 +215,66 @@ There is no browser submit in this version. Issue #44 allows one only after the 
 (#43) is merged; when it comes, it must go through `submitProposal` (proposal-only, `model:propose`)
 and so through the same lock as the CLI (ADR 0010).
 
+## Evidence and the pre-merge page
+
+`src/evidence.ts` is a thin adapter over functions the CLI already uses. It decides nothing
+itself, and every answer is a new observation of the checkout. Each part labels what kind of
+thing it shows: a claim (something an agent or person asserted) or an observation (what VCV
+checked just now, with the limits of that check).
+
+- **Object evidence** (`GET /api/evidence/objects/:id`, in the inspector under *Code and test
+  evidence*) comes from `getObjectEvidence`. It lists every binding claim about the object, up to
+  50, and labels how many it found when the list is cut. For each claim it shows:
+  - the claim's state (resolved, stale, missing, ambiguous, unchecked, indeterminate or
+    unreadable);
+  - the locator as written;
+  - who claimed it and how, *as the claim says*;
+  - whether the pointer resolves now (line and match count);
+  - whether the code and the model object changed since the claim, each with its cause;
+  - whether it is disputed.
+
+  A footnote repeats that "resolved and fresh" is not evidence that the code does what the model
+  says.
+- **Criteria** add `criteriaEvidence`: the mapping state, each mapped test case, and a result from
+  the test-run records given at start (`--run`). Without runs the result is *unverified*, and the
+  page says that it runs nothing. A record handed to the host is always a claim, whatever it
+  declares (`RESULT_CLAIMED`). The host has no `tests:observe` permission and captures nothing.
+- **Module evidence** (`GET /api/evidence/modules/:id`) is `getEvidenceOverview`, up to 200
+  claims, grouped by the module's owned objects and counted by state. It says when the overview
+  was cut.
+- **Implementation** (`GET /api/proposals/:id/implementation`, on an applied proposal) shows
+  three layers that are kept apart:
+  - *approved intent*: `buildHandoff`, meaning the request, the scope and the claims that
+    probably move with the change;
+  - *the agent's report*: the recorded report, shown as claims with the report's own note that
+    VCV verified none of it;
+  - *what VCV observes now*: from `implementationStatus`, the files changed, out-of-scope paths,
+    claim states, and whether each claim was re-claimed after implementing.
+
+  Then come the warnings and the "not reconciled" note. A change that is not applied and
+  attested here has no handoff, and the page says why.
+- **Before merging** (`#/gate`, `GET /api/gate`) runs `reconcile` (pinned to the base,
+  attestation required) and `preMergeGate` against `--base-commit <sha>`.
+  - The base must be a full commit ID that the person starting the explorer copied from the
+    hosting service. It is never guessed from local branch names. Without it, nothing runs and
+    the page names the missing flag.
+  - The decision, headline, reasons (with severity, basis and rule), criteria and runs are the
+    gate's own. Reconciliation findings are listed as facts with their category and basis, and
+    are not coloured as a verdict.
+  - Integrity says *caller-asserted*: CI's gate against the protected branch is the authority.
+  - A policy file can be given with `--policy`. Test-run and policy files are read once at
+    start; the host never re-reads or writes them.
+  - The page reads when it opens and whenever the model moves. **Check again** re-reads after a
+    code edit; it is still only a read.
+
+Each answer runs its reads between two checkout identities, as the inbox does (`src/observe.ts`).
+For example, the reconciliation and the gate on the pre-merge page always describe the same state.
+
+The client sends the model key it is showing (`?model=<key>`). If the checkout has moved on, the
+host answers `409 STATE_CHANGED` rather than describing a model the page is not showing. The
+next poll brings the new model, and the panels reload for it. The evidence routes answer GET
+only, and any other method is `405 READ_ONLY`. There is no reassert, record, capture or run route.
+
 ## Trust boundary
 
 The browser is not a trust boundary, and neither is this host for anything beyond reading.
@@ -222,8 +284,8 @@ The browser is not a trust boundary, and neither is this host for anything beyon
 - Every write takes a JSON body (a cross-site form cannot send one) and writes only files in
   the UI state directory: the layout file and draft files. Nothing under the checkout, `.vcv/`
   or Git is written; tests compare the checkout byte for byte.
-- There is no submit, apply or approve route. `/api/proposals` answers GET only; any other
-  method is `405 READ_ONLY`. Recording a proposal is the agent's step (`vcv proposal submit`);
+- There is no submit, apply or approve route. `/api/proposals`, `/api/evidence` and `/api/gate`
+  answer GET only; any other method is `405 READ_ONLY`. Recording a proposal is the agent's step (`vcv proposal submit`);
   approval stays the reviewer's `vcv review approve` with their own key
   ([approvals](approvals.md)). The host never reads, receives or stores a private key.
 - Cooperating VCV writers are serialized by the store's writer lock (ADR 0010). A future
@@ -275,6 +337,22 @@ The browser is not a trust boundary, and neither is this host for anything beyon
 - `apps/ui/e2e/proposals.e2e.ts`: the same in Chromium, with the page open while the reviewer
   approves in a terminal (20 to 25), keyboard reachability, and a check that no button on the
   page approves, signs, submits, applies, rejects or rebases.
+- `apps/ui/test/evidence.test.ts`: evidence over HTTP on a Course Desk with claims, mapped
+  criteria, an approved change with an agent's report, and a run the agent captured:
+  - claim states, freshness causes and provenance as `@vcv/repo` reports them;
+  - a criterion unverified without runs, and *claimed* with one;
+  - module counts;
+  - the implementation layers;
+  - the gate without a base (nothing run, the missing input named) and with one (equal to
+    `preMergeGate` called directly);
+  - 405 on writes, with no reassert or run route;
+  - `STATE_CHANGED` for a model the page no longer shows;
+  - a model change landing between reconciliation and the gate yields one consistent answer, and
+    a checkout that keeps moving is `STATE_CHANGED`;
+  - an unchanged checkout.
+- `apps/ui/e2e/evidence.e2e.ts`: the same in Chromium (screenshots 30 to 35). It also checks
+  that the pre-merge page follows the model when it moves, and that no button on these pages
+  reasserts, records, runs, approves or merges.
 - `apps/ui/e2e/explorer.e2e.ts`: the built client in Chromium (Playwright), covering the first
   PR's acceptance tests 1 to 5, plus: no mixed-model inspector across a branch switch, cross-module
   object links, the viewport surviving refreshes, and reduced motion. `npm run test:ui`; set
@@ -285,6 +363,7 @@ The browser is not a trust boundary, and neither is this host for anything beyon
 
 Editing purpose, contracts, nested elements and creating or removing objects from the
 inspector; submitting from the browser (after #43 merges, if at all) and approving in it (never:
-approval stays the reviewer's CLI step); source and test evidence (M5.5); and opening a
+approval stays the reviewer's CLI step); capturing test runs or reasserting claims from the
+browser (never: those stay the host's and the agent's steps); and opening a
 different checkout from the browser. Projects with more than
 1000 modules show the first 1000 and say so.

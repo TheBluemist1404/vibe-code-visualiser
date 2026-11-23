@@ -1,5 +1,6 @@
 // Which model, which commit, and whether the host is still watching the checkout.
 import type { Observation, ProjectState } from "../../src/types.ts";
+import type { Page } from "../App.tsx";
 import { Icon } from "../icons.tsx";
 
 const STATE: Record<ProjectState, { label: string; cls: string }> = {
@@ -29,10 +30,10 @@ export function ProjectBar({
   refreshing: boolean;
   pulse: number;
   onRefresh(): void;
-  page: "explorer" | "proposals";
+  page: Page;
   /** Pending proposals in this checkout; null while there is no model to show. */
   pending: number | null;
-  onPage(page: "explorer" | "proposals"): void;
+  onPage(page: Page): void;
 }) {
   const s = observation ? STATE[observation.state] : null;
   const git = observation?.git;
@@ -74,6 +75,15 @@ export function ProjectBar({
                 <span className="sr-only"> pending</span>
               </span>
             )}
+          </button>
+          <button
+            type="button"
+            className="tab"
+            aria-current={page === "gate" ? "page" : undefined}
+            onClick={() => onPage("gate")}
+            data-testid="tab-gate"
+          >
+            <Icon name="pull" /> Before merging
           </button>
         </nav>
       )}
