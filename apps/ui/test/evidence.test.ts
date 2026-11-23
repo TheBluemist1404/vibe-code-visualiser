@@ -3,6 +3,8 @@
 // functions say about the checkout now. Nothing is written, reasserted, run or decided here, and
 // the pre-merge views need a base commit the person starting the host names explicitly.
 import assert from "node:assert/strict";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { preMergeGate, projectStatus } from "@vcv/repo";
 import { EvidenceDesk } from "../src/evidence.ts";
@@ -18,6 +20,7 @@ import type {
   ObjectEvidenceView,
   ProjectView,
 } from "../src/types.ts";
+import { SERVICE } from "../../../packages/repo/test/course-desk.ts";
 import { FAIL, claimedRun, evidenceWorld } from "./evidence-fixture.ts";
 import { git, renameModule, tempDir, tree } from "./fixtures.ts";
 
@@ -231,4 +234,54 @@ test("one gate answer is one state: a model change landing between reconciliatio
     (e: { code?: string }) => e.code === "STATE_CHANGED",
   );
   assert.ok(n >= 2, "it retried before giving up");
+});
+
+test("source edits are part of the observed state: a dirty→dirty edit between reads is never stitched in; edits on every read are STATE_CHANGED; an unbounded working tree is refused, not guessed", async () => {
+  const { repo, base, changeId } = evidenceWorld();
+  const file = join(repo, SERVICE);
+  const original = readFileSync(file, "utf8");
+  writeFileSync(file, `${original}\n// dirty version A\n`); // already dirty before any read
+  const session = new ProjectSession(repo, new LayoutFileStore(tempDir("vcv-ui-state-")));
+  const editTo = (tag: string) => writeFileSync(file, `${original}\n// dirty version ${tag}\n`);
+
+  for (const [step, read] of [
+    ["after-reconcile", (d: EvidenceDesk) => d.gate()],
+    ["after-handoff", (d: EvidenceDesk) => d.implementation(changeId)],
+    ["after-evidence", (d: EvidenceDesk) => d.object("rul-seat-limit")],
+  ] as const) {
+    // One edit (A → B) lands mid-read: the first composition is discarded and the answer is of B.
+    let calls = 0;
+    const once = new EvidenceDesk(session, {
+      baseCommit: base,
+      betweenReads: (s) => {
+        if (s !== step) return;
+        if (calls++ === 0) editTo(`B-${step}`);
+      },
+    });
+    read(once);
+    assert.equal(calls, 2, `${step}: the read was retried after the mid-read edit`);
+
+    // An edit on every read: refused.
+    let n = 0;
+    const restless = new EvidenceDesk(session, {
+      baseCommit: base,
+      betweenReads: (s) => {
+        if (s === step) editTo(`C-${step}-${n++}`);
+      },
+    });
+    assert.throws(
+      () => read(restless),
+      (e: { code?: string }) => e.code === "STATE_CHANGED",
+      step,
+    );
+  }
+
+  // Too many untracked files to fingerprint: OBSERVATION_LIMIT (422), never a silent answer.
+  const junk = join(repo, "scratch");
+  mkdirSync(junk);
+  for (let i = 0; i < 2001; i++) writeFileSync(join(junk, `f${i}.txt`), String(i));
+  const get = await open(repo, { baseCommit: base });
+  const r = await get("/api/gate");
+  assert.equal(r.status, 422);
+  assert.equal(r.body.error?.code, "OBSERVATION_LIMIT");
 });

@@ -268,7 +268,18 @@ checked just now, with the limits of that check).
     code edit; it is still only a read.
 
 Each answer runs its reads between two checkout identities, as the inbox does (`src/observe.ts`).
-For example, the reconciliation and the gate on the pre-merge page always describe the same state.
+Because these views inspect source and test files, their identity also includes the working
+tree's content: the bytes of every file `git status` reports as changed or untracked (ignored
+files excluded; committed, unchanged files are covered by the commit). A dirty→dirty edit between
+two reads is therefore seen, and the reads are retried or refused with `STATE_CHANGED`. As a
+result, the reconciliation and the gate on the pre-merge page always describe the same source
+state. More than 2000 changed or untracked files, more than 32 MB of them, or an unreadable one
+is `422 OBSERVATION_LIMIT`: the answer is refused, not guessed.
+
+On the pre-merge page, a passing integrity check reads "checks passed locally against the base
+commit given at start (caller-asserted; not an authorization)". The check establishes
+consistency and attestation under that anchor only. CI's gate against the protected branch is
+the authority.
 
 The client sends the model key it is showing (`?model=<key>`). If the checkout has moved on, the
 host answers `409 STATE_CHANGED` rather than describing a model the page is not showing. The
@@ -349,6 +360,9 @@ The browser is not a trust boundary, and neither is this host for anything beyon
   - `STATE_CHANGED` for a model the page no longer shows;
   - a model change landing between reconciliation and the gate yields one consistent answer, and
     a checkout that keeps moving is `STATE_CHANGED`;
+  - a dirty→dirty source edit landing mid-read is retried for the gate, the implementation view
+    and object evidence, an edit on every read is `STATE_CHANGED`, and 2001 untracked files are
+    `OBSERVATION_LIMIT`. With the source fingerprint switched off, that test fails;
   - an unchanged checkout.
 - `apps/ui/e2e/evidence.e2e.ts`: the same in Chromium (screenshots 30 to 35). It also checks
   that the pre-merge page follows the model when it moves, and that no button on these pages

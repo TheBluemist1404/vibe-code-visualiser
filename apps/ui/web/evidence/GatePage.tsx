@@ -230,7 +230,9 @@ function Reconciliation({ r }: { r: NonNullable<GateView["reconciliation"]> }) {
         <dd>{r.lineage}</dd>
         <dt>Integrity</dt>
         <dd data-testid="rec-integrity" data-ok={String(r.integrity.ok)}>
-          {r.integrity.ok ? "consistent and attested" : "failed"}{" "}
+          {r.integrity.ok
+            ? "checks passed locally against the base commit given at start (caller-asserted; not an authorization)"
+            : "checks failed"}{" "}
           <span className="muted small">({r.integrity.authorization})</span>
           {r.integrity.errors.map((e) => (
             <div key={e.code + e.message}>

@@ -18,7 +18,25 @@ const MAX_FILES = 5000;
 const MAX_BYTES = 64 * 1024 * 1024;
 const ATTEMPTS = 3;
 
-export type ObserveOptions = { ref?: string };
+export type ObserveOptions = {
+  ref?: string;
+  /**
+   * Also fingerprint the working tree's content: the bytes of every file Git reports as
+   * modified, added, deleted, renamed or untracked (not ignored). Committed, unchanged files are
+   * covered by the commit ID. For reads that inspect source and test files (evidence,
+   * implementation status, reconciliation, the gate), so a dirty→dirty edit between two reads
+   * is seen. Over budget or unreadable: ObservationLimit, never a silent pass.
+   */
+  source?: boolean;
+};
+
+/** The working tree could not be fingerprinted within bounds: the answer is refused, not guessed. */
+export class ObservationLimit extends Error {
+  readonly code = "OBSERVATION_LIMIT";
+}
+
+const SOURCE_MAX_FILES = 2000;
+const SOURCE_MAX_BYTES = 32 * 1024 * 1024;
 
 export function checkoutIdentity(path: string, opts: ObserveOptions = {}): string {
   const st = projectStatus(path);
@@ -54,6 +72,7 @@ export function checkoutIdentity(path: string, opts: ObserveOptions = {}): strin
     }
   };
   if (st.storeDir) walk(st.storeDir, "");
+  if (opts.source) sourceFingerprint(st.root, h);
   if (opts.ref) {
     try {
       h.update(
@@ -64,6 +83,53 @@ export function checkoutIdentity(path: string, opts: ObserveOptions = {}): strin
     }
   }
   return h.digest("hex");
+}
+
+function sourceFingerprint(root: string, h: ReturnType<typeof createHash>): void {
+  let out: string;
+  try {
+    out = execFileSync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"], {
+      cwd: root,
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    });
+  } catch (e) {
+    throw new ObservationLimit(`cannot list the working tree's changes: ${(e as Error).message}`);
+  }
+  const entries = out.split("\0").filter(Boolean);
+  if (entries.length > SOURCE_MAX_FILES)
+    throw new ObservationLimit(
+      `${entries.length} changed or untracked files is more than this view checks (${SOURCE_MAX_FILES}); commit or clean some and retry`,
+    );
+  let bytes = 0;
+  h.update("\0source");
+  for (const e of entries.sort()) {
+    const rel = e.slice(3);
+    h.update(`\0${e}\0`);
+    const s = lstatSync(join(root, rel), { throwIfNoEntry: false });
+    if (!s) {
+      h.update("deleted");
+      continue;
+    }
+    if (s.isDirectory()) {
+      h.update("dir");
+      continue;
+    }
+    if (!s.isFile()) {
+      h.update(`special:${s.size}`);
+      continue;
+    }
+    bytes += s.size;
+    if (bytes > SOURCE_MAX_BYTES)
+      throw new ObservationLimit(
+        `changed or untracked files add up to more than ${SOURCE_MAX_BYTES} bytes; this view cannot observe them consistently`,
+      );
+    try {
+      h.update(readFileSync(join(root, rel)));
+    } catch (err) {
+      throw new ObservationLimit(`cannot read ${rel}: ${(err as Error).message}`);
+    }
+  }
 }
 
 /**

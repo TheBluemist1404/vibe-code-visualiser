@@ -48,12 +48,14 @@ export type EvidenceOptions = {
   /** Where those came from, for display. */
   sources?: { runs: string[]; policy: string | null };
   /** Test hook: called between the reads that make up one answer. */
-  betweenReads?: (step: "after-handoff" | "after-reconcile") => void;
+  betweenReads?: (step: "after-evidence" | "after-handoff" | "after-reconcile") => void;
 };
 
 const OWNED = ["capabilities", "data", "rules", "events", "contracts", "behaviors", "criteria"] as const;
 /** The UI host observes nothing itself: it captures no test run, so every run is a claim. */
 const HOST = { principalId: "vcv-ui", permissions: [] as const };
+/** Evidence reads inspect source and test files: their identity includes the working tree's content. */
+const SOURCE = { source: true } as const;
 const COMMIT = /^([0-9a-f]{40}|[0-9a-f]{64})$/;
 
 export class EvidenceDesk {
@@ -67,7 +69,7 @@ export class EvidenceDesk {
 
   /** Binding claims about one object, verified now; for a criterion also its test mappings. */
   object(id: string, expect?: string): ObjectEvidenceView {
-    return consistentRead(this.session.path, () => this.objectOnce(id, expect));
+    return consistentRead(this.session.path, () => this.objectOnce(id, expect), SOURCE);
   }
 
   private objectOnce(id: string, expect?: string): ObjectEvidenceView {
@@ -76,6 +78,7 @@ export class EvidenceDesk {
     const api = createEvidenceApi(this.session.path);
     const r = api.getObjectEvidence({ id, expectedRevision: s.model.project.modelRevision, limit: 50 });
     if (!r.ok) throw unavailable(r.error.code, r.error.message);
+    this.opts.betweenReads?.("after-evidence");
     const crit = s.model.criteria?.some((c) => c.id === id) ? this.criterion(id, s.model) : null;
     return {
       observed: observedOf(r.context, s.key),
@@ -95,7 +98,7 @@ export class EvidenceDesk {
 
   /** Per owned object of a module: how many claims, in which states. */
   module(moduleId: string, expect?: string): ModuleEvidenceView {
-    return consistentRead(this.session.path, () => this.moduleOnce(moduleId, expect));
+    return consistentRead(this.session.path, () => this.moduleOnce(moduleId, expect), SOURCE);
   }
 
   private moduleOnce(moduleId: string, expect?: string): ModuleEvidenceView {
@@ -127,7 +130,7 @@ export class EvidenceDesk {
 
   /** The approved change's handoff and the agent's report, as separate layers. */
   implementation(changeId: string, expect?: string): ImplementationView {
-    return consistentRead(this.session.path, () => this.implementationOnce(changeId, expect));
+    return consistentRead(this.session.path, () => this.implementationOnce(changeId, expect), SOURCE);
   }
 
   private implementationOnce(changeId: string, expect?: string): ImplementationView {
@@ -233,7 +236,7 @@ export class EvidenceDesk {
 
   /** Reconciliation and the gate against the base the host was given. Never a guessed base. */
   gate(expect?: string): GateView {
-    return consistentRead(this.session.path, () => this.gateOnce(expect));
+    return consistentRead(this.session.path, () => this.gateOnce(expect), SOURCE);
   }
 
   private gateOnce(expect?: string): GateView {
