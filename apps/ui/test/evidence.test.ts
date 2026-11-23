@@ -3,10 +3,10 @@
 // functions say about the checkout now. Nothing is written, reasserted, run or decided here, and
 // the pre-merge views need a base commit the person starting the host names explicitly.
 import assert from "node:assert/strict";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { preMergeGate, projectStatus } from "@vcv/repo";
+import { preMergeGate, projectStatus, recordBinding } from "@vcv/repo";
 import { EvidenceDesk } from "../src/evidence.ts";
 import type { EvidenceOptions } from "../src/evidence.ts";
 import { LayoutFileStore } from "../src/layout-store.ts";
@@ -284,4 +284,80 @@ test("source edits are part of the observed state: a dirty→dirty edit between 
   const r = await get("/api/gate");
   assert.equal(r.status, 422);
   assert.equal(r.body.error?.code, "OBSERVATION_LIMIT");
+});
+
+test("the supported source path model: a symlink retargeted between reads, an ignored file read through a committed symlink a claim names, and a changed nested repository", async () => {
+  const { repo, base } = evidenceWorld();
+  const session = new ProjectSession(repo, new LayoutFileStore(tempDir("vcv-ui-state-")));
+  // gen/ is ignored; server/src/enrollment/generated.ts is a committed symlink into it, and a
+  // claim names that path, so the resolver reads ignored bytes through an unchanged symlink.
+  writeFileSync(join(repo, ".gitignore"), "gen/\n");
+  mkdirSync(join(repo, "gen"));
+  writeFileSync(join(repo, "gen", "a.ts"), "export const a = 1;\n");
+  writeFileSync(join(repo, "gen", "b.ts"), "export const b = 2;\n");
+  const link = join(repo, "server/src/enrollment/generated.ts");
+  symlinkSync("../../../gen/a.ts", link);
+  recordBinding(
+    repo,
+    {
+      bindingId: "impl.generated",
+      modelObjectId: "cap-enroll",
+      relation: "implements",
+      locator: { path: "server/src/enrollment/generated.ts", selector: { kind: "file" } },
+    },
+    { principalId: "agent:coder", permissions: ["binding:record"], source: "agent" } as never,
+    null,
+  );
+  git(repo, "add", "-A");
+  git(repo, "commit", "-qm", "generated code behind a symlink");
+
+  const retriedOnce = (
+    step: "after-evidence" | "after-reconcile",
+    mutate: () => void,
+    read: (d: EvidenceDesk) => unknown,
+  ) => {
+    let calls = 0;
+    read(
+      new EvidenceDesk(session, {
+        baseCommit: base,
+        betweenReads: (s) => {
+          if (s === step && calls++ === 0) mutate();
+        },
+      }),
+    );
+    return calls;
+  };
+
+  // 1. The ignored target changes; the symlink and git status do not.
+  assert.equal(
+    retriedOnce(
+      "after-evidence",
+      () => writeFileSync(join(repo, "gen", "a.ts"), "export const a = 3;\n"),
+      (d) => d.object("cap-enroll"),
+    ),
+    2,
+    "ignored bytes behind a claimed symlink are observed",
+  );
+  // 2. The symlink is retargeted to a link text of the same length (dirty → dirty).
+  rmSync(link);
+  symlinkSync("../../../gen/a.ts", link); // same text as committed: clean
+  writeFileSync(join(repo, "gen", "a.ts"), "export const a = 4;\n");
+  assert.equal(
+    retriedOnce(
+      "after-reconcile",
+      () => {
+        rmSync(link);
+        symlinkSync("../../../gen/b.ts", link);
+      },
+      (d) => d.gate(),
+    ),
+    2,
+    "a retargeted symlink is observed",
+  );
+  // 3. A nested repository with changes is refused, not silently skipped.
+  const nested = join(repo, "vendor-lib");
+  mkdirSync(nested);
+  git(nested, "init", "-q");
+  writeFileSync(join(nested, "x.ts"), "x\n");
+  assert.throws(() => new EvidenceDesk(session, { baseCommit: base }).gate(), { code: "OBSERVATION_LIMIT" });
 });

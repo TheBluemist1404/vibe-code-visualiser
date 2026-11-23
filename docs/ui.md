@@ -268,13 +268,29 @@ checked just now, with the limits of that check).
     code edit; it is still only a read.
 
 Each answer runs its reads between two checkout identities, as the inbox does (`src/observe.ts`).
-Because these views inspect source and test files, their identity also includes the working
-tree's content: the bytes of every file `git status` reports as changed or untracked (ignored
-files excluded; committed, unchanged files are covered by the commit). A dirty→dirty edit between
-two reads is therefore seen, and the reads are retried or refused with `STATE_CHANGED`. As a
-result, the reconciliation and the gate on the pre-merge page always describe the same source
-state. More than 2000 changed or untracked files, more than 32 MB of them, or an unreadable one
-is `422 OBSERVATION_LIMIT`: the answer is refused, not guessed.
+Because these views inspect source and test files, their identity also covers the source state.
+This is the supported source path model:
+
+| Path | How it is observed |
+|---|---|
+| Committed, unchanged files | the commit ID |
+| Every path `git status` reports as changed or untracked (not ignored) | its bytes |
+| A symlink among those | its link text plus the bytes it resolves to inside the checkout, or the fact that it leaves the checkout (which the resolver refuses) |
+| Every file a binding claim's locator names, including ignored files and files behind unchanged tracked symlinks | the bytes the resolver would read, resolved the same way |
+| A submodule or nested repository with changes | refused: its working tree is not observed here |
+
+A dirty→dirty edit, a retargeted symlink, or a change to an ignored file a claim reads is
+therefore seen between two reads. The reads are then retried, or refused with `STATE_CHANGED`.
+As a result, the reconciliation and the gate on the pre-merge page always describe the same
+source state.
+
+These cases are `422 OBSERVATION_LIMIT`, and the answer is refused, not guessed:
+- more than 2000 such paths, or more than 32 MB of them;
+- a special file (FIFO, device);
+- an unreadable file;
+- a changed submodule.
+
+Ignored files that no claim names are outside the model. No evidence view reads them.
 
 On the pre-merge page, a passing integrity check reads "checks passed locally against the base
 commit given at start (caller-asserted; not an authorization)". The check establishes
@@ -363,6 +379,9 @@ The browser is not a trust boundary, and neither is this host for anything beyon
   - a dirty→dirty source edit landing mid-read is retried for the gate, the implementation view
     and object evidence, an edit on every read is `STATE_CHANGED`, and 2001 untracked files are
     `OBSERVATION_LIMIT`. With the source fingerprint switched off, that test fails;
+  - the source path model: an ignored file read through a committed, claimed symlink and a
+    symlink retargeted to a same-length link text are both seen mid-read, and a changed nested
+    repository is `OBSERVATION_LIMIT`. Without the claimed-path fingerprint, that test fails;
   - an unchanged checkout.
 - `apps/ui/e2e/evidence.e2e.ts`: the same in Chromium (screenshots 30 to 35). It also checks
   that the pre-merge page follows the model when it moves, and that no button on these pages

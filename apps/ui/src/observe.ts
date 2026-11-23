@@ -9,8 +9,8 @@
 // moving is STATE_CHANGED. Nothing is stitched together from two states.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync, statSync } from "node:fs";
+import { join, sep } from "node:path";
 import { projectStatus } from "@vcv/repo";
 import { StateChangedError, modelKey } from "./session.ts";
 
@@ -85,6 +85,18 @@ export function checkoutIdentity(path: string, opts: ObserveOptions = {}): strin
   return h.digest("hex");
 }
 
+/**
+ * The supported source path model (docs/ui.md, "Evidence and the pre-merge page"):
+ * - committed, unchanged files: covered by the commit ID;
+ * - every path `git status` reports as changed or untracked (not ignored): its bytes; a symlink:
+ *   its link text plus the bytes of what it resolves to inside the checkout (or that it leaves
+ *   the checkout, which the resolver refuses anyway);
+ * - every file a binding claim's locator names, wherever it is (also ignored files, also behind
+ *   unchanged tracked symlinks): the bytes the resolver would read, resolved the same way;
+ * - a submodule or nested repository with changes: refused (OBSERVATION_LIMIT), because its
+ *   working tree is not observed here.
+ * Anything over budget or unreadable is refused, never hashed as a placeholder.
+ */
 function sourceFingerprint(root: string, h: ReturnType<typeof createHash>): void {
   let out: string;
   try {
@@ -97,39 +109,112 @@ function sourceFingerprint(root: string, h: ReturnType<typeof createHash>): void
     throw new ObservationLimit(`cannot list the working tree's changes: ${(e as Error).message}`);
   }
   const entries = out.split("\0").filter(Boolean);
-  if (entries.length > SOURCE_MAX_FILES)
+  const claimed = claimedPaths(root);
+  if (entries.length + claimed.length > SOURCE_MAX_FILES)
     throw new ObservationLimit(
-      `${entries.length} changed or untracked files is more than this view checks (${SOURCE_MAX_FILES}); commit or clean some and retry`,
+      `${entries.length} changed or untracked files and ${claimed.length} claimed paths is more than this view checks (${SOURCE_MAX_FILES}); commit or clean some and retry`,
     );
-  let bytes = 0;
+  const budget = { bytes: 0 };
   h.update("\0source");
   for (const e of entries.sort()) {
-    const rel = e.slice(3);
     h.update(`\0${e}\0`);
-    const s = lstatSync(join(root, rel), { throwIfNoEntry: false });
-    if (!s) {
-      h.update("deleted");
-      continue;
-    }
-    if (s.isDirectory()) {
-      h.update("dir");
-      continue;
-    }
-    if (!s.isFile()) {
-      h.update(`special:${s.size}`);
-      continue;
-    }
-    bytes += s.size;
-    if (bytes > SOURCE_MAX_BYTES)
+    hashPath(root, e.slice(3), h, budget, true);
+  }
+  h.update("\0claimed");
+  for (const rel of claimed) {
+    h.update(`\0${rel}\0`);
+    hashPath(root, rel, h, budget, false);
+  }
+}
+
+const realRootOf = (root: string) => {
+  try {
+    return realpathSync(root);
+  } catch {
+    return root;
+  }
+};
+
+function hashPath(
+  root: string,
+  rel: string,
+  h: ReturnType<typeof createHash>,
+  budget: { bytes: number },
+  fromStatus: boolean,
+): void {
+  const abs = join(root, rel);
+  const s = lstatSync(abs, { throwIfNoEntry: false });
+  if (!s) {
+    h.update("absent");
+    return;
+  }
+  if (s.isDirectory()) {
+    // git status lists a directory only for a submodule or nested repository; its files are not observed.
+    if (fromStatus)
       throw new ObservationLimit(
-        `changed or untracked files add up to more than ${SOURCE_MAX_BYTES} bytes; this view cannot observe them consistently`,
+        `${rel} is a submodule or nested repository with changes; this view does not observe its working tree. Commit or clean it and retry`,
       );
+    h.update("directory");
+    return;
+  }
+  let target = abs;
+  if (s.isSymbolicLink()) {
     try {
-      h.update(readFileSync(join(root, rel)));
-    } catch (err) {
-      throw new ObservationLimit(`cannot read ${rel}: ${(err as Error).message}`);
+      h.update(`link:${readlinkSync(abs)}\0`);
+      target = realpathSync(abs);
+    } catch {
+      h.update("dangling");
+      return;
+    }
+    const realRoot = realRootOf(root);
+    if (target !== realRoot && !target.startsWith(realRoot + sep)) {
+      h.update("outside"); // the resolver refuses a symlink that leaves the checkout
+      return;
     }
   }
+  const t = statSync(target, { throwIfNoEntry: false });
+  if (!t) {
+    h.update("absent");
+    return;
+  }
+  if (t.isDirectory()) {
+    h.update("directory");
+    return;
+  }
+  if (!t.isFile()) throw new ObservationLimit(`${rel} is a special file; this view does not observe it`);
+  budget.bytes += t.size;
+  if (budget.bytes > SOURCE_MAX_BYTES)
+    throw new ObservationLimit(
+      `changed, untracked and claimed files add up to more than ${SOURCE_MAX_BYTES} bytes; this view cannot observe them consistently`,
+    );
+  try {
+    h.update(readFileSync(target));
+  } catch (err) {
+    throw new ObservationLimit(`cannot read ${rel}: ${(err as Error).message}`);
+  }
+}
+
+/** Locator paths named by binding claims in .vcv/bindings/ (unreadable claims are covered by the .vcv/ walk). */
+function claimedPaths(root: string): string[] {
+  const dir = join(root, ".vcv", "bindings");
+  let names: string[];
+  try {
+    names = readdirSync(dir).filter((n) => n.endsWith(".json"));
+  } catch {
+    return [];
+  }
+  const paths = new Set<string>();
+  for (const n of names) {
+    try {
+      const st = lstatSync(join(dir, n));
+      if (!st.isFile() || st.size > 1024 * 1024) continue;
+      const p = (JSON.parse(readFileSync(join(dir, n), "utf8")) as { locator?: { path?: unknown } }).locator?.path;
+      if (typeof p === "string" && p && !p.startsWith("/") && !p.split("/").includes("..")) paths.add(p);
+    } catch {
+      // an unreadable claim is part of the .vcv/ bytes already
+    }
+  }
+  return [...paths].sort();
 }
 
 /**
