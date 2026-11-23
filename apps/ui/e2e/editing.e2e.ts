@@ -1,17 +1,21 @@
-// End-to-end for M5.3: inspector edits staged as typed proposals, in a real browser against real
-// checkouts. Run with `npm run test:ui`. Set VCV_UI_SHOTS=<dir> to keep screenshots.
+// End-to-end for M5.3 (Issue #41): inspector edits staged into local drafts, checked by the
+// engine and handed off to a coding agent, in a real browser against real checkouts. Nothing is
+// submitted or approved, and the checkout stays byte-identical. Run with `npm run test:ui`.
+// Set VCV_UI_SHOTS=<dir> to keep screenshots.
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
-import { projectStatus } from "@vcv/repo";
+import { proposedChangeSchema } from "@vcv/core";
+import { previewProposal, projectStatus } from "@vcv/repo";
 import { chromium } from "playwright";
 import type { Browser, Page } from "playwright";
+import { DraftFileStore } from "../src/drafts/store.ts";
 import { LayoutFileStore } from "../src/layout-store.ts";
 import { startHost } from "../src/server.ts";
 import type { Host } from "../src/server.ts";
 import { ProjectSession } from "../src/session.ts";
-import { addAuditModule, courseDesk, git, tempDir } from "../test/fixtures.ts";
+import { addAuditModule, courseDesk, git, tempDir, tree } from "../test/fixtures.ts";
 
 const WEB = join(import.meta.dirname, "../dist");
 const SHOTS = process.env.VCV_UI_SHOTS;
@@ -28,14 +32,17 @@ after(async () => {
   await browser?.close();
 });
 
-async function launch(repo: string) {
-  const session = new ProjectSession(repo, new LayoutFileStore(tempDir("vcv-ui-state-")));
-  const host = await startHost({ session, webDir: WEB, proposer: "user:hoang" });
-  hosts.push(host);
+async function host(repo: string, stateDir: string) {
+  const h = await startHost({ session: new ProjectSession(repo, new LayoutFileStore(stateDir)), webDir: WEB });
+  hosts.push(h);
+  return h;
+}
+
+async function tab(h: Host) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
-  await page.goto(host.url);
+  await page.goto(h.url);
   await page.locator('[data-module="mod-enrollment"]').waitFor();
   return { page, errors };
 }
@@ -49,8 +56,6 @@ async function shot(page: Page, name: string) {
   await page.screenshot({ path: join(SHOTS, `${name}.png`) });
 }
 
-const uiRecords = (repo: string) => readdirSync(join(repo, ".vcv", "changes")).filter((f) => f.startsWith("ui-"));
-
 async function selectModule(page: Page, name: string) {
   await page
     .getByRole("navigation", { name: "Modules" })
@@ -59,114 +64,185 @@ async function selectModule(page: Page, name: string) {
   await page.getByTestId("inspector-name").filter({ hasText: name }).waitFor();
 }
 
-test("10: edit a module, preview it with the engine, submit a pending proposal; the model and HEAD stay put", async () => {
+/** Edit one field in the inspector and stage it; waits until the draft shows `count` steps. */
+async function stage(page: Page, label: string, value: string | { check: string }, count: number) {
+  const fields = page.getByTestId("fields");
+  await fields.getByRole("button", { name: `Edit ${label}` }).click();
+  if (typeof value === "string") await fields.getByRole("textbox", { name: label }).fill(value);
+  else await fields.getByRole("checkbox", { name: new RegExp(value.check) }).check();
+  await fields.getByRole("button", { name: "Stage", exact: true }).click();
+  await page
+    .getByTestId("staged-count")
+    .filter({ hasText: String(count) })
+    .waitFor();
+}
+
+const tray = (page: Page) => page.getByTestId("tray");
+
+test("10: a multi-module draft is checked by the engine and handed off as a change the CLI layer accepts", async () => {
   const repo = courseDesk();
+  const before = tree(repo);
   const head = git(repo, "rev-parse", "HEAD");
   const revision = projectStatus(repo).model?.revision;
-  const { page, errors } = await launch(repo);
+  const { page, errors } = await tab(await host(repo, tempDir("vcv-ui-state-")));
+
   await selectModule(page, "Enrollment");
-
-  // Editable fields name their typed operation; purpose is read-only, with the reason.
   const fields = page.getByTestId("fields");
-  await assert.doesNotReject(fields.getByTestId("field-name").getByText("renameObject").waitFor());
-  await assert.doesNotReject(
-    fields
-      .getByTestId("readonly-purpose")
-      .getByText(/No typed operation/)
-      .waitFor(),
-  );
+  await fields.getByTestId("field-name").getByText("renameObject").waitFor();
+  await fields
+    .getByTestId("readonly-purpose")
+    .getByText(/No typed operation/)
+    .waitFor();
   await shot(page, "10-fields");
+  await stage(page, "Name", "Enrollments", 1);
+  // A rule in another module.
+  await selectModule(page, "Notifications");
+  await page
+    .getByTestId("owned-rule")
+    .getByRole("button", { name: /recipientId required/ })
+    .click();
+  await page.getByTestId("object-name").filter({ hasText: "recipientId required" }).waitFor();
+  await stage(page, "Statement", "Listing notifications needs a recipientId.", 2);
+  await tray(page).getByRole("textbox", { name: /Why/ }).fill("Clearer names");
+  await tray(page).getByRole("textbox", { name: /Why/ }).blur();
 
-  await fields.getByRole("button", { name: "Edit Name" }).click();
-  await fields.getByRole("textbox", { name: "Name" }).fill("Enrollments");
-  await fields.getByRole("button", { name: "Stage", exact: true }).click();
-  await fields.getByRole("button", { name: "Edit Description" }).click();
-  await fields.getByRole("textbox", { name: "Description" }).fill("Seats, enrollments and their decisions.");
-  await fields.getByRole("button", { name: "Stage", exact: true }).click();
-
-  const tray = page.getByTestId("tray");
-  assert.equal(await tray.getByTestId("staged-count").textContent(), "2");
-  await tray
+  const steps = tray(page).getByTestId("steps");
+  assert.match(
+    (await steps.textContent()) ?? "",
+    /renameObject\s*Enrollment.*setRuleStatement\s*recipientId required/s,
+  );
+  await tray(page)
     .getByTestId("check-state")
     .filter({ hasText: `Valid on ${revision}` })
     .waitFor();
-  assert.match((await tray.getByTestId("check-body").textContent()) ?? "", /renameObject.*setDescription/s);
-  // The canvas marks the module, and the canvas itself still shows the model's name.
+  assert.match(
+    (await tray(page).getByTestId("check-delta").textContent()) ?? "",
+    /Enrollments.*Listing notifications needs/s,
+  );
+  // The canvas marks the module and still shows the model's own name.
   await page.locator('[data-module="mod-enrollment"].is-staged').waitFor();
   assert.match((await page.locator('[data-module="mod-enrollment"] .node-name').textContent()) ?? "", /^Enrollment/);
-  await tray.getByRole("textbox", { name: /Why/ }).fill("Name it for what it holds");
-  await shot(page, "11-staged");
+  await shot(page, "11-draft");
 
-  await page.getByTestId("submit-proposal").click();
-  const done = page.getByTestId("submit-result");
-  await done.waitFor();
-  assert.match((await done.textContent()) ?? "", /ui-\d{8}-\d{6}-[0-9a-f]{4}.*waiting for review/s);
-  assert.match((await done.textContent()) ?? "", /vcv review approve/);
-  assert.equal(await page.getByRole("button", { name: /^approve/i }).count(), 0, "the browser never approves");
-  await shot(page, "12-submitted");
+  await page.getByTestId("export-draft").click();
+  const dialog = page.getByTestId("export-dialog");
+  await dialog.getByTestId("export-change").waitFor();
+  assert.equal(await dialog.getByTestId("export-check").getAttribute("data-check"), "valid");
+  const change = JSON.parse((await dialog.getByTestId("export-change").textContent()) ?? "");
+  assert.equal(proposedChangeSchema.safeParse(change).success, true);
+  assert.equal(change.expectedRevision, revision);
+  assert.equal(change.rationale, "Clearer names");
+  const direct = previewProposal(repo, { change });
+  assert.ok(direct.ok && direct.data.validation.appliesToCurrent);
+  await shot(page, "12-handoff");
 
-  assert.equal(uiRecords(repo).length, 1);
-  assert.equal(projectStatus(repo).model?.revision, revision, ".vcv/HEAD did not move");
+  for (const name of [/submit/i, /^approve/i]) assert.equal(await page.getByRole("button", { name }).count(), 0);
+  assert.deepEqual(tree(repo), before, "checkout, .vcv/ and change records unchanged");
   assert.equal(git(repo, "rev-parse", "HEAD"), head);
-
-  // The project view lists it as waiting for review.
-  await page.getByRole("button", { name: "Done" }).click();
-  await page.keyboard.press("Escape");
-  await page
-    .getByTestId("pending-proposals")
-    .getByText(/1 operation|2 operations/)
-    .waitFor();
   assert.deepEqual(errors, []);
 });
 
-test("11: engine errors block submit and warnings are shown; nothing is recorded", async () => {
+test("11: an invalid operation and a warning are reported; the handoff says it needs repair", async () => {
   const repo = courseDesk();
-  const { page, errors } = await launch(repo);
+  const before = tree(repo);
+  const { page, errors } = await tab(await host(repo, tempDir("vcv-ui-state-")));
   await selectModule(page, "Notifications");
-  const fields = page.getByTestId("fields");
-  const tray = page.getByTestId("tray");
   // Notifications depending on Web closes a cycle: the engine accepts it with a warning.
-  await fields.getByRole("button", { name: "Edit Depends on" }).click();
-  await fields.getByRole("checkbox", { name: /Web/ }).check();
-  await fields.getByRole("button", { name: "Stage", exact: true }).click();
-  await tray.getByTestId("check-warnings").getByText("DEPENDENCY_CYCLE").first().waitFor();
-  // An empty name does not match renameObject: an error, and submit is disabled.
-  await fields.getByRole("button", { name: "Edit Name" }).click();
-  await fields.getByRole("textbox", { name: "Name" }).fill("");
-  await fields.getByRole("button", { name: "Stage", exact: true }).click();
-  await tray.getByTestId("check-state").filter({ hasText: /error/ }).waitFor();
-  assert.match((await tray.getByTestId("check-errors").textContent()) ?? "", /SCHEMA.*operations\.1\.name/s);
-  assert.ok(await page.getByTestId("submit-proposal").isDisabled());
+  await stage(page, "Depends on", { check: "Web" }, 1);
+  await tray(page).getByTestId("check-warnings").getByText("DEPENDENCY_CYCLE").first().waitFor();
+  // An empty name does not match renameObject.
+  await stage(page, "Name", "", 2);
+  await tray(page).getByTestId("check-state").filter({ hasText: /error/ }).waitFor();
+  assert.match((await tray(page).getByTestId("check-errors").textContent()) ?? "", /SCHEMA.*operations\.1\.name/s);
   await shot(page, "13-invalid");
-  assert.deepEqual(uiRecords(repo), []);
+  await page.getByTestId("export-draft").click();
+  await page.getByTestId("export-change").waitFor();
+  assert.equal(await page.getByTestId("export-check").getAttribute("data-check"), "invalid");
+  assert.deepEqual(tree(repo), before);
   assert.deepEqual(errors, []);
 });
 
-test("12: a draft keeps its revision when the model moves, is reported stale, and can be restaged", async () => {
+test("12: a draft survives reload and host restart; a second tab gets an explicit conflict, not an overwrite", async () => {
   const repo = courseDesk();
-  const { page, errors } = await launch(repo);
-  const before = projectStatus(repo).model?.revision;
-  await selectModule(page, "Web");
-  const fields = page.getByTestId("fields");
+  const stateDir = tempDir("vcv-ui-state-");
+  const h1 = await host(repo, stateDir);
+  const one = await tab(h1);
+  await selectModule(one.page, "Web");
+  await stage(one.page, "Name", "Web app", 1);
+  const two = await tab(h1); // opens the same draft
+  await two.page.getByTestId("staged-count").filter({ hasText: "1" }).waitFor();
+
+  await selectModule(one.page, "Enrollment");
+  await stage(one.page, "Name", "Enrollments", 2);
+  // Tab two still holds version 2 of the draft; its edit is refused and the draft reloaded.
+  await selectModule(two.page, "Notifications");
+  const fields = two.page.getByTestId("fields");
   await fields.getByRole("button", { name: "Edit Name" }).click();
-  await fields.getByRole("textbox", { name: "Name" }).fill("Web app");
+  await fields.getByRole("textbox", { name: "Name" }).fill("Alerts");
   await fields.getByRole("button", { name: "Stage", exact: true }).click();
-  const tray = page.getByTestId("tray");
-  await tray.getByTestId("check-state").filter({ hasText: "Valid" }).waitFor();
-
-  const now = addAuditModule(repo); // someone else's change lands
-  await page.getByTestId("stale-draft").waitFor();
-  await tray.getByTestId("check-state").filter({ hasText: "Stale" }).waitFor();
-  assert.match((await tray.getByTestId("check-errors").textContent()) ?? "", /STALE_REVISION/);
-  assert.match((await tray.textContent()) ?? "", new RegExp(`on ${before}`));
-  assert.ok(await page.getByTestId("submit-proposal").isDisabled());
-  await shot(page, "14-stale");
-
-  await tray.getByRole("button", { name: `Restage on ${now}` }).click();
-  await tray
-    .getByTestId("check-state")
-    .filter({ hasText: `Valid on ${now}` })
+  await two.page
+    .getByTestId("draft-notice")
+    .getByText(/changed in another tab/)
     .waitFor();
-  assert.equal(await page.getByTestId("stale-draft").count(), 0);
+  await two.page.getByTestId("staged-count").filter({ hasText: "2" }).waitFor();
+  await shot(two.page, "14-conflict");
+  // A second, independent draft in tab two leaves tab one's draft alone.
+  await fields.getByRole("button", { name: "Cancel" }).click();
+  await two.page.getByTestId("new-draft").click();
+  await two.page.getByTestId("staged-count").filter({ hasText: "0" }).waitFor();
+  await stage(two.page, "Name", "Alerts", 1);
+
+  // Reload tab one: same draft, same two steps.
+  await one.page.reload();
+  await one.page.getByTestId("staged-count").filter({ hasText: "2" }).waitFor();
+  // Restart the host on the same state directory.
+  await h1.close();
+  const three = await tab(await host(repo, stateDir));
+  assert.equal(await three.page.getByTestId("draft-select").locator("option").count(), 2);
+  assert.deepEqual([...one.errors, ...two.errors, ...three.errors], []);
+});
+
+test("13: a draft from R1 stays on R1 when the model moves: stale, no restage, handoff needs an agent", async () => {
+  const repo = courseDesk();
+  const r1 = projectStatus(repo).model?.revision as string;
+  const { page, errors } = await tab(await host(repo, tempDir("vcv-ui-state-")));
+  await selectModule(page, "Web");
+  await stage(page, "Name", "Web app", 1);
+  await tray(page).getByTestId("check-state").filter({ hasText: "Valid" }).waitFor();
+
+  const r2 = addAuditModule(repo); // someone else's change lands
+  const after = tree(repo);
+  const stale = page.getByTestId("stale-draft");
+  await stale.waitFor();
+  assert.match((await stale.textContent()) ?? "", new RegExp(`${r1}.*${r2}`, "s"));
+  await tray(page).getByTestId("check-state").filter({ hasText: "Stale" }).waitFor();
+  assert.equal(await page.getByRole("button", { name: /restage/i }).count(), 0);
+  assert.ok(await page.getByTestId("fields").getByRole("button", { name: "Edit Name" }).isDisabled());
+  await shot(page, "15-stale");
+
+  await page.getByTestId("export-draft").click();
+  await page.getByTestId("export-change").waitFor();
+  assert.equal(await page.getByTestId("export-check").getAttribute("data-check"), "stale");
+  const change = JSON.parse((await page.getByTestId("export-change").textContent()) ?? "");
+  assert.equal(change.expectedRevision, r1, "the original base, never retargeted");
+  assert.deepEqual(tree(repo), after, "R2 untouched");
+  assert.deepEqual(errors, []);
+});
+
+test("14: an unreadable draft file is reported and removed only when asked", async () => {
+  const repo = courseDesk();
+  const stateDir = tempDir("vcv-ui-state-");
+  const store = new DraftFileStore(stateDir);
+  const dir = store.dirFor({ root: projectStatus(repo).root, projectId: "prj-course-desk" });
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "d-20260101-000000-aaaa.json"), "{ not json");
+  const { page, errors } = await tab(await host(repo, stateDir));
+  const problem = page.getByTestId("draft-problem-d-20260101-000000-aaaa");
+  await problem.getByText(/DRAFT_CORRUPT/).waitFor();
+  await shot(page, "16-corrupt");
+  assert.deepEqual(readdirSync(dir), ["d-20260101-000000-aaaa.json"], "left as it was");
+  await problem.getByRole("button", { name: "Discard this file" }).click();
+  await problem.waitFor({ state: "detached" });
+  assert.deepEqual(readdirSync(dir), []);
   assert.deepEqual(errors, []);
 });

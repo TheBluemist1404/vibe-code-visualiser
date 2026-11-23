@@ -1,9 +1,9 @@
 // The inspector's edit section: each field the host offers, with the typed operation it
-// becomes, and every read-only field with the reason. Editing here only stages a change; the
-// model changes when a reviewer approves the proposal outside the browser.
+// becomes, and every read-only field with the reason. Editing here only stages the operation in
+// a local draft; the model itself never changes from the browser.
 import { useEffect, useRef, useState } from "react";
 import type { FieldAccess, GraphView } from "../../src/types.ts";
-import { useDraft } from "../draft.tsx";
+import { useDrafts } from "../drafts/DraftsProvider.tsx";
 import { Icon } from "../icons.tsx";
 
 type Editable = FieldAccess["editable"][number];
@@ -11,31 +11,30 @@ type Editable = FieldAccess["editable"][number];
 type Props = {
   access: FieldAccess;
   objectId: string;
-  objectName: string;
-  objectKind: string;
   graph: GraphView;
 };
 
-export function Fields({ access, objectId, objectName, objectKind, graph }: Props) {
+export function Fields({ access, objectId, graph }: Props) {
+  const { active } = useDrafts();
   return (
     <section className="sec" data-testid="fields">
       <h2 className="sec-head">
-        <Icon name="pencil" /> Propose a change
+        <Icon name="pencil" /> Draft a change
       </h2>
       <p className="small muted" style={{ margin: "0 0 var(--space-2)" }}>
-        Edits are staged, then submitted as a pending proposal. The model changes only when a reviewer approves it.
+        Staged edits go into a local draft as typed operations, for you to check and hand to a coding agent. The model
+        does not change.
       </p>
+      {active?.stale && (
+        <p className="small notice-inline" data-testid="fields-stale">
+          <Icon name="lock" small /> The open draft is based on another model, so it takes no new edits here. Start a
+          new draft below to edit this model.
+        </p>
+      )}
       {access.editable.length > 0 && (
         <ul className="fields">
           {access.editable.map((f) => (
-            <Field
-              key={f.field}
-              f={f}
-              objectId={objectId}
-              objectName={objectName}
-              objectKind={objectKind}
-              graph={graph}
-            />
+            <Field key={f.field} f={f} objectId={objectId} graph={graph} locked={!!active?.stale} />
           ))}
         </ul>
       )}
@@ -63,12 +62,12 @@ const show = (v: string | string[] | null, names: Map<string, string>) =>
         : "none"
       : v;
 
-function Field({ f, objectId, objectName, objectKind, graph }: { f: Editable } & Omit<Props, "access">) {
-  const draft = useDraft();
-  const staged = draft.staged(objectId, f.field);
+function Field({ f, objectId, graph, locked }: { f: Editable; locked: boolean } & Omit<Props, "access">) {
+  const drafts = useDrafts();
+  const staged = locked ? undefined : drafts.staged(objectId, f.field);
   const [editing, setEditing] = useState(false);
   const names = new Map(graph.modules.map((m) => [m.id, m.name]));
-  const value = staged ? staged.value : f.value;
+  const value = staged ? staged.after : f.value;
   return (
     <li className={`field${staged ? " is-staged" : ""}`} data-testid={`field-${f.field}`}>
       <span className="field-main">
@@ -86,17 +85,8 @@ function Field({ f, objectId, objectName, objectKind, graph }: { f: Editable } &
             self={objectId}
             graph={graph}
             onCancel={() => setEditing(false)}
-            onStage={(v) => {
-              draft.stage({
-                objectId,
-                field: f.field,
-                value: v,
-                label: f.label,
-                objectName,
-                objectKind,
-                before: f.value,
-              });
-              setEditing(false);
+            onStage={async (v) => {
+              if (await drafts.stage({ objectId, field: f.field, value: v })) setEditing(false);
             }}
           />
         ) : (
@@ -114,7 +104,7 @@ function Field({ f, objectId, objectName, objectKind, graph }: { f: Editable } &
               className="btn btn-ghost btn-icon"
               title="Unstage"
               aria-label={`Unstage ${f.label}`}
-              onClick={() => draft.unstage(objectId, f.field)}
+              onClick={() => drafts.unstage(staged.key)}
             >
               <Icon name="x" small />
             </button>
@@ -122,8 +112,9 @@ function Field({ f, objectId, objectName, objectKind, graph }: { f: Editable } &
           <button
             type="button"
             className="btn btn-ghost btn-icon"
-            title={`Edit ${f.label}`}
+            title={locked ? "The open draft is based on another model" : `Edit ${f.label}`}
             aria-label={`Edit ${f.label}`}
+            disabled={locked}
             onClick={() => setEditing(true)}
           >
             <Icon name="pencil" small />

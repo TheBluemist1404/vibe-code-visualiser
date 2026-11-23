@@ -41,7 +41,7 @@ Early and pre-release. The engine works from the command line and from coding ag
 A model lives in a `.vcv/` folder inside your Git repository, is bound to the source code it
 describes, changes only through reviewed proposals, and is checked against every pull request
 before it merges. An architecture explorer runs locally in the browser, where you can also
-propose model edits for review.
+draft model edits and hand them to a coding agent.
 
 | Milestone | What it delivers | Status |
 |---|---|---|
@@ -50,7 +50,7 @@ propose model edits for review.
 | **M2** Repository integration | `.vcv/` in the repo, branch-safe revisions, a reference app, agent-drafted first models, portable model↔code binding claims resolved for TypeScript, source evidence queries | ✅ Done ([#6](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/6)) |
 | **M3** Approved model → code | Agent proposes model changes, a reviewer approves with a signed attestation, a coding agent implements from a bounded handoff, VCV records what was implemented | ✅ Done ([#17](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/17)) |
 | **M4** Code → model reconciliation | Pre-merge reconciliation of a PR against its base, acceptance criteria mapped to tests, per-test runner evidence, a policy gate for CI | ✅ Done ([#22](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/22)) |
-| **M5** Local visual product | Module graph, change review and evidence panels in a local UI | In progress: explorer and proposal editing ([#39](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/39)) |
+| **M5** Local visual product | Module graph, change review and evidence panels in a local UI | In progress: explorer and drafted edits ([#39](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/39)) |
 
 M0 to M4 make up the technical MVP; M5 makes it usable without reading code. Everything is
 single-user and local for now. The file store assumes one writer at a time.
@@ -108,7 +108,7 @@ than silently reset. See [ADR 0007](docs/adr/0007-repository-projects.md).
 ### Explore the architecture in the browser
 
 ```sh
-npm run ui -- <checkout> [--as <you>]   # builds the client, then serves http://127.0.0.1:4870/
+npm run ui -- <checkout>            # builds the client, then serves http://127.0.0.1:4870/
 ```
 
 The explorer shows the checkout's modules on one canvas, with an arrow from each module to the
@@ -119,13 +119,15 @@ watching the checkout: when the model changes on disk it says so, keeps your lay
 new modules in free space. An absent, conflicted or invalid project is reported as it is; the
 explorer never creates, repairs or rewrites anything in the checkout.
 
-The inspector can also propose edits: a module's or object's name, description, a rule's or
-criterion's statement, and a module's dependencies. Each edit is staged, checked by the engine
-as you go (errors, warnings, what it changes and which modules it touches), and submitted as a
-**pending proposal** recorded for `--as` (default `local-user`). Submitting never changes the
-model: a reviewer approves with `vcv review approve` and their own key, and the explorer shows
-that command instead of an approve button. Fields without a typed operation, such as a module's
-purpose, are marked read-only with the reason. See [docs/ui.md](docs/ui.md).
+You can also draft edits in the inspector: a module's or object's name and description, a
+rule's or criterion's statement, and a module's dependencies. Each staged edit is a typed
+operation in a local draft, kept on your computer outside the checkout, so it survives restarts.
+The engine checks the draft as you go (errors, warnings, before and after, modules touched).
+**Hand off to agent** gives you the draft as a proposed change file that `vcv proposal preview
+--file` accepts, for your coding agent to integrate and submit. The explorer never submits or
+approves anything, and a draft whose model has moved is marked stale rather than moved onto the
+new model. Fields without a typed operation, such as a module's purpose, are read-only with the
+reason. See [docs/ui.md](docs/ui.md).
 
 ### Connect a coding agent
 

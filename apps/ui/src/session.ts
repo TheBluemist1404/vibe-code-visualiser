@@ -62,6 +62,11 @@ export class ProjectSession {
     this.hooks = hooks;
   }
 
+  /** The UI state directory (outside the checkout) this session keeps its layout in. */
+  get stateDir(): string {
+    return this.layouts.dir;
+  }
+
   /** Observe the checkout and build the canvas view. */
   view(): ProjectView {
     const snap = this.read();

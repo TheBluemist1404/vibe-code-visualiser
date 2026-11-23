@@ -1,8 +1,8 @@
 // Which fields the inspector may edit, and the typed operation each edit becomes. This table is
 // the only place the UI decides editability, and it decides nothing about validity: every
-// operation it builds is checked by the engine (previewProposal / submitProposal), never here.
-import { buildIndex, isUnresolved } from "@vcv/ir";
-import type { Model } from "@vcv/ir";
+// operation it builds is checked by the engine's dry run (previewProposal), never here.
+import { buildIndex, COLLECTIONS, collectionOf, isUnresolved } from "@vcv/ir";
+import type { CollectionName, Model } from "@vcv/ir";
 import type { EditableFieldName, FieldAccess, StagedEdit } from "./types.ts";
 
 export class BadEdit extends Error {
@@ -92,30 +92,53 @@ export function fieldAccess(kind: string, record: Record<string, unknown>): Fiel
   return access;
 }
 
+/** One staged edit, kept as the typed operation it became when it was staged. */
+export type Step = {
+  operation: Record<string, unknown> & { type: string };
+  objectId: string;
+  objectName: string;
+  objectKind: string;
+  field: EditableFieldName;
+  label: string;
+  /** What the field said in the model the draft is based on, and the staged value. Display only. */
+  before: string | string[] | null;
+  after: string | string[];
+};
+
+/** The record of one top-level object (not nested elements), or undefined. */
+function recordOf(model: Model, id: string): Record<string, unknown> | undefined {
+  for (const coll of Object.keys(COLLECTIONS) as CollectionName[]) {
+    const hit = collectionOf(model, coll).find((o) => o.id === id);
+    if (hit) return hit as unknown as Record<string, unknown>;
+  }
+  return undefined;
+}
+
 /**
- * Turn staged edits into typed operations, in the order they were staged. Rejects an edit of
- * an unknown object or a field its kind does not offer; leaves every rule about the result to
- * the engine.
+ * Turn one edit into its typed operation, against the model the draft is based on. Rejects an
+ * unknown object or a field its kind does not offer; leaves every rule about the value to the
+ * engine (an empty name is staged and the dry run reports it).
  */
-export function toOperations(model: Model, edits: unknown): Record<string, unknown>[] {
-  if (!Array.isArray(edits) || edits.length === 0) throw new BadEdit("stage at least one edit");
-  if (edits.length > 50) throw new BadEdit("at most 50 edits in one proposal");
-  const index = buildIndex(model).byId;
-  const seen = new Set<string>();
-  return edits.map((raw, i) => {
-    const e = raw as Partial<StagedEdit>;
-    if (typeof e?.objectId !== "string" || typeof e.field !== "string")
-      throw new BadEdit(`edit ${i}: objectId and field are required`);
-    const entry = index.get(e.objectId);
-    if (!entry || entry.kind === "project") throw new BadEdit(`edit ${i}: no object ${e.objectId} in this model`);
-    const key = `${e.objectId}:${e.field}`;
-    if (seen.has(key)) throw new BadEdit(`edit ${i}: ${key} is staged twice`);
-    seen.add(key);
-    const allowed = fieldAccess(entry.kind, {}).editable.map((f) => f.field);
-    if (!allowed.includes(e.field as EditableFieldName))
-      throw new BadEdit(`edit ${i}: the ${e.field} of a ${entry.kind} cannot be edited here`);
-    return operation(entry.kind, e.objectId, e.field as EditableFieldName, e.value, i);
-  });
+export function toStep(model: Model, edit: unknown): Step {
+  const e = (edit ?? {}) as Partial<StagedEdit>;
+  if (typeof e.objectId !== "string" || typeof e.field !== "string")
+    throw new BadEdit("an edit names an objectId and a field");
+  const entry = buildIndex(model).byId.get(e.objectId);
+  const record = recordOf(model, e.objectId);
+  if (!entry || !record) throw new BadEdit(`no editable object ${e.objectId} in this model`);
+  const access = fieldAccess(entry.kind, record).editable.find((f) => f.field === e.field);
+  if (!access) throw new BadEdit(`the ${e.field} of a ${entry.kind} cannot be edited here`);
+  const field = access.field;
+  return {
+    operation: operation(entry.kind, e.objectId, field, e.value),
+    objectId: e.objectId,
+    objectName: entry.name,
+    objectKind: entry.kind,
+    field,
+    label: access.label,
+    before: access.value,
+    after: e.value as string | string[],
+  };
 }
 
 function operation(
@@ -123,15 +146,15 @@ function operation(
   objectId: string,
   field: EditableFieldName,
   value: unknown,
-  i: number,
-): Record<string, unknown> {
+): Record<string, unknown> & { type: string } {
   if (field === "dependsOn") {
-    if (!Array.isArray(value) || !value.every((v) => typeof v === "string"))
-      throw new BadEdit(`edit ${i}: dependsOn takes a list of module IDs`);
+    if (!Array.isArray(value) || value.length > 200 || !value.every((v) => typeof v === "string"))
+      throw new BadEdit("dependsOn takes a list of module IDs");
     return { type: "setModuleDependencies", moduleId: objectId, dependsOn: value };
   }
-  if (typeof value !== "string") throw new BadEdit(`edit ${i}: ${field} takes text`);
-  // Text is sent as typed; the engine decides whether it is acceptable (an empty name is not).
+  if (typeof value !== "string") throw new BadEdit(`${field} takes text`);
+  if (value.length > 4000) throw new BadEdit(`${field} is longer than 4000 characters`);
+  // Text is kept as typed; the engine decides whether it is acceptable.
   if (field === "name") return { type: "renameObject", objectId, name: value };
   if (field === "description") return { type: "setDescription", objectId, description: value };
   return kind === "criterion"
