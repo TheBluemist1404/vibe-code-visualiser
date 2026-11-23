@@ -53,7 +53,9 @@ draft model edits and hand them to a coding agent.
 | **M5** Local visual product | Module graph, change review and evidence panels in a local UI | In progress: explorer and drafted edits ([#39](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/39)) |
 
 M0 to M4 make up the technical MVP; M5 makes it usable without reading code. Everything is
-single-user and local for now. The file store assumes one writer at a time.
+single-user and local for now. CLI, agent and UI processes writing the same checkout take turns
+through a lock in `.vcv/cache/`; Git and other tools are detected, not blocked
+([ADR 0010](docs/adr/0010-writer-lock.md)).
 
 ## Quick start
 

@@ -17,6 +17,8 @@ export type { Head, StoreErrorCode, StoreFileRead } from "./store/files.ts";
 export { MemoryStore } from "./store/model-store.ts";
 export type { ChangeGuard, ModelStore, StoreSnapshot } from "./store/model-store.ts";
 export { FileStore, FileStoreReader } from "./store/file-store.ts";
+export { holdsStoreLock, LOCK_FILE, readLockOwner, withStoreLock } from "./store/lock.ts";
+export type { LockOptions, LockOwner } from "./store/lock.ts";
 export type { CommitStep, FileStoreOptions, RecoveryReport } from "./store/file-store.ts";
 export {
   inspectStore,

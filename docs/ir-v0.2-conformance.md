@@ -36,8 +36,9 @@ Not covered yet: detecting a divergent code change (needs the repository indexer
 | Persisted-ID grammar (lowercase only), structured errors, nothing written outside the store | `packages/core/test/ids.test.ts` |
 | Which attempts create records, attempt log, pending preserved on denied approvals | `packages/core/test/audit.test.ts` |
 
-The file store assumes a **single writer**; see [ADR 0003](adr/0003-persistence.md) for the
-commit protocol and its limits.
+Concurrent VCV writers are serialized by a per-store writer lock; see
+[ADR 0003](adr/0003-persistence.md) for the commit protocol and [ADR 0010](adr/0010-writer-lock.md)
+for the lock and what it does not cover.
 
 ## Decisions the spec left open (made here, review them)
 

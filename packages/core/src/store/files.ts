@@ -39,7 +39,11 @@ export type StoreErrorCode =
   /** HEAD on disk moved under an open writer (Git checkout/pull, another process); nothing was written. */
   | "HEAD_CHANGED"
   /** Other store files changed under an open writer after validation (e.g. a merge or a same-ID swap); nothing was written. */
-  | "STORE_CHANGED";
+  | "STORE_CHANGED"
+  /** Another VCV writer holds the store's writer lock and did not release it in time; nothing was written. */
+  | "LOCKED"
+  /** The lock location is not a plain directory/file (a symlink or other entry); nothing was written. */
+  | "UNSAFE_LOCK";
 
 export class StoreError extends Error {
   readonly code: StoreErrorCode;
