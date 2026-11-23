@@ -35,13 +35,27 @@ process-safe filesystem serialization. No daemon, no server, no database, no pla
   (another boot, or a PID that no longer exists, or this same thread without the lock in its
   table). A lock from another host is never broken automatically; the `LOCKED` message says
   which file to delete if no VCV process is running. An unreadable lock file (VCV never writes
-  one) is broken once it is 10 s old. Breaking runs under a short-lived `writer.lock.break`
-  guard and renames the lock aside first, then discards it only if it is still the exact file
-  that was judged stale, so two breakers cannot delete a fresh lock.
+  one) is broken once it is 10 s old.
+- **A live lock is never displaced.** Every removal of someone else's lock runs under the break
+  guard `writer.lock.break` (created exclusively, with an owner record like the lock's). Inside
+  the guard the lock is read again and judged again, and it is unlinked only if it is still
+  exactly the stale record that was judged. Nothing is renamed. While the guard is held the lock
+  path cannot change: a stale holder is not running and cannot release it, no other breaker can
+  act, and an acquirer only creates the file when it is absent. So if a live writer B took over
+  after a stale A was judged, a delayed breaker C sees B's record, touches nothing and waits for
+  B like any other writer.
+- **The break guard fails closed.** It is never broken automatically, because breaking it safely
+  would need the same guarantee one level up. If a breaker died inside its guard (a window of a
+  few file operations), writers fail with `LOCKED`, which names `writer.lock.break` and says to
+  delete it once no VCV process is running.
 - **Reentrant within a thread.** A repo operation that holds the lock can open a `FileStore` and
   call the engine, which take the same lock again without waiting.
 - **What runs under it.** Everything that writes or moves store files, and the read/check step
   that the write depends on:
+  - Initialization: `FileStore.init` (and `initProject`, through it) takes the lock before
+    `HEAD` exists, creating `cache/` for it, and checks for `HEAD` inside it. Of concurrent
+    initializers exactly one writes the initial revision, `HEAD` and the init-owned files
+    (`.vcv/.gitignore`). The rest get `ALREADY_INITIALIZED` having written nothing.
   - `FileStore`: open-time recovery, `sync()` recovery after the store changed, `commit()`,
     `putChange()`.
   - `ModelEngine.propose()` and `approve()`: the whole snapshot → replay/pending check →
@@ -81,6 +95,10 @@ Not guaranteed:
 - **Other hosts.** A store on a network share used from two machines is not supported: PID
   liveness is local, so a remote holder is never judged stale, and network filesystems may not
   honour `link`/`fsync` semantics.
+- **Windows.** The design relies only on operations Node supports there: `link` (NTFS hard
+  links, `EEXIST` when the target exists), `unlink`, and `process.kill(pid, 0)` for liveness.
+  Windows has no boot ID, so a lock from before a reboot is judged by PID alone. The race tests
+  run on Linux in CI; Windows is not exercised by CI yet.
 - **PID reuse.** A holder that died and whose PID was reused by an unrelated live process on
   the same boot keeps its lock until a person deletes it; the `LOCKED` error says how.
 - **Authority.** The lock orders writers; it does not authorize them. Approval authority still
@@ -103,11 +121,19 @@ codes. It must not add its own mutex, and it must not call `FileStore` write met
   approve vs approve; approve vs apply; a process exiting at each commit step and one killed with
   `SIGKILL` while holding the lock; a live holder is never stolen (`LOCKED` names it); lock rules
   (reentrancy, foreign host, unreadable lock age, token-checked release, symlinked `cache/`); a
-  branch swap while the lock is held is still refused.
+  branch swap while the lock is held is still refused. Stale takeover: A is stale, a breaker C
+  judges it and is held back while B (another thread) breaks A and holds a live lock; C then
+  touches nothing and waits, a third writer waits too, and B's lock stays in place. Four
+  processes racing one stale lock all write in turn. An interrupted break guard fails closed.
+  Four processes initializing one store with different models: one writes, three get
+  `ALREADY_INITIALIZED`, and the winner's model is intact.
 - `packages/repo/test/concurrency.test.ts`: `reviewApprove` from two processes with two trusted
   reviewers (one attestation, signed over the reviewed digest); approval vs submission; a
   reviewer process dying after the commit, then `reviewFinalize`; the lock never shows in
-  `git status`.
+  `git status`; four `initProject` processes on one checkout (one initializes, `.vcv/.gitignore`
+  intact).
+- With the in-guard re-read removed (the breaker unlinks whatever it finds), the stale-takeover
+  test fails: C removes B's live lock.
 - With the lock temporarily disabled, the propose vs propose, paused-writer, distinct-ID and
   approve vs apply tests fail (contenders refused with `STORE_CHANGED` or lost, an orphaned
   revision).

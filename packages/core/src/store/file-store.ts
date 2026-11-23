@@ -68,7 +68,9 @@ export type CommitStep =
   | "head.write"
   | "head.rename"
   | "change.write"
-  | "change.rename";
+  | "change.rename"
+  /** Initialization: under the writer lock, after HEAD was found absent and before anything is written. */
+  | "init.checked";
 
 export type FileStoreOptions = {
   /** Test hook: called before each step of a commit; throwing simulates a crash at that point. */
@@ -115,15 +117,31 @@ export class FileStore implements ModelStore {
     return withStoreLock(this.dir, fn, { ...this.opts.lock, purpose });
   }
 
-  static init(dir: string, initial: Model, opts: FileStoreOptions = {}): FileStore {
-    if (existsSync(join(dir, "HEAD")))
-      throw new StoreError("ALREADY_INITIALIZED", `${dir} already holds a model store`);
+  /**
+   * Create a store. The whole "HEAD absent → write the initial revision and HEAD" decision runs
+   * under the writer lock (taken before HEAD exists; `cache/` is created for it), and HEAD is
+   * checked inside it: of several concurrent initializers exactly one writes, the others get
+   * ALREADY_INITIALIZED having written nothing. `inLock` runs inside the same lock, after the
+   * check, for a caller's own init-owned files.
+   */
+  static init(dir: string, initial: Model, opts: FileStoreOptions = {}, inLock?: () => void): FileStore {
     const rev = initial.project.modelRevision;
     assertPersistedId("revision", rev);
-    for (const sub of ["revisions", "changes", "orphaned"]) mkdirSync(join(dir, sub), { recursive: true });
-    durableWrite(join(dir, "revisions", `${rev}.yaml`), dumpModel(initial));
-    const head: Head = { format: 1, revision: rev, history: [rev] };
-    durableWrite(join(dir, "HEAD"), `${JSON.stringify(head, null, 2)}\n`); // initialized only once HEAD exists
+    mkdirSync(dir, { recursive: true });
+    withStoreLock(
+      dir,
+      () => {
+        if (existsSync(join(dir, "HEAD")))
+          throw new StoreError("ALREADY_INITIALIZED", `${dir} already holds a model store`);
+        opts.beforeStep?.("init.checked");
+        inLock?.();
+        for (const sub of ["revisions", "changes", "orphaned"]) mkdirSync(join(dir, sub), { recursive: true });
+        durableWrite(join(dir, "revisions", `${rev}.yaml`), dumpModel(initial));
+        const head: Head = { format: 1, revision: rev, history: [rev] };
+        durableWrite(join(dir, "HEAD"), `${JSON.stringify(head, null, 2)}\n`); // initialized only once HEAD exists
+      },
+      { ...opts.lock, purpose: "init" },
+    );
     return new FileStore(dir, opts);
   }
 
