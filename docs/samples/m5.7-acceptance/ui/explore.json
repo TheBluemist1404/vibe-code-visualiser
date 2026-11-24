@@ -1,0 +1,21 @@
+{
+  "phase": "explore",
+  "checkout": "<repo>",
+  "base": "9d37615f7473be495953796944cfefb337d32089",
+  "revision": "rev-4-d704dd46aee2",
+  "branch": "test-base",
+  "edges": [
+    "dependsOn:mod-enrollment->mod-notifications",
+    "dependsOn:mod-web->mod-enrollment",
+    "dependsOn:mod-web->mod-notifications"
+  ],
+  "returnTrip": {
+    "before": "translate(396px, 97px) scale(0.993921)",
+    "after": "translate(396px, 84.079px) scale(0.993921)",
+    "selected": "mod-enrollment",
+    "zoomKept": true
+  },
+  "webPinnedAt": "translate(69px, 27px)",
+  "checkoutUnchanged": true,
+  "pageErrors": []
+}

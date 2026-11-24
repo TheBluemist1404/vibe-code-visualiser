@@ -13,7 +13,9 @@
       "apps/*/test/**/*.ts",
       "apps/*/web/**/*.ts",
       "apps/*/web/**/*.tsx",
-      "apps/*/e2e/**/*.ts"
+      "apps/*/e2e/**/*.ts",
+      "examples/reference-app/acceptance/**/*.ts",
+      "examples/reference-app/acceptance/**/*.mjs"
     ]
   },
   "formatter": {

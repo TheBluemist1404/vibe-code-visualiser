@@ -1,0 +1,11 @@
+{
+  "phase": "draft",
+  "checkout": "<repo>",
+  "base": "9d37615f7473be495953796944cfefb337d32089",
+  "dryRun": "Valid on rev-4-d704dd46aee2",
+  "steps": "setRuleStatement Only a confirmed decision is notified statementEach enrollment decision is recorded; a confirmed decision results in exactly one notification to the student, a rejected one in none.  Each enrollment decision is recorded. A confirmed decision results in exactly one enrollment-confirmed notification, and a rejection because the course is full (COURSE_FULL) in exactly one enrollment-rejected notification; a repeat request (ALREADY_ENROLLED) results in none.renameObject Only a confirmed decision is notified nameOnly a confirmed decision is notified  Confirmations and full-course rejections are notifiedreviseCriterion A rejected enrollment is not announced statementA request for a full course is recorded as rejected with COURSE_FULL, and the student receives no notification for it.  A request for a full course is recorded as rejected with COURSE_FULL, and the student receives exactly one enrollment-rejected notification for that enrollment.",
+  "draftPath": "<work>/state/drafts/630fbb4b0a7fe6eebcbe08a5/d-20261124-160840-22c9.json",
+  "draftVersion": 5,
+  "checkoutUnchanged": true,
+  "pageErrors": []
+}

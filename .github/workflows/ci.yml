@@ -88,3 +88,25 @@ jobs:
           name: ui-screenshots
           path: ${{ runner.temp }}/ui-shots
           if-no-files-found: ignore
+
+  # M5.7: the acceptance walkthrough on the real Course Desk repository (Issue #46): the explorer in a
+  # real browser, the agent in its own clone, a TEST-ONLY fixture reviewer and the gate at each step.
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: examples/reference-app/acceptance/setup.sh "$RUNNER_TEMP/acceptance"
+      - run: examples/reference-app/acceptance/run.sh "$RUNNER_TEMP/acceptance" "$RUNNER_TEMP/acceptance-out"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m5.7-acceptance
+          path: ${{ runner.temp }}/acceptance-out
+          if-no-files-found: ignore

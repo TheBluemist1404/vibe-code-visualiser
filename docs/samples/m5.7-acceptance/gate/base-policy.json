@@ -1,0 +1,5 @@
+{
+  "format": "vcv-policy-1",
+  "observations": { "contradiction": "block" },
+  "requireEvidence": [{ "object": "rul-announce-every-decision", "reason": "every enrollment decision must reach the student" }]
+}

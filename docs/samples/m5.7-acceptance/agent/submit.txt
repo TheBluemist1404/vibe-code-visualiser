@@ -1,0 +1,3 @@
+chg-full-course-notice: pending (recorded); .vcv/HEAD stays at rev-4-d704dd46aee2
+  digest: ad613a3d7d4ad75319860d468020efae807892d23cffe5fd2ea925313e6ef12b
+  Recorded as pending; .vcv/HEAD is still rev-4-d704dd46aee2. A separate reviewer must approve it before anything is implemented. Preview: vcv proposal preview <path> chg-full-course-notice

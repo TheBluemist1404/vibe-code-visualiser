@@ -1,0 +1,34 @@
+{
+  "changeId": "chg-full-course-notice",
+  "baseCommit": "FILLED_FROM_HANDOFF",
+  "handoffDigest": "FILLED_FROM_HANDOFF",
+  "testsRun": [],
+  "acceptance": [
+    {
+      "criterion": "A COURSE_FULL rejection produces exactly one enrollment-rejected notification for that enrollment",
+      "status": "met",
+      "evidence": "enrollment.service.spec.ts 'rejects an enrollment into a full course and notifies the student' asserts the single enrollment-rejected entry for enr-2"
+    },
+    {
+      "criterion": "A confirmed enrollment still produces exactly one enrollment-confirmed notification",
+      "status": "met",
+      "evidence": "the unchanged unit test; the renamed e2e case still asserts stu-ada's single enrollment-confirmed entry"
+    },
+    {
+      "criterion": "An ALREADY_ENROLLED rejection produces no notification and takes no seat",
+      "status": "met",
+      "evidence": "the renamed repeat unit test asserts seatsLeft 1 and only the original confirmation in stu-ada's notifications"
+    },
+    {
+      "criterion": "GET /api/notifications returns the rejected student's enrollment-rejected entry",
+      "status": "met",
+      "evidence": "app.e2e-spec.ts asserts stu-bob's enrollment-rejected entry over HTTP; scripts/smoke.mjs checks it against the built server"
+    }
+  ],
+  "gaps": [
+    "The web page was not changed: it already lists whatever notifications the API returns. Not checked in a browser.",
+    "No consumer of the old behaviour (no notification on a rejection) was searched for outside this repository."
+  ],
+  "outOfScope": [],
+  "confidence": "high"
+}

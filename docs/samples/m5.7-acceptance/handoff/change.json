@@ -1,0 +1,23 @@
+{
+  "changeId": "ui-20261124-160840-22c9-v5",
+  "projectId": "prj-course-desk",
+  "expectedRevision": "rev-4-d704dd46aee2",
+  "rationale": "Students turned away from a full course should hear about it (they may pick another course); a repeat request stays quiet because the student already holds the seat.",
+  "operations": [
+    {
+      "type": "setRuleStatement",
+      "ruleId": "rul-announce-every-decision",
+      "statement": "Each enrollment decision is recorded. A confirmed decision results in exactly one enrollment-confirmed notification, and a rejection because the course is full (COURSE_FULL) in exactly one enrollment-rejected notification; a repeat request (ALREADY_ENROLLED) results in none."
+    },
+    {
+      "type": "renameObject",
+      "objectId": "rul-announce-every-decision",
+      "name": "Confirmations and full-course rejections are notified"
+    },
+    {
+      "type": "reviseCriterion",
+      "criterionId": "crt-rejection-notified",
+      "statement": "A request for a full course is recorded as rejected with COURSE_FULL, and the student receives exactly one enrollment-rejected notification for that enrollment."
+    }
+  ]
+}

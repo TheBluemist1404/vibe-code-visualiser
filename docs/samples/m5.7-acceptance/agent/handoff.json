@@ -1,0 +1,412 @@
+{
+  "format": 1,
+  "kind": "vcv-implementation-handoff",
+  "project": {
+    "id": "prj-course-desk",
+    "name": "Course Desk"
+  },
+  "change": {
+    "changeId": "chg-full-course-notice",
+    "proposalDigest": "ad613a3d7d4ad75319860d468020efae807892d23cffe5fd2ea925313e6ef12b",
+    "baseRevision": "rev-4-d704dd46aee2",
+    "approvedRevision": "rev-5-6a1f0d8df2df",
+    "proposerId": "agent:coder",
+    "approverId": "user:fixture-reviewer",
+    "rationale": "Students turned away from a full course should hear about it (they may pick another course); a repeat request stays quiet because the student already holds the seat. Integrated by agent:coder from the owner's UI handoff and its own draft; labels aligned so no name or description still says a full-course rejection is not announced.",
+    "rationaleTruncated": false,
+    "operations": [
+      {
+        "index": 0,
+        "type": "setRuleStatement",
+        "summary": "change the statement of rule rul-announce-every-decision"
+      },
+      {
+        "index": 1,
+        "type": "renameObject",
+        "summary": "rename rul-announce-every-decision to \"Confirmations and full-course rejections are notified\""
+      },
+      {
+        "index": 2,
+        "type": "reviseCriterion",
+        "summary": "change its statement of criterion crt-rejection-notified"
+      },
+      {
+        "index": 3,
+        "type": "renameObject",
+        "summary": "rename crt-rejection-notified to \"A full-course rejection is announced\""
+      },
+      {
+        "index": 4,
+        "type": "reviseCriterion",
+        "summary": "change its statement of criterion crt-repeat-rejected"
+      },
+      {
+        "index": 5,
+        "type": "setDescription",
+        "summary": "change the description of dat-notification"
+      },
+      {
+        "index": 6,
+        "type": "setDescription",
+        "summary": "change the description of prj-course-desk"
+      }
+    ],
+    "operationsTotal": 7,
+    "operationsTruncated": false
+  },
+  "approval": {
+    "attestation": "valid-signature",
+    "keyFingerprint": "5a3be563f44cdde8",
+    "trustVerification": "caller-asserted",
+    "note": "Signature checked against the record; key trust is decided by the host gate (docs/approvals.md)."
+  },
+  "modelNow": {
+    "revision": "rev-5-6a1f0d8df2df",
+    "atApprovedRevision": true,
+    "laterRevisions": [],
+    "laterRevisionsTotal": 0
+  },
+  "delta": {
+    "changes": [
+      {
+        "id": "crt-rejection-notified",
+        "kind": "criterion",
+        "name": "A full-course rejection is announced",
+        "moduleId": "mod-enrollment",
+        "change": "modified",
+        "fields": [
+          {
+            "field": "name",
+            "before": "A rejected enrollment is not announced",
+            "after": "A full-course rejection is announced"
+          },
+          {
+            "field": "statement",
+            "before": "A request for a full course is recorded as rejected with COURSE_FULL, and the student receives no notification for it.",
+            "after": "A request for a full course is recorded as rejected with COURSE_FULL, and the student receives exactly one enrollment-rejected notification for that enrollment."
+          }
+        ]
+      },
+      {
+        "id": "crt-repeat-rejected",
+        "kind": "criterion",
+        "name": "A repeat request takes no second seat",
+        "moduleId": "mod-enrollment",
+        "change": "modified",
+        "fields": [
+          {
+            "field": "statement",
+            "before": "A student already enrolled in a course is rejected with ALREADY_ENROLLED and no second seat is taken.",
+            "after": "A student already enrolled in a course is rejected with ALREADY_ENROLLED, no second seat is taken, and the student receives no notification for the repeat request."
+          }
+        ]
+      },
+      {
+        "id": "dat-notification",
+        "kind": "data",
+        "name": "Notification",
+        "moduleId": "mod-notifications",
+        "change": "modified",
+        "fields": [
+          {
+            "field": "description",
+            "before": "notification.types.ts, in-memory outbox; ids ntf-N. kind is enrollment-confirmed|enrollment-rejected. enrollmentId points at an Enrollment in another module, so it is typed id rather than reference.",
+            "after": "notification.types.ts, in-memory outbox; ids ntf-N. kind is enrollment-confirmed (a confirmed enrollment) or enrollment-rejected (a rejection because the course is full). enrollmentId points at an Enrollment in another module, so it is typed id rather than reference."
+          }
+        ]
+      },
+      {
+        "id": "prj-course-desk",
+        "kind": "project",
+        "name": "Course Desk",
+        "moduleId": null,
+        "change": "modified",
+        "fields": [
+          {
+            "field": "description",
+            "before": "Draft bootstrapped from the repository at commit adb423c; not reviewed. Students enroll in courses; every enrollment decision is recorded, and a confirmed one is announced as a notification. NestJS API (server/, in-memory storage) plus a React page (web/). Based on README.md and the sources.",
+            "after": "Draft bootstrapped from the repository at commit adb423c; not reviewed. Students enroll in courses; every enrollment decision is recorded, and a confirmation or a rejection because the course is full is announced as a notification. NestJS API (server/, in-memory storage) plus a React page (web/). Ba…",
+            "truncated": true
+          }
+        ]
+      },
+      {
+        "id": "rul-announce-every-decision",
+        "kind": "rule",
+        "name": "Confirmations and full-course rejections are notified",
+        "moduleId": "mod-enrollment",
+        "change": "modified",
+        "fields": [
+          {
+            "field": "name",
+            "before": "Only a confirmed decision is notified",
+            "after": "Confirmations and full-course rejections are notified"
+          },
+          {
+            "field": "statement",
+            "before": "Each enrollment decision is recorded; a confirmed decision results in exactly one notification to the student, a rejected one in none.",
+            "after": "Each enrollment decision is recorded. A confirmed decision results in exactly one enrollment-confirmed notification, and a rejection because the course is full (COURSE_FULL) in exactly one enrollment-rejected notification; a repeat request (ALREADY_ENROLLED) results in none."
+          }
+        ]
+      }
+    ],
+    "total": 5,
+    "truncated": false
+  },
+  "impact": {
+    "modules": [
+      {
+        "id": "mod-enrollment",
+        "name": "Enrollment",
+        "via": "changed"
+      },
+      {
+        "id": "mod-notifications",
+        "name": "Notifications",
+        "via": "changed"
+      }
+    ],
+    "crossModule": "yes",
+    "contracts": [],
+    "candidates": [
+      {
+        "id": "crt-confirmation-notified",
+        "kind": "criterion",
+        "name": "A confirmed enrollment is announced",
+        "moduleId": "mod-enrollment",
+        "parentId": "mod-enrollment",
+        "irPath": "criteria[1]",
+        "distance": 1,
+        "via": "dependent",
+        "dependencyPath": [
+          {
+            "from": "rul-announce-every-decision",
+            "relation": "verifies",
+            "to": "crt-confirmation-notified"
+          }
+        ],
+        "reason": "criterion crt-confirmation-notified references rule rul-announce-every-decision (verifies)"
+      },
+      {
+        "id": "mod-enrollment",
+        "kind": "module",
+        "name": "Enrollment",
+        "description": "server/src/enrollment/ (EnrollmentModule). EnrollmentService calls NotificationsService.notify directly (injected via NotificationsModule import); this is a direct call, not an event, so no events or contracts are modelled.",
+        "moduleId": "mod-enrollment",
+        "parentId": "prj-course-desk",
+        "irPath": "modules[0]",
+        "distance": 1,
+        "via": "container",
+        "dependencyPath": [
+          {
+            "from": "crt-rejection-notified",
+            "relation": "owner",
+            "to": "mod-enrollment"
+          }
+        ],
+        "reason": "module mod-enrollment owns criterion crt-rejection-notified"
+      },
+      {
+        "id": "mod-notifications",
+        "kind": "module",
+        "name": "Notifications",
+        "description": "server/src/notifications/ (NotificationsModule). Exports NotificationsService; has no dependencies.",
+        "moduleId": "mod-notifications",
+        "parentId": "prj-course-desk",
+        "irPath": "modules[1]",
+        "distance": 1,
+        "via": "container",
+        "dependencyPath": [
+          {
+            "from": "dat-notification",
+            "relation": "owner",
+            "to": "mod-notifications"
+          }
+        ],
+        "reason": "module mod-notifications owns data dat-notification"
+      }
+    ],
+    "total": 3,
+    "truncated": false,
+    "impactClass": "structural-candidate",
+    "note": "Structural candidates from declared model references (@vcv/query analyzeImpact), not proof of semantic or code impact. Confirm each in the repository.",
+    "listsTruncated": false
+  },
+  "request": {
+    "behavior": "enroll() keeps recording every decision. A confirmed enrollment still sends one enrollment-confirmed notification. A rejection because the course is full now also sends exactly one enrollment-rejected notification to that student, with the message '<course> is full; your enrollment was not accepted.'. A repeat request (ALREADY_ENROLLED) sends none. The HTTP API and the web page are unchanged; the page already lists whatever notifications the API returns.",
+    "acceptanceCriteria": [
+      "A COURSE_FULL rejection produces exactly one enrollment-rejected notification for that enrollment",
+      "A confirmed enrollment still produces exactly one enrollment-confirmed notification",
+      "An ALREADY_ENROLLED rejection produces no notification and takes no seat",
+      "GET /api/notifications returns the rejected student's enrollment-rejected entry"
+    ],
+    "suggestedTests": [
+      "server/src/enrollment/enrollment.service.spec.ts: full-course and repeat-request cases",
+      "server/test/app.e2e-spec.ts: the confirm-then-full flow over HTTP"
+    ],
+    "scope": [
+      "server/src/enrollment/**",
+      "server/test/**",
+      "README.md",
+      "scripts/smoke.mjs"
+    ]
+  },
+  "scope": {
+    "declared": [
+      "server/src/enrollment/**",
+      "server/test/**",
+      "README.md",
+      "scripts/smoke.mjs"
+    ],
+    "fromBindings": [
+      "server/src/enrollment/enrollment.service.spec.ts",
+      "server/src/enrollment/enrollment.service.ts",
+      "server/src/notifications/notification.types.ts",
+      "server/test/app.e2e-spec.ts"
+    ],
+    "fromBindingsTruncated": false
+  },
+  "tests": {
+    "requested": [
+      "server/src/enrollment/enrollment.service.spec.ts: full-course and repeat-request cases",
+      "server/test/app.e2e-spec.ts: the confirm-then-full flow over HTTP"
+    ],
+    "bound": [
+      {
+        "bindingId": "test.confirmation.e2e",
+        "modelObjectId": "crt-confirmation-notified",
+        "locator": "server/test/app.e2e-spec.ts#test:Course Desk API (e2e) > confirms, then rejects when full; only the confirmed student is notified"
+      },
+      {
+        "bindingId": "test.confirmation.unit",
+        "modelObjectId": "crt-confirmation-notified",
+        "locator": "server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > confirms an enrollment while seats are left and notifies the student"
+      },
+      {
+        "bindingId": "test.rejection.e2e",
+        "modelObjectId": "crt-rejection-notified",
+        "locator": "server/test/app.e2e-spec.ts#test:Course Desk API (e2e) > confirms, then rejects when full; only the confirmed student is notified"
+      },
+      {
+        "bindingId": "test.rejection.unit",
+        "modelObjectId": "crt-rejection-notified",
+        "locator": "server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > rejects an enrollment into a full course without notifying the student"
+      },
+      {
+        "bindingId": "test.repeat.unit",
+        "modelObjectId": "crt-repeat-rejected",
+        "locator": "server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > rejects a repeat enrollment without taking a second seat"
+      }
+    ],
+    "boundTotal": 5,
+    "boundTruncated": false
+  },
+  "bindings": {
+    "items": [
+      {
+        "bindingId": "impl.rul-announce-every-decision",
+        "modelObjectId": "rul-announce-every-decision",
+        "relation": "implements",
+        "locator": "server/src/enrollment/enrollment.service.ts#symbol:EnrollmentService.enroll",
+        "why": "changed",
+        "state": "stale",
+        "source": "unchanged",
+        "model": "changed",
+        "reassertAfterImplementing": true
+      },
+      {
+        "bindingId": "persist.dat-notification",
+        "modelObjectId": "dat-notification",
+        "relation": "persists",
+        "locator": "server/src/notifications/notification.types.ts#symbol:Notification",
+        "why": "changed",
+        "state": "stale",
+        "source": "unchanged",
+        "model": "changed",
+        "reassertAfterImplementing": true
+      },
+      {
+        "bindingId": "test.confirmation.e2e",
+        "modelObjectId": "crt-confirmation-notified",
+        "relation": "tests",
+        "locator": "server/test/app.e2e-spec.ts#test:Course Desk API (e2e) > confirms, then rejects when full; only the confirmed student is notified",
+        "why": "impacted",
+        "state": "resolved",
+        "source": "unchanged",
+        "model": "unchanged",
+        "reassertAfterImplementing": false
+      },
+      {
+        "bindingId": "test.confirmation.unit",
+        "modelObjectId": "crt-confirmation-notified",
+        "relation": "tests",
+        "locator": "server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > confirms an enrollment while seats are left and notifies the student",
+        "why": "impacted",
+        "state": "resolved",
+        "source": "unchanged",
+        "model": "unchanged",
+        "reassertAfterImplementing": false
+      },
+      {
+        "bindingId": "test.rejection.e2e",
+        "modelObjectId": "crt-rejection-notified",
+        "relation": "tests",
+        "locator": "server/test/app.e2e-spec.ts#test:Course Desk API (e2e) > confirms, then rejects when full; only the confirmed student is notified",
+        "why": "changed",
+        "state": "stale",
+        "source": "unchanged",
+        "model": "changed",
+        "reassertAfterImplementing": true
+      },
+      {
+        "bindingId": "test.rejection.unit",
+        "modelObjectId": "crt-rejection-notified",
+        "relation": "tests",
+        "locator": "server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > rejects an enrollment into a full course without notifying the student",
+        "why": "changed",
+        "state": "stale",
+        "source": "unchanged",
+        "model": "changed",
+        "reassertAfterImplementing": true
+      },
+      {
+        "bindingId": "test.repeat.unit",
+        "modelObjectId": "crt-repeat-rejected",
+        "relation": "tests",
+        "locator": "server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > rejects a repeat enrollment without taking a second seat",
+        "why": "changed",
+        "state": "stale",
+        "source": "unchanged",
+        "model": "changed",
+        "reassertAfterImplementing": true
+      }
+    ],
+    "total": 7,
+    "truncated": false
+  },
+  "git": {
+    "baseCommit": "cd0427883d719ee78c7fa19838b6641537aac7b2",
+    "branch": "agent/full-course-notice",
+    "dirty": false,
+    "worktree": {
+      "digest": "57c405629950d9cc73090557607fe9c3aaac4580dadef18f45506b5e22bae855",
+      "files": 7,
+      "complete": true
+    }
+  },
+  "steps": [
+    "Work in this checkout, on the branch and from the base commit above. Inspect the code yourself: the delta, impact and binding claims are pointers, not proof of where or how the code must change.",
+    "Implement the requested behavior and its tests within the declared scope. If the change needs code outside it, or a different model, stop: model intent changes only through a new proposal and a new review (vcv proposal submit).",
+    "Never edit .vcv/HEAD, .vcv/revisions/, .vcv/changes/ or .vcv/approvals/ by hand.",
+    "After implementing, re-inspect the code for every claim marked reassertAfterImplementing, and reassert it explicitly (vcv binding reassert … --expect <digest>, or vcv binding add for new code). Reassertion is your claim, not an approval.",
+    "Run the tests and record what really happened, then record the implementation report: vcv implementation record <path> <changeId> --report <file> (see docs/implementation.md)."
+  ],
+  "caveats": [
+    "Approved model intent is not implemented source: this handoff says what was approved, not what the code does.",
+    "Binding states are VCV-verified locator facts about the working tree now (does the pointer resolve, did the code or model change since the claim); their meaning is the claimant's and unverified.",
+    "Impact is structural (declared model references), not a code, test or runtime analysis.",
+    "The attestation's signature was checked against the change record; whether its key is trusted is decided by the host gate (vcv integrity against the protected base), not here.",
+    "Nothing in this handoff is reconciled against the code; that is pre-merge reconciliation (`vcv reconcile`, `vcv gate`)."
+  ],
+  "digest": "fc19e2c987dae24119f389c9e5354f33730a028cc1d614d265da8e43f1fbead6"
+}

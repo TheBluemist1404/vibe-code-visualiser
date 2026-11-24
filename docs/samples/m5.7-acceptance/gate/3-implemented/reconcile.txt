@@ -1,0 +1,54 @@
+reconciliation of prj-course-desk: candidate 41f41dc185b3 (feature/full-course-notice) against base 9d37615f7473
+  model: extends, rev-4-d704dd46aee2 → rev-5-6a1f0d8df2df; integrity ok; 5 object change(s), 3 impact candidate(s), cross-module yes
+    rev-5-6a1f0d8df2df: verified by chg-full-course-notice; approval attested
+    modified criterion crt-rejection-notified (name, statement)
+    modified criterion crt-repeat-rejected (statement)
+    modified data dat-notification (description)
+    modified project prj-course-desk (description)
+    modified rule rul-announce-every-decision (name, statement)
+  source: 19 changed file(s), 2 file(s) outside .vcv/ unmapped
+    C  vcv-model    .vcv/HEAD
+    C  vcv-model    .vcv/approvals/chg-full-course-notice.json
+    C  vcv-bindings .vcv/bindings/impl.cap-enroll.json
+    C  vcv-bindings .vcv/bindings/impl.rul-announce-every-decision.json
+    C  vcv-bindings .vcv/bindings/impl.rul-seat-limit.json
+    C  vcv-bindings .vcv/bindings/persist.dat-notification.json
+    C  vcv-bindings .vcv/bindings/test.confirmation.e2e.json
+    C  vcv-bindings .vcv/bindings/test.rejection.e2e.json
+    C  vcv-bindings .vcv/bindings/test.rejection.unit.json
+    C  vcv-bindings .vcv/bindings/test.repeat.unit.json
+    C  vcv-bindings .vcv/bindings/test.rul-seat-limit.json
+    C  vcv-model    .vcv/changes/chg-full-course-notice.json
+    C  vcv-other    .vcv/implementations/chg-full-course-notice.json
+    C  vcv-model    .vcv/revisions/rev-5-6a1f0d8df2df.yaml
+    C  source       README.md
+    C  source       scripts/smoke.mjs
+    C  test         server/src/enrollment/enrollment.service.spec.ts  ← test.confirmation.unit, test.rejection.unit, test.repeat.unit, test.rul-seat-limit
+    C  source       server/src/enrollment/enrollment.service.ts  ← impl.cap-enroll, impl.rul-announce-every-decision, impl.rul-seat-limit
+    C  test         server/test/app.e2e-spec.ts  ← test.confirmation.e2e, test.rejection.e2e
+  source impact (declared-model context, not evidence of drift): seeds cap-enroll, crt-confirmation-notified, crt-rejection-notified, crt-repeat-rejected, dat-notification, rul-announce-every-decision, rul-seat-limit; modules mod-enrollment, mod-notifications; 2 impact candidate(s); cross-module yes
+    rules: rul-announce-every-decision (seed), rul-seat-limit (seed)
+  bindings: 10 shown, 3 unaffected and resolved
+    impl.cap-enroll: resolved; claim reasserted; object unchanged; bound file changed
+    impl.rul-announce-every-decision: resolved; claim reasserted; object modified; bound file changed
+    impl.rul-seat-limit: resolved; claim reasserted; object unchanged; bound file changed
+    persist.dat-notification: resolved; claim reasserted; object modified
+    test.confirmation.e2e: resolved; claim reasserted; object impacted; bound file changed
+    test.confirmation.unit: resolved; claim unchanged; object impacted; bound file changed
+    test.rejection.e2e: resolved; claim reasserted; object modified; bound file changed
+    test.rejection.unit: resolved; claim reasserted; object modified; bound file changed
+    test.repeat.unit: resolved; claim reasserted; object modified; bound file changed
+    test.rul-seat-limit: resolved; claim reasserted; object unchanged; bound file changed
+  findings (4):
+    [source/observed] BOUND_FILE_CHANGED: server/src/enrollment/enrollment.service.spec.ts changed; claims test.confirmation.unit, test.rejection.unit, test.repeat.unit, test.rul-seat-limit point into it. A changed file is not drift: see each claim's freshness.
+    [source/observed] BOUND_FILE_CHANGED: server/src/enrollment/enrollment.service.ts changed; claims impl.cap-enroll, impl.rul-announce-every-decision, impl.rul-seat-limit point into it. A changed file is not drift: see each claim's freshness.
+    [source/observed] BOUND_FILE_CHANGED: server/test/app.e2e-spec.ts changed; claims test.confirmation.e2e, test.rejection.e2e point into it. A changed file is not drift: see each claim's freshness.
+    [unsupported/not-checked] UNMAPPED_CHANGES: 2 changed file(s) outside .vcv/ are not pointed at by any claim, so VCV cannot relate them to the model: README.md, scripts/smoke.mjs
+  semantic: VCV makes no semantic observations. Agent-authored interpretations are added to the pre-merge gate report and labelled as claims.
+  not established here:
+    - VCV checks the model history, claim shapes, locators and fingerprints, and the model delta. It does not read code for meaning: a resolved, fresh claim is not evidence that the code does what the model says.
+    - A changed file, a moved commit or a stale claim is not drift. Drift is a semantic judgement that an agent or a person makes with concrete source locations; this report gives them the places to look.
+    - Changed files that no claim points into are unmapped: VCV cannot relate them to the model at all.
+    - Structural impact candidates come from declared model references, not from code.
+    - The base is what the caller named. A ref name resolved in this checkout is caller-asserted; only a full commit ID supplied by the hosting service, in a check the candidate cannot edit, identifies the protected base.
+    - Source changes are measured from the merge base with the base, so changes that landed on the base after the branch point are not counted as the candidate's.

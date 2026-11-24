@@ -20,6 +20,7 @@
     "packages/*/test",
     "apps/*/src",
     "apps/*/test",
-    "apps/*/e2e"
+    "apps/*/e2e",
+    "examples/reference-app/acceptance/*.ts"
   ]
 }

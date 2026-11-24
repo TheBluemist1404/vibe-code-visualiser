@@ -1,0 +1,18 @@
+{
+  "phase": "recover",
+  "checkout": "<repo>",
+  "base": {
+    "revision": "rev-4-d704dd46aee2",
+    "modelKey": "rev-4-d704dd46aee2@360e1e8e8344e030c783f0ad6ea25bd3d472092f2fa7873b3934d1d8cb639cda",
+    "branch": "test-base",
+    "commit": "9d37615f7473be495953796944cfefb337d32089"
+  },
+  "operationOrder": [
+    "setRuleStatement",
+    "renameObject",
+    "reviseCriterion"
+  ],
+  "exportedChangeId": "ui-20261124-160840-22c9-v5",
+  "checkoutUnchanged": true,
+  "pageErrors": []
+}

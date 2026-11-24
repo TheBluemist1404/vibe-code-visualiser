@@ -1,0 +1,17 @@
+{
+  "phase": "approve",
+  "checkout": "<repo>",
+  "base": "9d37615f7473be495953796944cfefb337d32089",
+  "reviewSteps": [
+    "Submitted : yesRecorded in .vcv/changes/ by agent:coder (as written in the record).",
+    "Reviewer signature : yesAn attestation for this digest verifies, signed by key 5a3be563f44cdde8 for user:fixture-reviewer. Whether that key is trusted is not checked here.",
+    "Integrity, checked locally (caller-asserted base) : yesChecked on this computer against local branch test-base at 9d37615f7473: a local ref, not pinned; anyone with a shell here can create or move it; branch protection is asserted by whoever chose this anchor, not verified by Git, a ref named when the explorer was started: signed by user:fixture-reviewer (key 5a3be563f44cdde8), trusted per .vcv/reviewers.json at test-base (9d37615f7473). That ref is caller-asserted and can be moved by anyone with a shell here, so this is not the hosting service's verdict; CI's check against the protected branch is the authority.",
+    "Model applied : yesCommitted as rev-5-6a1f0d8df2df in .vcv/HEAD's history.",
+    "Implementation : unknownNot verified. Approving intent says nothing about code; see vcv reconcile and the pre-merge gate."
+  ],
+  "revisionAfterApproval": "rev-5-6a1f0d8df2df",
+  "pinnedStable": "translate(69px, 27px)",
+  "staleDraft": "Stale: needs agent integrationThis draft was staged on rev-4-d704dd46aee2 on test-base; the checkout now holds rev-5-6a1f0d8df2df on feature/full-course-notice. VCV keeps it exactly as staged and does not move it onto the new model. Hand it off so a coding agent can integrate it, or discard it.",
+  "staleAcrossBranchSwitch": "stale on the approved branch, current on test-base, stale again",
+  "pageErrors": []
+}
