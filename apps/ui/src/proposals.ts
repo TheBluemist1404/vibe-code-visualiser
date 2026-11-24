@@ -23,7 +23,7 @@ export class InboxUnavailable extends Error {
 export type InboxOptions = {
   protectedBase?: string;
   /** Test hook: called between the reads that make up one answer. */
-  betweenReads?: (step: "after-preview" | "after-list" | "after-integrity") => void;
+  betweenReads?: (step: "after-preview" | "after-integrity") => void;
 };
 
 const LIST_LIMIT = 200;
@@ -75,9 +75,8 @@ export class ProposalInbox {
     const r = previewProposal(path, { changeId, limit: 50 });
     if (!r.ok) throw new InboxUnavailable(r.error.code, r.error.message);
     this.opts.betweenReads?.("after-preview");
-    const listed = listProposals(path, { limit: LIST_LIMIT });
-    this.opts.betweenReads?.("after-list");
-    const summary = listed.ok ? listed.data.proposals.find((p) => p.changeId === changeId) : undefined;
+    // The record's own summary, from the same read as the preview: never looked up in a capped list.
+    const summary = r.data.record;
     const p = r.data;
     const current = r.context.modelRevision;
     const root = s.status.root;
@@ -88,10 +87,7 @@ export class ProposalInbox {
     this.opts.betweenReads?.("after-integrity");
     // The parts must describe one change in one state; the identity check around this read
     // covers the checkout, this covers the answers themselves.
-    if (
-      r.context.modelRevision !== s.model.project.modelRevision ||
-      (summary?.proposalDigest && summary.proposalDigest !== r.data.proposal.proposalDigest)
-    )
+    if (r.context.modelRevision !== s.model.project.modelRevision)
       throw new InboxUnavailable("STATE_CHANGED", "the proposal changed between reads; try again");
     return {
       changeId: p.proposal.changeId,
@@ -272,11 +268,15 @@ function steps(
   out.push({
     id: "model",
     label: "Model applied",
-    state: applied ? (s?.resultInThisCheckout === false ? "unknown" : "done") : "not-yet",
+    // Done only on positive evidence: the record names its resulting revision and this
+    // checkout's .vcv/HEAD history contains it.
+    state: applied ? (s?.resultingRevision && s.resultInThisCheckout === true ? "done" : "unknown") : "not-yet",
     detail: applied
-      ? s?.resultInThisCheckout === false
-        ? `Applied as ${s.resultingRevision} on another line; this checkout's history does not contain it.`
-        : `Committed as ${s?.resultingRevision ?? "a revision"} in .vcv/HEAD's history.`
+      ? s?.resultingRevision && s.resultInThisCheckout === true
+        ? `Committed as ${s.resultingRevision} in .vcv/HEAD's history.`
+        : s?.resultingRevision
+          ? `Recorded as applied as ${s.resultingRevision}, but this checkout's history does not contain it (another line?).`
+          : "Recorded as applied, but the record names no resulting revision, so it cannot be found in this checkout's history."
       : lc === "pending"
         ? ".vcv/HEAD is unchanged until a reviewer approves."
         : "Not applied.",

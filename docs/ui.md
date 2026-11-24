@@ -181,7 +181,7 @@ The dialog shows both, with Copy and Download and the CLI command to check the f
      (caller-asserted base)*, and its detail says the ref was named by whoever started the
      explorer and can be moved locally. It is not the hosting service's verdict; CI's check
      against the protected branch is the authority.
-  4. *Model applied*: the resulting revision is in this checkout's history.
+  4. *Model applied*: the resulting revision is in this checkout's history. Shown as done only on that positive evidence, taken from the record's own summary in the same read as the preview (`previewProposal`'s `record`), never from the capped list. A record that names no resulting revision, or one this history lacks, is unknown.
   5. *Implementation*: always unknown here (reconciliation is M4's `vcv reconcile`).
 - The engine's check and delta, as for drafts. An applied change is shown against its base and
   not rechecked (a recheck would always say `STALE_REVISION`).

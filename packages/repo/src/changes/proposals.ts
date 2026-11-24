@@ -167,6 +167,11 @@ export type ProposalPreview = {
     /** What the proposer asks to be implemented after approval (covered by the digest). */
     implementation?: ImplementationRequest;
   };
+  /**
+   * For a recorded proposal: the same summary listProposals gives, read in this same observation
+   * (lifecycle, resulting revision and whether this checkout's history contains it).
+   */
+  record?: ProposalSummary;
   /** The engine's checkChange() against this checkout's current model, now. */
   validation: {
     appliesToCurrent: boolean;
@@ -542,6 +547,7 @@ export function previewProposal(path: string, input: unknown, hooks: ObserveHook
           operations: change.operations.map((op, index) => ({ index, type: op.type, summary: describeOperation(op) })),
           ...(change.implementation ? { implementation: change.implementation } : {}),
         },
+        ...(record ? { record: summarize(change.changeId, record, undefined, model, history) } : {}),
         validation: {
           appliesToCurrent: !!check.model,
           errors: hinted(check.errors),
