@@ -281,7 +281,11 @@ const phases: Record<string, () => Promise<void>> = {
     record("dryRun", await text(page, "check-state"));
     record("steps", await text(page, "steps"));
     await shot(page, "05-draft-staged");
+    // The rationale is saved when the field loses focus, after the steps: wait until the file on
+    // disk holds it, so the snapshot below is the draft as the owner left it.
+    for (let i = 0; i < 100 && draftFile().draft.rationale !== RATIONALE; i++) await page.waitForTimeout(100);
     const { path, draft } = draftFile();
+    assert.equal(draft.rationale, RATIONALE, "the rationale was saved to the draft");
     assert.ok(!path.startsWith(repo), "the draft lives outside the checkout");
     record("draftPath", path.replace(work, "<work>"));
     record("draftVersion", draft.version);
