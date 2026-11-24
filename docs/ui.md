@@ -35,6 +35,8 @@ browser (React, @xyflow/react)  ──HTTP JSON──▶  host (Node, apps/ui/sr
 | `src/drafts/preview.ts` | The dry-run adapter over `@vcv/repo` `previewProposal` |
 | `src/drafts/handoff.ts` | The export: a strict proposed change plus separate metadata |
 | `src/drafts/routes.ts` | The `/api/drafts` routes |
+| `src/proposals.ts` | The proposal inbox over `listProposals`, `previewProposal` and `checkIntegrity`, read-only |
+| `src/evidence.ts` | Evidence, implementation and pre-merge views over `@vcv/repo`, read-only |
 | `src/layout.ts` | Pure, deterministic placement: layered auto layout, reconcile with stored positions, tidy |
 | `src/layout-store.ts` | Positions on disk, outside the checkout |
 | `src/types.ts` | The JSON contract shared with the client (types only) |
@@ -224,12 +226,13 @@ The identity is exact or it is refused with `422 OBSERVATION_LIMIT`; nothing is 
   - Listings, `lstat`, `readlink` and file opens all go through the held descriptors.
 - Where the platform has no descriptor-relative open (no `/proc/self/fd`: macOS, Windows), nothing is observed. The inbox answers `422 OBSERVATION_LIMIT` there rather than fall back to a weaker path-based read.
 
-The answer itself is read under the same boundary, not only the identity. Both identity checks
+The answer itself is read under the same boundary, not only the identity, for the inbox and the
+evidence views alike. Both identity checks
 and the read between them run inside one contained scope (`withContainedReads` in
 `packages/core/src/contained.ts`):
 - While the scope is active, the repository readers behind the inbox (store files, change
-  records, attestations, the trust list, implementation reports, binding claims and source
-  files) resolve every path under the checkout from the root's descriptor, one folder at a time
+  records, attestations, the trust list, implementation reports, binding claims, source files
+  and the pre-merge worktree walk) resolve every path under the checkout from the root's descriptor, one folder at a time
   with `O_NOFOLLOW`, as the identity walk does.
 - A folder on the way that is a symlink when it is reached is a containment violation. The whole
   answer is then refused with `422 OBSERVATION_LIMIT`, even if a reader caught the error, so no
@@ -253,6 +256,102 @@ There is no browser submit in this version. Issue #44 allows one only after the 
 (#43) is merged; when it comes, it must go through `submitProposal` (proposal-only, `model:propose`)
 and so through the same lock as the CLI (ADR 0010).
 
+## Evidence and the pre-merge page
+
+`src/evidence.ts` is a thin adapter over functions the CLI already uses. It decides nothing
+itself, and every answer is a new observation of the checkout. Each part labels what kind of
+thing it shows: a claim (something an agent or person asserted) or an observation (what VCV
+checked just now, with the limits of that check).
+
+- **Object evidence** (`GET /api/evidence/objects/:id`, in the inspector under *Code and test
+  evidence*) comes from `getObjectEvidence`. It lists every binding claim about the object, up to
+  50, and labels how many it found when the list is cut. For each claim it shows:
+  - the claim's state (resolved, stale, missing, ambiguous, unchecked, indeterminate or
+    unreadable);
+  - the locator as written;
+  - who claimed it and how, *as the claim says*;
+  - whether the pointer resolves now (line and match count);
+  - whether the code and the model object changed since the claim, each with its cause;
+  - whether it is disputed.
+
+  A footnote repeats that "resolved and fresh" is not evidence that the code does what the model
+  says.
+- **Criteria** add `criteriaEvidence`: the mapping state, each mapped test case, and a result from
+  the test-run records given at start (`--run`). Without runs the result is *unverified*, and the
+  page says that it runs nothing. A record handed to the host is always a claim, whatever it
+  declares (`RESULT_CLAIMED`). The host has no `tests:observe` permission and captures nothing.
+- **Module evidence** (`GET /api/evidence/modules/:id`) is `getEvidenceOverview`, up to 200
+  claims, grouped by the module's owned objects and counted by state. It says when the overview
+  was cut.
+- **Implementation** (`GET /api/proposals/:id/implementation`, on an applied proposal) shows
+  three layers that are kept apart:
+  - *approved intent*: `buildHandoff`, meaning the request, the scope and the claims that
+    probably move with the change;
+  - *the agent's report*: the recorded report, shown as claims with the report's own note that
+    VCV verified none of it;
+  - *what VCV observes now*: from `implementationStatus`, the files changed, out-of-scope paths,
+    claim states, and whether each claim was re-claimed after implementing.
+
+  Then come the warnings and the "not reconciled" note. A change that is not applied and
+  attested here has no handoff, and the page says why.
+- **Before merging** (`#/gate`, `GET /api/gate`) runs `reconcile` (pinned to the base,
+  attestation required) and `preMergeGate` against `--base-commit <sha>`.
+  - The base must be a full commit ID that the person starting the explorer copied from the
+    hosting service. It is never guessed from local branch names. Without it, nothing runs and
+    the page names the missing flag.
+  - The decision, headline, reasons (with severity, basis and rule), criteria and runs are the
+    gate's own. Reconciliation findings are listed as facts with their category and basis, and
+    are not coloured as a verdict.
+  - Integrity says *caller-asserted*: CI's gate against the protected branch is the authority.
+  - A policy file can be given with `--policy`. Test-run and policy files are read once at
+    start; the host never re-reads or writes them.
+  - The page reads when it opens and whenever the model moves. **Check again** re-reads after a
+    code edit; it is still only a read.
+
+Each answer runs its reads between two checkout identities, as the inbox does (`src/observe.ts`).
+Because these views inspect source and test files, their identity also covers the source state.
+This is the supported source path model:
+
+| Path | How it is observed |
+|---|---|
+| Committed, unchanged files | the commit ID |
+| Every path `git status` reports as changed or untracked (not ignored) | its bytes |
+| A symlink among those | its link text, plus where the binding verifier resolves it and the bytes there; or the fact that it leaves the checkout (which the resolver refuses) |
+| Every file a binding claim's locator names, including ignored files and files behind symlinked folders | the bytes the resolver would read, resolved by the resolver's own `resolveInside` |
+| A submodule or nested repository with changes | refused: its working tree is not observed here |
+
+A dirty→dirty edit, a retargeted symlink, or a change to an ignored file a claim reads is
+therefore seen between two reads. The reads are then retried, or refused with `STATE_CHANGED`.
+As a result, the reconciliation and the gate on the pre-merge page always describe the same
+source state.
+
+These cases are `422 OBSERVATION_LIMIT`, and the answer is refused, not guessed:
+- more than 2000 such paths, or more than 32 MB of them;
+- a special file (FIFO, device);
+- an unreadable file;
+- a changed submodule;
+- a file that turns into a symlink or a special file between the listing and the read.
+
+Each path is first resolved by the binding verifier's own rules (`resolveInside` in
+`@vcv/repo`): names match case exactly, and a symlink anywhere in the path is followed only if it
+stays inside the checkout. So a locator through an in-checkout symlinked folder is observed where
+the resolver reads it, and one that leaves is recorded as unsafe and never read. The resolved
+path is then read like the store: from the root descriptor, one folder at a time with
+`O_NOFOLLOW`, non-blocking and `fstat`-checked, with the bytes actually read counted against the
+32 MB budget.
+
+Ignored files that no claim names are outside the model. No evidence view reads them.
+
+On the pre-merge page, a passing integrity check reads "checks passed locally against the base
+commit given at start (caller-asserted; not an authorization)". The check establishes
+consistency and attestation under that anchor only. CI's gate against the protected branch is
+the authority.
+
+The client sends the model key it is showing (`?model=<key>`). If the checkout has moved on, the
+host answers `409 STATE_CHANGED` rather than describing a model the page is not showing. The
+next poll brings the new model, and the panels reload for it. The evidence routes answer GET
+only, and any other method is `405 READ_ONLY`. There is no reassert, record, capture or run route.
+
 ## Trust boundary
 
 The browser is not a trust boundary, and neither is this host for anything beyond reading.
@@ -262,8 +361,8 @@ The browser is not a trust boundary, and neither is this host for anything beyon
 - Every write takes a JSON body (a cross-site form cannot send one) and writes only files in
   the UI state directory: the layout file and draft files. Nothing under the checkout, `.vcv/`
   or Git is written; tests compare the checkout byte for byte.
-- There is no submit, apply or approve route. `/api/proposals` answers GET only; any other
-  method is `405 READ_ONLY`. Recording a proposal is the agent's step (`vcv proposal submit`);
+- There is no submit, apply or approve route. `/api/proposals`, `/api/evidence` and `/api/gate`
+  answer GET only; any other method is `405 READ_ONLY`. Recording a proposal is the agent's step (`vcv proposal submit`);
   approval stays the reviewer's `vcv review approve` with their own key
   ([approvals](approvals.md)). The host never reads, receives or stores a private key.
 - Cooperating VCV writers are serialized by the store's writer lock (ADR 0010). A future
@@ -327,6 +426,10 @@ The browser is not a trust boundary, and neither is this host for anything beyon
 
   With the old size/mtime and skip fallbacks put back, three of these fail.
 - `apps/ui/test/contained.test.ts`: the boundary, over HTTP.
+  - `GET /api/evidence/objects/:id`: a claim through an in-checkout symlinked folder still
+    resolves. The source folder swapped for a symlink to an outside copy just before the evidence
+    read opens the file, and put back before the closing identity check, is `422
+    OBSERVATION_LIMIT`. With the scope turned off, the read goes through the swap.
   - `GET /api/proposals/:id` with the records folder swapped for a symlink to an outside copy
     just before the proposal read opens the record, and put back before the closing identity
     check: `422 OBSERVATION_LIMIT`, and nothing from the outside copy is in the body. With the
@@ -338,6 +441,28 @@ The browser is not a trust boundary, and neither is this host for anything beyon
 - `apps/ui/e2e/proposals.e2e.ts`: the same in Chromium, with the page open while the reviewer
   approves in a terminal (20 to 25), keyboard reachability, and a check that no button on the
   page approves, signs, submits, applies, rejects or rebases.
+- `apps/ui/test/evidence.test.ts`: evidence over HTTP on a Course Desk with claims, mapped
+  criteria, an approved change with an agent's report, and a run the agent captured:
+  - claim states, freshness causes and provenance as `@vcv/repo` reports them;
+  - a criterion unverified without runs, and *claimed* with one;
+  - module counts;
+  - the implementation layers;
+  - the gate without a base (nothing run, the missing input named) and with one (equal to
+    `preMergeGate` called directly);
+  - 405 on writes, with no reassert or run route;
+  - `STATE_CHANGED` for a model the page no longer shows;
+  - a model change landing between reconciliation and the gate yields one consistent answer, and
+    a checkout that keeps moving is `STATE_CHANGED`;
+  - a dirty→dirty source edit landing mid-read is retried for the gate, the implementation view
+    and object evidence, an edit on every read is `STATE_CHANGED`, and 2001 untracked files are
+    `OBSERVATION_LIMIT`. With the source fingerprint switched off, that test fails;
+  - the source path model: an ignored file read through a committed, claimed symlink and a
+    symlink retargeted to a same-length link text are both seen mid-read, and a changed nested
+    repository is `OBSERVATION_LIMIT`. Without the claimed-path fingerprint, that test fails;
+  - an unchanged checkout.
+- `apps/ui/e2e/evidence.e2e.ts`: the same in Chromium (screenshots 30 to 35). It also checks
+  that the pre-merge page follows the model when it moves, and that no button on these pages
+  reasserts, records, runs, approves or merges.
 - `apps/ui/e2e/explorer.e2e.ts`: the built client in Chromium (Playwright), covering the first
   PR's acceptance tests 1 to 5, plus: no mixed-model inspector across a branch switch, cross-module
   object links, the viewport surviving refreshes, and reduced motion. `npm run test:ui`; set
@@ -348,6 +473,7 @@ The browser is not a trust boundary, and neither is this host for anything beyon
 
 Editing purpose, contracts, nested elements and creating or removing objects from the
 inspector; submitting from the browser (after #43 merges, if at all) and approving in it (never:
-approval stays the reviewer's CLI step); source and test evidence (M5.5); and opening a
+approval stays the reviewer's CLI step); capturing test runs or reasserting claims from the
+browser (never: those stay the host's and the agent's steps); and opening a
 different checkout from the browser. Projects with more than
 1000 modules show the first 1000 and say so.

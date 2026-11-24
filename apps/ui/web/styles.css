@@ -338,3 +338,28 @@ button { font: inherit; color: inherit; }
 .st-failed { --st: var(--danger); } .st-failed .step-mark { background: var(--danger-tint); }
 .st-unknown { --st: var(--unknown); } .st-unknown .step-mark { border-style: dashed; }
 @media (max-width: 900px) { .inbox-side { width: 260px; } .review { padding: var(--space-4); } }
+
+/* Evidence (M5.5): claims and what VCV observes about them, each layer labelled. */
+.ev { display: inline-flex; align-items: center; gap: 4px; height: 22px; padding: 0 8px 0 6px; border-radius: var(--radius-pill); font: 500 12px/16px var(--font-sans); white-space: nowrap; color: var(--evc); background: var(--evt); }
+.ev b { font-weight: 600; font-variant-numeric: tabular-nums; }
+.ev-ok { --evc: var(--ok); --evt: var(--ok-tint); }
+.ev-warn { --evc: var(--warn); --evt: var(--warn-tint); }
+.ev-bad { --evc: var(--danger); --evt: var(--danger-tint); }
+.ev-unknown { --evc: var(--ink-muted); --evt: var(--unknown-tint); }
+.bindings { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.binding { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--line); border-left: 3px solid var(--evc, var(--line)); border-radius: var(--radius-sm); background: var(--surface-raised); animation: fade-up 260ms var(--ease-out) both; animation-delay: calc(var(--i, 0) * 50ms); }
+.binding[data-state="resolved"] { --evc: var(--ok); }
+.binding[data-state="stale"] { --evc: var(--warn); }
+.binding[data-state="missing"], .binding[data-state="ambiguous"], .binding[data-state="invalid"] { --evc: var(--danger); }
+.binding-top { gap: var(--space-2); flex-wrap: wrap; }
+.binding-loc { overflow-wrap: anywhere; color: var(--ink); }
+.kv-tight { grid-template-columns: 84px minmax(0, 1fr); gap: 4px var(--space-2); font-size: 12px; line-height: 16px; }
+.crit { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius-sm); background: var(--surface-sunken); }
+.crit .row { flex-wrap: wrap; gap: var(--space-2); }
+.crit-map { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+.ev-observed { margin: 0; }
+.impl { display: flex; flex-direction: column; gap: var(--space-3); }
+.impl-layer { position: relative; display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); padding-top: var(--space-4); border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.layer-claim { border-style: dashed; border-color: color-mix(in srgb, var(--warn) 50%, var(--line)); }
+.layer-tag { position: absolute; top: -9px; left: var(--space-3); padding: 0 6px; background: var(--surface-raised); color: var(--ink-muted); font: 600 11px/16px var(--font-sans); letter-spacing: 0.04em; text-transform: uppercase; }
+@media (prefers-reduced-motion: reduce) { .binding { animation: none; } }

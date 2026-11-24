@@ -317,3 +317,225 @@ export type ProposalReview = {
   agent: { note: string; commands: { label: string; text: string }[] } | null;
   integrityLimits: string[];
 };
+
+// Evidence (M5.5). Each view is one new observation; see src/evidence.ts.
+
+/** Which checkout state an evidence answer was read from. */
+export type EvidenceObservation = {
+  at: string;
+  modelRevision: string;
+  modelKey: string;
+  commit: string | null;
+  branch: string | null;
+  dirty: boolean | null;
+  resolver: string;
+};
+
+export type EvidenceStateName =
+  | "resolved"
+  | "stale"
+  | "missing"
+  | "ambiguous"
+  | "unchecked"
+  | "indeterminate"
+  | "invalid";
+
+export type BindingView = {
+  bindingId: string;
+  /** Repository-relative claim file. */
+  file: string;
+  state: EvidenceStateName;
+  problem?: string;
+  relation: string | null;
+  /** The locator as written in the claim (repo-relative path plus selector). */
+  locator: string | null;
+  path: string | null;
+  selectorKind: string | null;
+  claimedAtRevision: string | null;
+  /** Who made the claim and how, as the claim says. Never checked by VCV. */
+  provenance: { source: string; principalId: string } | null;
+  /** Does the pointer resolve now. */
+  pointer: {
+    state: "resolved" | "missing" | "ambiguous" | "unchecked";
+    detail: string;
+    matches: { label: string; declaration: string; line: number }[];
+    matchesTotal: number;
+  } | null;
+  sourceFreshness: { state: string; cause: string } | null;
+  modelFreshness: { state: string; cause: string } | null;
+  disputed: { by: string; reason: string } | null;
+};
+
+export type CriterionView = {
+  verification: string;
+  mapping: "none" | "resolved" | "partial" | "unresolved" | "unknown";
+  assessment: "complete" | "incomplete";
+  /** unverified: no test runs were supplied to this host. */
+  result: "passed" | "failed" | "stale" | "missing" | "unknown" | "unverified";
+  resultObservedBy: "host" | "claimed" | null;
+  runsSupplied: number;
+  mappings: {
+    bindingId: string;
+    test: string | null;
+    state: string;
+    claimedAtRevision: string | null;
+    result: { status: string; observedBy: ("host" | "claimed")[]; message?: string } | null;
+  }[];
+  problems: { code: string; message: string }[];
+};
+
+export type ObjectEvidenceView = {
+  observed: EvidenceObservation;
+  object: { id: string; kind: string | null; name: string | null; inCurrentModel: boolean };
+  counts: Record<EvidenceStateName, number> & { total: number; disputed: number };
+  bindings: BindingView[];
+  matched: number;
+  truncated: boolean;
+  unreadableClaims: number;
+  /** For a criterion: its test mappings and their results in the runs this host was given. */
+  criterion: CriterionView | null;
+  limits: string[];
+};
+
+export type ModuleEvidenceView = {
+  observed: EvidenceObservation;
+  moduleId: string;
+  objects: {
+    id: string;
+    kind: string;
+    name: string;
+    claims: number;
+    states: Record<string, number>;
+    disputed: number;
+  }[];
+  truncated: boolean;
+  unreadableClaims: number;
+};
+
+export type ImplementationView = {
+  changeId: string;
+  modelKey: string;
+  /** What was approved to be implemented. Null when the change is not applied and attested here. */
+  handoff: {
+    digest: string;
+    approvedRevision: string;
+    request: {
+      behavior: string;
+      acceptanceCriteria: string[];
+      suggestedTests: string[];
+      scope: string[] | null;
+    } | null;
+    scopeFromBindings: string[];
+    bindings: {
+      bindingId: string;
+      modelObjectId: string;
+      relation: string;
+      locator: string;
+      why: string;
+      state: string;
+      reassert: boolean;
+    }[];
+    bindingsTotal: number;
+    baseCommit: string | null;
+    caveats: string[];
+  } | null;
+  handoffProblem: string | null;
+  /** The agent's recorded report: its claims, what VCV observed then, and what it observes now. */
+  report: {
+    file: string;
+    digest: string;
+    claims: {
+      by: string;
+      confidence: string;
+      testsRun: { command: string; outcome: string; summary?: string }[];
+      acceptance: { criterion: string; status: string; evidence?: string }[];
+      gaps: string[];
+      outOfScope: { path: string; reason: string }[];
+      notes: string | null;
+      note: string;
+    };
+    observedThen: { filesModified: string[]; outOfScope: string[] };
+    observedNow: {
+      baseCommit: string;
+      headCommit: string | null;
+      dirty: boolean | null;
+      filesModified: string[];
+      filesTruncated: boolean;
+      outOfScope: string[];
+      bindings: { bindingId: string; locator: string; state: string; reasserted: boolean }[];
+    };
+    changedSinceReport: boolean;
+    warnings: { code: string; message: string; path?: string; bindingId?: string }[];
+    notReconciled: string;
+  } | null;
+  reportProblem: string | null;
+};
+
+export type GateInputs = {
+  baseCommit: string | null;
+  /** Test-run record files given at start (claims). */
+  runs: string[];
+  policy: string | null;
+  /** What is needed to run reconciliation and the gate, and was not given. */
+  missing: string[];
+};
+
+export type GateView = {
+  modelKey: string;
+  inputs: GateInputs;
+  problem: string | null;
+  reconciliation: {
+    base: {
+      ref: string;
+      commit: string;
+      pinned: boolean;
+      mergeBase: string;
+      containedInCandidate: boolean;
+      modelRevision: string | null;
+    };
+    candidate: { commit: string; branch: string | null; dirty: boolean; modelRevision: string };
+    lineage: string;
+    integrity: { ok: boolean; errors: { code: string; message: string }[]; authorization: string };
+    summary: Record<string, number | string | boolean>;
+    files: { path: string; area: string; committed: boolean; uncommitted: boolean; objectIds: string[] }[];
+    filesTotal: number;
+    findings: {
+      code: string;
+      category: string;
+      basis: "checked" | "observed" | "not-checked";
+      related: boolean;
+      message: string;
+      checked: string;
+      objectIds?: string[];
+      path?: string;
+    }[];
+    findingsTotal: number;
+    findingsTruncated: boolean;
+    limits: string[];
+  } | null;
+  gate: {
+    decision: "pass" | "warn" | "block";
+    headline: string;
+    changeKind: string;
+    policy: { source: string; changedByCandidate: boolean };
+    reasons: {
+      severity: string;
+      code: string;
+      rule: string;
+      basis: "checked" | "observed" | "not-checked" | "claim";
+      message: string;
+      criterionId?: string;
+    }[];
+    reasonsTotal: number;
+    criteria: { id: string; verification: string; result: string; observedBy: string | null; verifies: string[] }[];
+    runs: {
+      index: number;
+      observedBy: "host" | "claimed";
+      runner: string;
+      fresh: boolean;
+      staleBecause: string[];
+      summary: { tests: number; passed: number; failed: number; errors: number; skipped: number };
+    }[];
+    limits: string[];
+  } | null;
+};

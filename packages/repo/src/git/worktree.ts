@@ -16,7 +16,15 @@
 import { closeSync, fstatSync, lstatSync, openSync, readlinkSync, realpathSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join, relative, sep } from "node:path";
-import { sha256Hex, digestOf, OPEN_READ_NOFOLLOW, readChunks } from "@vcv/core";
+import {
+  sha256Hex,
+  digestOf,
+  lstatContained,
+  OPEN_READ_NOFOLLOW,
+  openForRead,
+  readChunks,
+  readlinkContained,
+} from "@vcv/core";
 import { EXCLUDED_SEGMENTS, pathProblem, resolveInside } from "../bindings/locator.ts";
 
 export const WORKTREE_LIMITS = { files: 5000, fileBytes: 64 * 1024 * 1024, totalBytes: 512 * 1024 * 1024 } as const;
@@ -85,10 +93,11 @@ function identity(root: string, rel: string, budget: number): Identity {
     abs = join(abs, segments[i]!);
     let st;
     try {
-      st = lstatSync(abs, { bigint: true });
+      st = lstatContained(abs, { bigint: true });
     } catch (e) {
       return isAbsence(e) ? { id: "absent" } : { id: "unreadable", unavailable: true };
     }
+    if (!st) return { id: "absent" };
     if (st.isSymbolicLink()) return throughLink(root, rel, abs, budget);
     if (i < segments.length - 1) {
       if (!st.isDirectory()) return { id: "absent" };
@@ -110,7 +119,7 @@ function identity(root: string, rel: string, budget: number): Identity {
 function throughLink(root: string, rel: string, link: string, budget: number): Identity {
   let text: string;
   try {
-    text = sha256Hex(readlinkSync(link)).slice(0, 16);
+    text = sha256Hex(readlinkContained(link)).slice(0, 16);
   } catch {
     return { id: "link:unreadable", unavailable: true };
   }
@@ -131,10 +140,11 @@ function throughLink(root: string, rel: string, link: string, budget: number): I
   const target = relative(realRoot(root), where.abs).split(sep).join("/");
   let st;
   try {
-    st = lstatSync(where.abs, { bigint: true });
+    st = lstatContained(where.abs, { bigint: true });
   } catch {
-    return { id: `link:${text}:${target}:unreadable`, unavailable: true };
+    st = null;
   }
+  if (!st) return { id: `link:${text}:${target}:unreadable`, unavailable: true };
   const stat = `stat:${st.size}:${st.mtimeNs}:${st.ino}`;
   if (st.size > BigInt(Math.min(budget, WORKTREE_LIMITS.fileBytes)))
     return { id: `link:${text}:${target}:${stat}`, partial: true };
@@ -155,7 +165,7 @@ const realRoot = (root: string) => {
 function hashFile(abs: string): { id: string; bytes: number } | null {
   let fd: number;
   try {
-    fd = openSync(abs, OPEN_READ_NOFOLLOW);
+    fd = openForRead(abs, OPEN_READ_NOFOLLOW);
   } catch {
     return null;
   }

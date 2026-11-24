@@ -24,9 +24,9 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
-import { relative, sep } from "node:path";
+import { join, relative, sep } from "node:path";
 import { ContainmentUnavailable, OPEN_READ_NOFOLLOW, readChunks, withContainedReads } from "@vcv/core";
-import { projectStatus, resolveProjectRoot } from "@vcv/repo";
+import { projectStatus, resolveInside, resolveProjectRoot } from "@vcv/repo";
 import { StateChangedError, modelKey } from "./session.ts";
 
 /** Budget for hashing .vcv/. Mutable for tests only. Past it, nothing is served (no size/mtime stand-in). */
@@ -50,7 +50,21 @@ export class ObservationLimit extends Error {
   readonly code = "OBSERVATION_LIMIT";
 }
 
-export type ObserveOptions = { ref?: string };
+const SOURCE_MAX_FILES = 2000;
+const SOURCE_MAX_BYTES = 32 * 1024 * 1024;
+const CLAIM_MAX_BYTES = 1024 * 1024;
+
+export type ObserveOptions = {
+  ref?: string;
+  /**
+   * Also fingerprint the working tree's content: the bytes of every file Git reports as
+   * modified, added, deleted, renamed or untracked (not ignored). Committed, unchanged files are
+   * covered by the commit ID. For reads that inspect source and test files (evidence,
+   * implementation status, reconciliation, the gate), so a dirty→dirty edit between two reads
+   * is seen. Over budget or unreadable: ObservationLimit, never a silent pass.
+   */
+  source?: boolean;
+};
 
 const errno = (e: unknown) => (e as NodeJS.ErrnoException).code ?? "unreadable";
 
@@ -254,6 +268,7 @@ export function checkoutIdentity(path: string, opts: ObserveOptions = {}): strin
       closeSync(dir);
     }
   }
+  if (opts.source) sourceFingerprint(rootReal, h);
   if (opts.ref) {
     try {
       h.update(
@@ -264,6 +279,157 @@ export function checkoutIdentity(path: string, opts: ObserveOptions = {}): strin
     }
   }
   return h.digest("hex");
+}
+
+/**
+ * The working tree's changed and claimed files (see ObserveOptions.source). Paths are resolved by the
+ * binding verifier's own rules (resolveInside: exact-case names, symlinks anywhere in the path
+ * followed only if they stay in the checkout), then read through openContained.
+ */
+function sourceFingerprint(root: string, h: ReturnType<typeof createHash>): void {
+  let out: string;
+  try {
+    out = execFileSync("git", ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--no-renames"], {
+      cwd: root,
+      encoding: "utf8",
+      maxBuffer: 16 * 1024 * 1024,
+    });
+  } catch (e) {
+    throw new ObservationLimit(`cannot list the working tree's changes: ${(e as Error).message}`);
+  }
+  const entries = out.split("\0").filter(Boolean);
+  const claimed = claimedPaths(root);
+  if (entries.length + claimed.length > SOURCE_MAX_FILES)
+    throw new ObservationLimit(
+      `${entries.length} changed or untracked files and ${claimed.length} claimed paths is more than this view checks (${SOURCE_MAX_FILES}); commit or clean some and retry`,
+    );
+  const budget = { bytes: 0 };
+  h.update("\0source");
+  for (const e of entries.sort()) {
+    h.update(`\0${e}\0`);
+    hashPath(root, e.slice(3), h, budget, true);
+  }
+  h.update("\0claimed");
+  for (const rel of claimed) {
+    h.update(`\0${rel}\0`);
+    hashPath(root, rel, h, budget, false);
+  }
+}
+
+function hashPath(
+  root: string,
+  rel: string,
+  h: ReturnType<typeof createHash>,
+  budget: { bytes: number },
+  fromStatus: boolean,
+): void {
+  const s = lstatSync(join(root, rel), { throwIfNoEntry: false });
+  if (s?.isDirectory()) {
+    // git status lists a directory only for a submodule or nested repository; its files are not observed.
+    if (fromStatus)
+      throw new ObservationLimit(
+        `${rel} is a submodule or nested repository with changes; this view does not observe its working tree. Commit or clean it and retry`,
+      );
+    h.update("directory");
+    return;
+  }
+  if (s?.isSymbolicLink()) {
+    try {
+      h.update(`link:${readlinkSync(join(root, rel))}\0`);
+    } catch {
+      h.update("link:unreadable\0");
+    }
+  }
+  // The same resolution the binding verifier uses, so a locator through an in-checkout symlinked
+  // folder is observed exactly where the resolver reads it, and one that leaves is never read.
+  const where = resolveInside(root, rel);
+  if (!where.ok) {
+    h.update(`unresolved:${where.reason}`);
+    return;
+  }
+  const inside = relative(root, where.abs).split(sep).join("/");
+  h.update(`at:${inside}\0`);
+  observeTestHooks.beforeOpen?.(`source:${rel}`);
+  const file = createHash("sha256");
+  const found = streamRegular(root, inside, (chunk) => {
+    budget.bytes += chunk.length;
+    if (budget.bytes > SOURCE_MAX_BYTES)
+      throw new ObservationLimit(
+        `changed, untracked and claimed files add up to more than ${SOURCE_MAX_BYTES} bytes; this view cannot observe them consistently`,
+      );
+    file.update(chunk);
+  });
+  h.update(found ? `bytes:${file.digest("hex")}` : "absent");
+}
+
+/**
+ * Stream the regular file at checkout-relative `rel` through openContained (no symlink anywhere in
+ * the path, non-blocking, fstat-checked). False if it vanished first.
+ */
+function streamRegular(rootReal: string, rel: string, onChunk: (chunk: Buffer) => void): boolean {
+  const fd = openContained(rootReal, rel, (why) => {
+    throw new ObservationLimit(`cannot observe ${rel} exactly (${why})`);
+  });
+  if (fd === null) return false;
+  try {
+    readChunks(fd, CHUNK, (chunk) => {
+      onChunk(chunk);
+      return true;
+    });
+    return true;
+  } catch (e) {
+    if (e instanceof ObservationLimit) throw e;
+    throw new ObservationLimit(`cannot read ${rel}: ${(e as Error).message}`);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/** Locator paths named by binding claims in .vcv/bindings/, listed and read through held descriptors. */
+function claimedPaths(rootReal: string): string[] {
+  const fail = (why: string): never => {
+    throw new ObservationLimit(`cannot observe .vcv/bindings exactly (${why})`);
+  };
+  let dir = openRoot(rootReal, fail);
+  const paths = new Set<string>();
+  try {
+    for (const name of [".vcv", "bindings"]) {
+      const next = openChildDir(dir, name, fail);
+      if (next === null) return [];
+      closeSync(dir);
+      dir = next;
+    }
+    for (const n of readdirSync(`${PROC_FD}/${dir}`)
+      .filter((x) => x.endsWith(".json"))
+      .sort()) {
+      const st = lstatSync(at(dir, n), { throwIfNoEntry: false });
+      if (!st?.isFile() || st.size > CLAIM_MAX_BYTES) continue; // covered by the .vcv/ walk
+      const fd = openChildFile(dir, n, (why) => fail(`${n}: ${why}`));
+      if (fd === null) continue;
+      const chunks: Buffer[] = [];
+      let size = 0;
+      try {
+        readChunks(fd, CHUNK, (chunk) => {
+          size += chunk.length;
+          if (size > CLAIM_MAX_BYTES) fail(`${n} grew while it was read`);
+          chunks.push(Buffer.from(chunk));
+          return true;
+        });
+      } finally {
+        closeSync(fd);
+      }
+      try {
+        const p = (JSON.parse(Buffer.concat(chunks).toString("utf8")) as { locator?: { path?: unknown } }).locator
+          ?.path;
+        if (typeof p === "string" && p && !p.startsWith("/") && !p.split("/").includes("..")) paths.add(p);
+      } catch {
+        // an unparseable claim is part of the .vcv/ bytes already
+      }
+    }
+  } finally {
+    closeSync(dir);
+  }
+  return [...paths].sort();
 }
 
 /**

@@ -4,7 +4,11 @@ import type {
   DraftList,
   DraftPreview,
   DraftView,
+  GateView,
+  ImplementationView,
   Inbox,
+  ModuleEvidenceView,
+  ObjectEvidenceView,
   ModuleView,
   ObjectView,
   Position,
@@ -46,6 +50,7 @@ const post = <T>(path: string, body: unknown) =>
   call<T>(path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
 
 type Positions = { positions: Record<string, Position> };
+const shown = (model: string) => `?model=${encodeURIComponent(model)}`;
 const draft = (id: string, rest = "") => `/api/drafts/${encodeURIComponent(id)}${rest}`;
 
 export const api = {
@@ -59,6 +64,19 @@ export const api = {
   proposals: {
     list: () => call<Inbox>("/api/proposals"),
     review: (id: string) => call<ProposalReview>(`/api/proposals/${encodeURIComponent(id)}`),
+  },
+  /**
+   * Read-only evidence (M5.5). `model` is the model key the page is showing: if the checkout has
+   * moved on, the host answers STATE_CHANGED instead of describing a model the page is not showing.
+   */
+  evidence: {
+    object: (id: string, model: string) =>
+      call<ObjectEvidenceView>(`/api/evidence/objects/${encodeURIComponent(id)}${shown(model)}`),
+    module: (id: string, model: string) =>
+      call<ModuleEvidenceView>(`/api/evidence/modules/${encodeURIComponent(id)}${shown(model)}`),
+    implementation: (changeId: string, model: string) =>
+      call<ImplementationView>(`/api/proposals/${encodeURIComponent(changeId)}/implementation${shown(model)}`),
+    gate: (model: string) => call<GateView>(`/api/gate${shown(model)}`),
   },
   drafts: {
     list: () => call<DraftList>("/api/drafts"),

@@ -31,7 +31,15 @@ import { buildIndex, loadModel, persistedIdProblem } from "@vcv/ir";
 import type { Id, Model } from "@vcv/ir";
 import { lstatSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { canonicalJson, readStoreFile, STORE_FILE_LIMITS, sha256Hex, digestOf } from "@vcv/core";
+import {
+  canonicalJson,
+  lstatContained,
+  readdirContained,
+  readStoreFile,
+  STORE_FILE_LIMITS,
+  sha256Hex,
+  digestOf,
+} from "@vcv/core";
 import { LIMITS as QUERY_LIMITS, createQueryApi } from "@vcv/query";
 import type { ImpactCandidate } from "@vcv/query";
 import { MAX_CLAIM_BYTES, verifyBinding } from "../bindings/bindings.ts";
@@ -388,11 +396,12 @@ function evidenceKey(root: string, storeDir: string, tree: Tree | null, trust: T
   const rels = new Set<string>([REVIEWERS_FILE]);
   let listing: string[] | string;
   try {
-    const st = lstatSync(join(storeDir, APPROVALS_DIR));
-    listing =
-      st.isSymbolicLink() || !st.isDirectory()
+    const st = lstatContained(join(storeDir, APPROVALS_DIR));
+    listing = !st
+      ? []
+      : st.isSymbolicLink() || !st.isDirectory()
         ? `unsafe:${st.isSymbolicLink() ? "symlink" : "not-a-directory"}`
-        : readdirSync(join(storeDir, APPROVALS_DIR)).sort();
+        : readdirContained(join(storeDir, APPROVALS_DIR)).sort();
   } catch (e) {
     listing = (e as NodeJS.ErrnoException).code === "ENOENT" ? [] : `unreadable:${(e as NodeJS.ErrnoException).code}`;
   }

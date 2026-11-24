@@ -1,4 +1,4 @@
-// The routes behind the proposal detail read the repository through a checkout-rooted boundary
+// The routes behind the proposal detail and the evidence views read the repository through a checkout-rooted boundary
 // (Issue #44/#48 review): a folder swapped for a symlink to somewhere outside the checkout while
 // the answer is composed is never read through, and a host that cannot enforce that serves nothing.
 import assert from "node:assert/strict";
@@ -15,11 +15,14 @@ import {
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { containedTestHooks } from "@vcv/core";
+import { recordBinding } from "@vcv/repo";
 import { LayoutFileStore } from "../src/layout-store.ts";
 import { startHost } from "../src/server.ts";
 import type { Host } from "../src/server.ts";
 import { ProjectSession } from "../src/session.ts";
-import { describeWeb, setup, submit, tempDir } from "./fixtures.ts";
+import type { ObjectEvidenceView } from "../src/types.ts";
+import { evidenceWorld } from "./evidence-fixture.ts";
+import { describeWeb, git, setup, submit, tempDir } from "./fixtures.ts";
 
 const hosts: Host[] = [];
 after(() => Promise.all(hosts.map((h) => h.close())));
@@ -146,4 +149,74 @@ test("where reads cannot be contained in the checkout, GET /api/proposals and /a
     containedTestHooks.unavailable = undefined;
   }
   assert.equal((await call("/api/proposals/chg-web")).status, 200);
+});
+
+test("GET /api/evidence/objects/:id reads source through the same boundary: an in-checkout symlinked folder still resolves; a source folder swapped out of the checkout mid-read is 422", async () => {
+  const { repo, base } = evidenceWorld();
+  // A claim through an in-checkout symlinked folder: a supported layout, resolved as before.
+  symlinkSync("enrollment", join(repo, "server/src/enrollment-link"));
+  recordBinding(
+    repo,
+    {
+      bindingId: "impl.linked",
+      modelObjectId: "cap-enroll",
+      relation: "implements",
+      locator: { path: "server/src/enrollment-link/enrollment.service.ts", selector: { kind: "file" } },
+    },
+    { principalId: "agent:coder", permissions: ["binding:record"], source: "agent" } as never,
+    null,
+  );
+  git(repo, "add", "-A");
+  git(repo, "commit", "-qm", "a claim through a symlinked folder");
+
+  const folder = join(realpathSync(repo), "server/src/enrollment");
+  const outside = join(tempDir("vcv-outside-"), "enrollment");
+  cpSync(folder, outside, { recursive: true });
+  writeFileSync(join(outside, "enrollment.service.ts"), `// ${MARKER}\n`);
+  let state = "armed" as "armed" | "swapped" | "restored";
+  const restore = () => {
+    if (state !== "swapped") return;
+    rmSync(folder);
+    renameSync(`${folder}.keep`, folder);
+    state = "restored";
+  };
+  const h = await startHost({
+    session: new ProjectSession(repo, new LayoutFileStore(tempDir("vcv-ui-state-"))),
+    webDir: tempDir(),
+    // Put the folder back before the closing identity check, so only containment can refuse.
+    evidence: { baseCommit: base, betweenReads: () => restore() },
+  });
+  hosts.push(h);
+  const get = async (path: string) => {
+    const r = await fetch(h.url + path.replace(/^\//, ""));
+    return { status: r.status, text: await r.text() };
+  };
+
+  const clean = await get("/api/evidence/objects/cap-enroll");
+  assert.equal(clean.status, 200, clean.text);
+  const linked = (JSON.parse(clean.text) as ObjectEvidenceView).bindings.find((b) => b.bindingId === "impl.linked");
+  assert.equal(linked?.pointer?.state, "resolved", "the in-checkout symlinked folder still resolves");
+
+  // Swap the folder just before the evidence read (not the identity check) opens the source file.
+  containedTestHooks.beforeOpen = (abs) => {
+    if (
+      state === "armed" &&
+      abs === join(folder, "enrollment.service.ts") &&
+      /getObjectEvidence/.test(new Error().stack ?? "")
+    ) {
+      renameSync(folder, `${folder}.keep`);
+      symlinkSync(outside, folder);
+      state = "swapped";
+    }
+  };
+  try {
+    const r = await get("/api/evidence/objects/cap-enroll");
+    assert.notEqual(state, "armed", "the swap happened");
+    assert.equal(r.status, 422, r.text);
+    assert.equal((JSON.parse(r.text) as { error: { code: string } }).error.code, "OBSERVATION_LIMIT");
+  } finally {
+    containedTestHooks.beforeOpen = undefined;
+    restore();
+  }
+  assert.equal((await get("/api/evidence/objects/cap-enroll")).status, 200, "served again once nothing is swapped");
 });

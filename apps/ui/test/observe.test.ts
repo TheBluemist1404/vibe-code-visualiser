@@ -332,3 +332,81 @@ test("without a descriptor-relative open (macOS, Windows) nothing is observed: O
   }
   checkoutIdentity(repo);
 });
+
+test("a changed source file swapped for a symlink or a FIFO after it is listed is refused by the source fingerprint", () => {
+  const { repo } = setup();
+  const p = join(repo, "notes.txt");
+  writeFileSync(p, "an untracked note");
+  checkoutIdentity(repo, { source: true });
+  const outside = join(tempDir("vcv-outside-"), "secret.txt");
+  writeFileSync(outside, "outside the checkout");
+  onceBeforeOpen(
+    "source:notes.txt",
+    () => {
+      rmSync(p);
+      symlinkSync(outside, p);
+    },
+    () => assert.throws(() => checkoutIdentity(repo, { source: true }), /replaced by a symlink/),
+  );
+  rmSync(p);
+  writeFileSync(p, "an untracked note");
+  onceBeforeOpen(
+    "source:notes.txt",
+    () => {
+      rmSync(p);
+      execFileSync("mkfifo", [p]);
+    },
+    () =>
+      assert.throws(
+        () => checkoutIdentity(repo, { source: true }),
+        (e: { code?: string }) => e.code === "OBSERVATION_LIMIT",
+      ),
+  );
+  rmSync(p);
+});
+
+test("a changed source file whose parent folder is swapped out of the checkout after it was opened is read inside, never through the swap", () => {
+  const { repo } = setup();
+  const dir = join(repo, "notes");
+  mkdirSync(dir);
+  writeFileSync(join(dir, "a.txt"), "inside");
+  const elsewhere = tempDir("vcv-outside-");
+  execFileSync("mkfifo", [join(elsewhere, "a.txt")]);
+  const clean = checkoutIdentity(repo, { source: true });
+  observeTestHooks.atOpen = (r) => {
+    if (r !== "notes/a.txt") return;
+    renameSync(dir, `${dir}.keep`);
+    symlinkSync(elsewhere, dir);
+  };
+  try {
+    assert.equal(checkoutIdentity(repo, { source: true }), clean);
+  } finally {
+    observeTestHooks.atOpen = undefined;
+  }
+});
+
+test("a binding through an in-checkout symlinked folder is observed where the binding verifier reads it; one through a folder that leaves the checkout is never read", () => {
+  const { repo } = setup();
+  mkdirSync(join(repo, "src-real"));
+  writeFileSync(join(repo, "src-real", "a.ts"), "export const a = 1;\n");
+  symlinkSync("src-real", join(repo, "src"));
+  mkdirSync(join(repo, ".vcv", "bindings"), { recursive: true });
+  writeFileSync(join(repo, ".vcv", "bindings", "zz-claim.json"), JSON.stringify({ locator: { path: "src/a.ts" } }));
+  // Ignored, so only the claim (not git status) brings the file into the fingerprint.
+  appendFileSync(join(repo, ".git", "info", "exclude"), "src-real/\nsrc\n");
+
+  const before = checkoutIdentity(repo, { source: true });
+  writeFileSync(join(repo, "src-real", "a.ts"), "export const a = 2;\n");
+  assert.notEqual(
+    checkoutIdentity(repo, { source: true }),
+    before,
+    "the bytes behind the symlinked folder are observed",
+  );
+
+  // The same locator through a folder that leaves the checkout: recorded as unsafe, never read.
+  const outside = tempDir("vcv-outside-");
+  execFileSync("mkfifo", [join(outside, "a.ts")]);
+  unlinkSync(join(repo, "src"));
+  symlinkSync(outside, join(repo, "src"));
+  checkoutIdentity(repo, { source: true });
+});

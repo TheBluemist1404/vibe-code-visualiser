@@ -12,7 +12,7 @@
 // node:fs calls, so the CLI behaves exactly as before. Where the platform has no descriptor-relative open (no
 // /proc/self/fd: macOS, Windows), withContainedReads refuses instead of reading less safely.
 import { closeSync, constants, existsSync, lstatSync, openSync, readdirSync, readlinkSync, statSync } from "node:fs";
-import type { Stats } from "node:fs";
+import type { BigIntStats, Stats } from "node:fs";
 import { relative, resolve, sep } from "node:path";
 
 const PROC_FD = "/proc/self/fd";
@@ -176,12 +176,15 @@ function withParent<T>(
 }
 
 /** lstat; null when the path (or a folder on it) does not exist. */
-export function lstatContained(p: string): Stats | null {
+export function lstatContained(p: string): Stats | null;
+export function lstatContained(p: string, opts: { bigint: true }): BigIntStats | null;
+export function lstatContained(p: string, opts?: { bigint: true }): Stats | BigIntStats | null {
+  const o = { bigint: opts?.bigint === true, throwIfNoEntry: false } as const;
   try {
     return withParent(
       p,
-      () => lstatSync(p, { throwIfNoEntry: false }) ?? null,
-      (path) => lstatSync(path, { throwIfNoEntry: false }) ?? null,
+      () => lstatSync(p, o) ?? null,
+      (path) => lstatSync(path, o) ?? null,
     );
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;

@@ -138,7 +138,21 @@ reviewer, attested under the protected base, applied to the model, and implement
 claimed here). A pending proposal shows the exact `vcv review approve` command for its digest:
 approval happens in the reviewer's own terminal with their key, never in the browser. Start the
 explorer with `--protected-base origin/main` to have it check attestations against that ref; it
-labels the result caller-asserted, because CI's `vcv integrity` is the authority. See
+labels the result caller-asserted, because CI's `vcv integrity` is the authority.
+
+Selecting an object also shows its **code and test evidence**:
+- every binding claim about it, whether its pointer still resolves, and whether the code or the
+  model object changed since the claim (and why);
+- for a criterion, its mapped test cases and their results in the test-run records you name with
+  `--run`.
+
+An applied proposal shows its implementation in three separate layers: what was approved, what
+the agent reports (as claims), and what VCV observes in the checkout now.
+
+The **Before merging** page shows reconciliation and the policy gate exactly as `vcv reconcile`
+and `vcv gate` compute them. It needs `--base-commit <sha>`, the protected branch's commit as
+your hosting service reports it, and it never guesses one. Optionally add `--policy <file>`.
+The explorer runs no tests, reasserts no claims and records nothing. See
 [docs/ui.md](docs/ui.md).
 
 The Proposals page needs Linux. It reads the checkout only through folder handles that cannot
