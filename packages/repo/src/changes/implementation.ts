@@ -29,6 +29,7 @@ import {
   unlinkSync,
   writeSync,
 } from "node:fs";
+import { lstatContained, openForRead } from "@vcv/core";
 import { dirname, join } from "node:path";
 import { z } from "zod";
 import { persistedIdProblem, persistedIdSchema } from "@vcv/ir";
@@ -695,7 +696,7 @@ export function globMatcher(pattern: string): (path: string) => boolean {
 
 function lstatOrNull(p: string) {
   try {
-    return lstatSync(p);
+    return lstatContained(p);
   } catch {
     return null;
   }
@@ -713,7 +714,7 @@ function readPlain(
     return { kind: "unsafe", problem: `${path.slice(path.lastIndexOf(VCV_DIR))} is not a regular file` };
   if (st.size > IMPLEMENTATION_LIMITS.reportBytes)
     return { kind: "unsafe", problem: "the report is larger than its limit" };
-  const fd = openSync(path, OPEN_READ_NOFOLLOW);
+  const fd = openForRead(path, OPEN_READ_NOFOLLOW);
   try {
     if (!fstatSync(fd).isFile()) return { kind: "unsafe", problem: "the report is not a regular file" };
     const bytes = readUpTo(fd, IMPLEMENTATION_LIMITS.reportBytes);

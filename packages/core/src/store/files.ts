@@ -16,6 +16,7 @@ import {
   renameSync,
   writeSync,
 } from "node:fs";
+import { existsContained, lstatContained, openForRead, readdirContained } from "../contained.ts";
 import { join } from "node:path";
 import { loadModel, persistedIdProblem } from "@vcv/ir";
 import type { Model } from "@vcv/ir";
@@ -71,7 +72,7 @@ export type StoreFileRead =
 
 export function lstatOrNull(p: string) {
   try {
-    return lstatSync(p);
+    return lstatContained(p);
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT" || (e as NodeJS.ErrnoException).code === "ENOTDIR") return null;
     throw e;
@@ -91,8 +92,8 @@ function subdirProblem(dir: string, sub: string): string | undefined {
 export function listStoreDir(dir: string, sub: string): string[] {
   const problem = subdirProblem(dir, sub);
   if (problem) throw new StoreError("CORRUPT", problem);
-  if (!existsSync(join(dir, sub))) return [];
-  return readdirSync(join(dir, sub)).sort();
+  if (!existsContained(join(dir, sub))) return [];
+  return readdirContained(join(dir, sub)).sort();
 }
 
 /**
@@ -114,7 +115,7 @@ export function readStoreFile(dir: string, rel: string, max: number): StoreFileR
   if (st.size > max) return { kind: "unsafe", problem: `${rel} is larger than ${max} bytes` };
   let fd: number;
   try {
-    fd = openSync(p, OPEN_READ_NOFOLLOW);
+    fd = openForRead(p, OPEN_READ_NOFOLLOW);
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return { kind: "absent" };

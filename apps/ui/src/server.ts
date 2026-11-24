@@ -13,6 +13,7 @@ import { DraftConflict, DraftMissing, DraftUnreadable } from "./drafts/store.ts"
 import { PreviewFailed } from "./drafts/preview.ts";
 import { BadEdit } from "./edits.ts";
 import { NotFoundError } from "./inspector.ts";
+import { ContainmentUnavailable } from "@vcv/core";
 import { ObservationLimit } from "./observe.ts";
 import { InboxUnavailable, ProposalInbox } from "./proposals.ts";
 import { StateChangedError } from "./session.ts";
@@ -132,6 +133,7 @@ async function handle(
     if (e instanceof NotFoundError) return send(res, e.code === "NOT_READY" ? 409 : 404, err(e.code, e.message));
     if (e instanceof StateChangedError) return send(res, 409, err(e.code, e.message));
     if (e instanceof ObservationLimit) return send(res, 422, err(e.code, e.message));
+    if (e instanceof ContainmentUnavailable) return send(res, 422, err("OBSERVATION_LIMIT", e.message));
     if (e instanceof BadRequest) return send(res, 400, err("INVALID_REQUEST", e.message));
     if (e instanceof BadEdit) return send(res, 400, err(e.code, e.message));
     if (e instanceof InboxUnavailable)
