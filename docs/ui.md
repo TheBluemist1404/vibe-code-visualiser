@@ -218,6 +218,12 @@ The identity is exact or it is refused with `422 OBSERVATION_LIMIT`; nothing is 
   (`O_NOFOLLOW | O_NONBLOCK`). They are re-checked with `fstat` and streamed, and the bytes
   actually read count against the budget. A swap after the `lstat` to a symlink, a FIFO or a
   file that grew past the budget is refused, as is a directory replaced while it was listed.
+- Every read is contained in the checkout. Before and after each open, every folder from the
+  checkout's real root down to the file must still be a plain directory, not a symlink. After
+  the open, the path must still name the very file that was opened (same device and inode). A
+  parent folder swapped for a symlink out of the checkout is refused, even if it is swapped back
+  right after the open. A listing read through a swapped parent can only add names, and each
+  name is then opened the same contained way.
 
 When a reviewer approves in their terminal, the page follows on its next poll: the record turns
 applied, the signature step verifies, and the pending count drops.
@@ -303,7 +309,10 @@ These cases are `422 OBSERVATION_LIMIT`, and the answer is refused, not guessed:
 - a file that turns into a symlink or a special file between the listing and the read.
 
 Like the store walk, these reads open by descriptor (`O_NOFOLLOW | O_NONBLOCK`), check the
-descriptor with `fstat`, and count the bytes actually read against the 32 MB budget.
+descriptor with `fstat`, and count the bytes actually read against the 32 MB budget. They are
+contained the same way too: no parent folder may be a symlink, and the path must still name the
+opened file after the open. A symlinked source file is read at its resolved path inside the
+checkout.
 
 Ignored files that no claim names are outside the model. No evidence view reads them.
 
@@ -384,6 +393,9 @@ The browser is not a trust boundary, and neither is this host for anything beyon
   - A hook between `lstat` and open swaps a store file for a symlink to an outside file, for a
     FIFO, or appends past the budget. Each is refused, and a swapped directory is refused too.
     With a plain path open and no directory re-check, both tests fail.
+  - Hooks around the open swap a parent folder for a symlink to an outside folder, then leave it
+    or swap it back right after the open. Both are refused. Without the checks after the open,
+    the test fails.
 
   With the old size/mtime and skip fallbacks put back, three of these fail.
 - `apps/ui/e2e/proposals.e2e.ts`: the same in Chromium, with the page open while the reviewer

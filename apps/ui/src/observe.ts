@@ -20,7 +20,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, fstatSync, lstatSync, openSync, readdirSync, readlinkSync, realpathSync, statSync } from "node:fs";
-import { join, sep } from "node:path";
+import { join, relative, sep } from "node:path";
 import { OPEN_READ_NOFOLLOW, readChunks } from "@vcv/core";
 import { projectStatus } from "@vcv/repo";
 import { StateChangedError, modelKey } from "./session.ts";
@@ -30,8 +30,15 @@ export const OBSERVE_LIMITS = { files: 5000, bytes: 64 * 1024 * 1024 };
 const ATTEMPTS = 3;
 const CHUNK = 64 * 1024;
 
-/** Test seam: runs after an entry's lstat and before it is opened or listed. */
-export const observeTestHooks: { beforeOpen?: (rel: string) => void } = {};
+/**
+ * Test seams: `beforeOpen` after a store entry's lstat; `atOpen` just before a contained open (after
+ * its ancestor check); `afterOpen` just after it. `atOpen`/`afterOpen` take checkout-relative paths.
+ */
+export const observeTestHooks: {
+  beforeOpen?: (rel: string) => void;
+  atOpen?: (rel: string) => void;
+  afterOpen?: (rel: string) => void;
+} = {};
 
 export type ObserveOptions = {
   ref?: string;
@@ -54,6 +61,60 @@ const SOURCE_MAX_FILES = 2000;
 const SOURCE_MAX_BYTES = 32 * 1024 * 1024;
 const CLAIM_MAX_BYTES = 1024 * 1024;
 
+const errno = (e: unknown) => (e as NodeJS.ErrnoException).code ?? "unreadable";
+
+/**
+ * Every folder from the checkout root down to `rel` (exclusive; inclusive with `self`) is a
+ * plain directory, not a symlink, so a path under it cannot leave the checkout.
+ */
+function assertPlainAncestors(rootReal: string, rel: string, fail: (why: string) => never, self = false): void {
+  const parts = rel.split("/");
+  const upto = self ? parts.length : parts.length - 1;
+  for (let i = 1; i <= upto; i++) {
+    const s = lstatSync(join(rootReal, ...parts.slice(0, i)), { throwIfNoEntry: false });
+    if (!s?.isDirectory())
+      fail(
+        `${parts.slice(0, i).join("/")} is no longer a plain folder inside the checkout; the read cannot be contained`,
+      );
+  }
+}
+
+/**
+ * Open the regular file at `rel` under the checkout's real root by descriptor (never through a
+ * final symlink, never blocking on a FIFO) and prove the bytes it reads are inside the checkout:
+ * after the open, every ancestor is still a plain directory and the path still names the very
+ * file (device and inode) that was opened. A parent folder swapped for a symlink, even if swapped
+ * back, is refused. Null if the file vanished before it was opened. The caller closes the fd.
+ */
+export function openContained(rootReal: string, rel: string, fail: (why: string) => never): number | null {
+  if (rel.startsWith("/") || rel.split("/").includes("..")) fail("the path leaves the checkout");
+  assertPlainAncestors(rootReal, rel, fail);
+  const abs = join(rootReal, rel);
+  let fd: number;
+  try {
+    observeTestHooks.atOpen?.(rel);
+    fd = openSync(abs, OPEN_READ_NOFOLLOW);
+  } catch (e) {
+    if (e instanceof ObservationLimit) throw e;
+    if (errno(e) === "ENOENT") return null;
+    if (errno(e) === "ELOOP") return fail("replaced by a symlink while it was read");
+    return fail(errno(e));
+  }
+  try {
+    const opened = fstatSync(fd);
+    if (!opened.isFile()) fail("replaced by something other than a regular file while it was read");
+    observeTestHooks.afterOpen?.(rel);
+    assertPlainAncestors(rootReal, rel, fail);
+    const here = lstatSync(abs, { throwIfNoEntry: false });
+    if (!here || here.dev !== opened.dev || here.ino !== opened.ino)
+      fail("the file that was opened is not the one at this path inside the checkout");
+    return fd;
+  } catch (e) {
+    closeSync(fd);
+    throw e;
+  }
+}
+
 export function checkoutIdentity(path: string, opts: ObserveOptions = {}): string {
   const st = projectStatus(path);
   const h = createHash("sha256");
@@ -65,19 +126,14 @@ export function checkoutIdentity(path: string, opts: ObserveOptions = {}): strin
       `cannot observe .vcv/${rel} exactly (${why}); nothing is served from a state that cannot be pinned down`,
     );
   };
-  const errno = (e: unknown) => (e as NodeJS.ErrnoException).code ?? "unreadable";
-  /** Hash one regular file by descriptor; false if it vanished before it was opened. */
-  const hashFile = (p: string, r: string): boolean => {
-    let fd: number;
+  const rootReal = realpathSync(st.root);
+  const store = st.storeDir ? relative(st.root, st.storeDir).split(sep).join("/") : "";
+  const at = (r: string) => (r ? `${store}/${r}` : store);
+  /** Hash one regular file by a contained descriptor; false if it vanished before it was opened. */
+  const hashFile = (r: string): boolean => {
+    const fd = openContained(rootReal, at(r), (why) => refuse(r, why));
+    if (fd === null) return false;
     try {
-      fd = openSync(p, OPEN_READ_NOFOLLOW);
-    } catch (e) {
-      if (errno(e) === "ENOENT") return false;
-      if (errno(e) === "ELOOP") return refuse(r, "replaced by a symlink while it was read");
-      return refuse(r, errno(e));
-    }
-    try {
-      if (!fstatSync(fd).isFile()) refuse(r, "replaced by something other than a regular file while it was read");
       const file = createHash("sha256");
       let n = 0;
       readChunks(fd, CHUNK, (chunk) => {
@@ -96,7 +152,11 @@ export function checkoutIdentity(path: string, opts: ObserveOptions = {}): strin
       closeSync(fd);
     }
   };
-  const walk = (dir: string, rel: string, expect?: { dev: number; ino: number }) => {
+  // A listing read through a swapped parent can only add names; each one is then lstat'd and
+  // opened through a contained descriptor, so nothing outside the checkout is ever hashed.
+  const walk = (rel: string, expect?: { dev: number; ino: number }) => {
+    const dir = join(rootReal, at(rel));
+    assertPlainAncestors(rootReal, at(rel), (why) => refuse(rel || ".", why), true);
     let names: string[];
     try {
       names = readdirSync(dir).sort();
@@ -108,6 +168,7 @@ export function checkoutIdentity(path: string, opts: ObserveOptions = {}): strin
       }
       return refuse(rel || ".", errno(e));
     }
+    assertPlainAncestors(rootReal, at(rel), (why) => refuse(rel || ".", why), true);
     if (expect) {
       const again = lstatSync(dir, { throwIfNoEntry: false });
       if (!again?.isDirectory() || again.dev !== expect.dev || again.ino !== expect.ino)
@@ -125,7 +186,7 @@ export function checkoutIdentity(path: string, opts: ObserveOptions = {}): strin
       observeTestHooks.beforeOpen?.(r);
       if (s.isDirectory()) {
         h.update(`\0dir:${r}`);
-        walk(p, r, { dev: s.dev, ino: s.ino });
+        walk(r, { dev: s.dev, ino: s.ino });
         continue;
       }
       files += 1;
@@ -138,16 +199,20 @@ export function checkoutIdentity(path: string, opts: ObserveOptions = {}): strin
         } catch (e) {
           return refuse(r, errno(e) === "EINVAL" ? "replaced by a non-link while it was read" : errno(e));
         }
+        assertPlainAncestors(rootReal, at(r), (why) => refuse(r, why));
+        const again = lstatSync(p, { throwIfNoEntry: false });
+        if (!again?.isSymbolicLink() || again.dev !== s.dev || again.ino !== s.ino)
+          refuse(r, "the link was replaced while it was read");
         bytes += Buffer.byteLength(target);
         if (bytes > OBSERVE_LIMITS.bytes) refuse(r, `more than ${OBSERVE_LIMITS.bytes} bytes`);
         h.update(`\0link:${r}\0${target}`);
         continue;
       }
       if (!s.isFile()) refuse(r, "not a regular file, directory or symlink");
-      if (!hashFile(p, r)) h.update(`\0gone:${r}`);
+      if (!hashFile(r)) h.update(`\0gone:${r}`);
     }
   };
-  if (st.storeDir) walk(st.storeDir, "");
+  if (st.storeDir) walk("");
   if (opts.source) sourceFingerprint(st.root, h);
   if (opts.ref) {
     try {
@@ -233,7 +298,9 @@ function hashPath(
     h.update("directory");
     return;
   }
+  const realRoot = realRootOf(root);
   let target = abs;
+  let inside = rel; // the file to read, relative to the checkout's real root
   if (s.isSymbolicLink()) {
     try {
       h.update(`link:${readlinkSync(abs)}\0`);
@@ -242,11 +309,11 @@ function hashPath(
       h.update("dangling");
       return;
     }
-    const realRoot = realRootOf(root);
     if (target !== realRoot && !target.startsWith(realRoot + sep)) {
       h.update("outside"); // the resolver refuses a symlink that leaves the checkout
       return;
     }
+    inside = relative(realRoot, target).split(sep).join("/");
   }
   observeTestHooks.beforeOpen?.(`source:${rel}`);
   const t = statSync(target, { throwIfNoEntry: false });
@@ -260,7 +327,7 @@ function hashPath(
   }
   if (!t.isFile()) throw new ObservationLimit(`${rel} is a special file; this view does not observe it`);
   const file = createHash("sha256");
-  const found = streamRegular(target, rel, (chunk) => {
+  const found = streamRegular(realRoot, inside, (chunk) => {
     budget.bytes += chunk.length;
     if (budget.bytes > SOURCE_MAX_BYTES)
       throw new ObservationLimit(
@@ -272,24 +339,17 @@ function hashPath(
 }
 
 /**
- * Stream a regular file by descriptor (never through a final symlink, never blocking on a FIFO,
- * re-checked with fstat), so a swap after the caller's stat cannot redirect or block the read.
- * False if it vanished first; ObservationLimit if it turned into something else or cannot be read.
+ * Stream a regular file under the checkout through openContained: never through a symlink (final
+ * or parent), never blocking on a FIFO, and only if the path still names the opened file after
+ * the open. False if it vanished first; ObservationLimit if it changed kind, left the checkout or
+ * cannot be read.
  */
-function streamRegular(abs: string, rel: string, onChunk: (chunk: Buffer) => void): boolean {
-  let fd: number;
+function streamRegular(rootReal: string, rel: string, onChunk: (chunk: Buffer) => void): boolean {
+  const fd = openContained(rootReal, rel, (why) => {
+    throw new ObservationLimit(`cannot observe ${rel} exactly (${why})`);
+  });
+  if (fd === null) return false;
   try {
-    fd = openSync(abs, OPEN_READ_NOFOLLOW);
-  } catch (e) {
-    const code = (e as NodeJS.ErrnoException).code;
-    if (code === "ENOENT") return false;
-    throw new ObservationLimit(
-      code === "ELOOP" ? `${rel} was replaced by a symlink while it was read` : `cannot read ${rel} (${code})`,
-    );
-  }
-  try {
-    if (!fstatSync(fd).isFile())
-      throw new ObservationLimit(`${rel} was replaced by something other than a regular file while it was read`);
     readChunks(fd, CHUNK, (chunk) => {
       onChunk(chunk);
       return true;
@@ -319,7 +379,7 @@ function claimedPaths(root: string): string[] {
       if (!st.isFile() || st.size > CLAIM_MAX_BYTES) continue;
       const chunks: Buffer[] = [];
       let size = 0;
-      streamRegular(join(dir, n), `.vcv/bindings/${n}`, (chunk) => {
+      streamRegular(realRootOf(root), `.vcv/bindings/${n}`, (chunk) => {
         size += chunk.length;
         if (size > CLAIM_MAX_BYTES) throw new ObservationLimit(`.vcv/bindings/${n} grew while it was read`);
         chunks.push(Buffer.from(chunk));
