@@ -155,6 +155,10 @@ your hosting service reports it, and it never guesses one. Optionally add `--pol
 The explorer runs no tests, reasserts no claims and records nothing. See
 [docs/ui.md](docs/ui.md).
 
+The Proposals page needs Linux. It reads the checkout only through folder handles that cannot
+be redirected outside it, and macOS and Windows offer no such reads to Node. On those systems the
+page says the checkout cannot be observed safely. The `vcv` CLI works everywhere.
+
 ### Connect a coding agent
 
 ```sh

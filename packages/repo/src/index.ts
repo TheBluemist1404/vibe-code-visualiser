@@ -10,7 +10,7 @@ export {
   VCV_DIR,
 } from "./project.ts";
 export type { ModelLineChange, ProjectDiagnostic, ProjectRefresh, ProjectState, ProjectStatus } from "./project.ts";
-export { formatLocator, parseLocator } from "./bindings/locator.ts";
+export { formatLocator, parseLocator, resolveInside } from "./bindings/locator.ts";
 export type { PathResolution } from "./bindings/locator.ts";
 export { fileFingerprint, resolveLocator } from "./bindings/resolver.ts";
 export type { Match, Resolution } from "./bindings/resolver.ts";
