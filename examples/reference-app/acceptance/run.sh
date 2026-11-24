@@ -6,10 +6,13 @@
 #
 # Runs as root only to start each context as its OS user (common.sh); it runs no step itself.
 #   owner     walkthrough.ts (the explorer in Chromium) and the owner's Git, as $WS_USER
-#   agent     agent.sh in <work>/agent/course-desk as agent:coder, as $WS_USER
+#   agent     agent.sh in <work>/ws/agent/course-desk as agent:coder, as $WS_USER
 #   host      premerge/ci.sh (identity, the app's own tests, the gate), as $WS_USER
 #   reviewer  reviewer.sh with the fixture key, in its own clone, as $RV_USER (TEST ONLY)
 # $WS_USER cannot open the fixture key; this is checked here, in agent.sh and in every browser phase.
+# Root never opens, writes or removes a file in the workspace (<work>/ws) or the output directory:
+# every such access goes through W (the workspace user). The trust anchor the reviewer signs against
+# was pinned by the reviewer at setup in <work>/reviewer, which the workspace cannot modify.
 #
 # <new-out-dir> must not exist: nothing from an earlier run can stand in for this one. Every step
 # must succeed; the first one that does not stops the run with exit 3 and no summary. A gate verdict
@@ -23,10 +26,9 @@ work=$(cd "${1:?usage: run.sh <work-dir> <new-out-dir>}" && pwd)
 outArg=${2:?usage: run.sh <work-dir> <new-out-dir>}
 [ ! -e "$outArg" ] || die "$outArg exists; give a new output directory"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-[ -s "$work/main.sha" ] || die "run setup.sh first"
+[ -s "$anchor_file" ] || die "run setup.sh first"
 install -d -o "$WS_USER" -g "$WS_USER" -m 0755 "$outArg"
 out=$(cd "$outArg" && pwd)
-base=$(cat "$work/main.sha")
 CHANGE=chg-full-course-notice
 W() { as "$WS_USER" "$@"; }                       # the workspace user
 Wvcv() { W node --experimental-strip-types --no-warnings "$vcv_home/apps/cli/src/main.ts" "$@"; }
@@ -36,18 +38,20 @@ Wgit() {
     GIT_COMMITTER_EMAIL="$GIT_COMMITTER_EMAIL" git "$@"
 }
 R() { as "$RV_USER" "$@"; }                       # the fixture reviewer
-ui() { W node --experimental-strip-types --no-warnings "$here/walkthrough.ts" "$1" "$work" "$out"; }
+ui() { W node --experimental-strip-types --no-warnings "$here/walkthrough.ts" "$1" "$ws" "$out"; }
+base=$(W cat "$ws/main.sha"); upstream=$(W cat "$ws/upstream.sha")
+[ "$base" = "$(R cat "$anchor_file")" ] || die "the workspace's test base differs from the anchor the reviewer pinned"
 gate() { # gate <step> <expected exit 0|1> <expected reason code>
   local step=$1 want=$2 code=$3 rc=0 got
-  [ ! -e "$out/gate/$step" ] || die "$step: $out/gate/$step already exists"
-  W bash "$vcv_home/examples/reference-app/premerge/ci.sh" "$work" "$out/gate/$step" > /dev/null || rc=$?
+  ! W test -e "$out/gate/$step" || die "$step: $out/gate/$step already exists"
+  W bash "$vcv_home/examples/reference-app/premerge/ci.sh" "$ws" "$out/gate/$step" > /dev/null || rc=$?
   case "$rc" in 0 | 1) ;; *) die "$step: the gate did not run to a verdict (exit $rc; see $out/gate/$step)" ;; esac
-  [ -s "$out/gate/$step/exit-code" ] || die "$step: no verdict written (an execution error, not a result)"
-  got=$(cat "$out/gate/$step/exit-code")
+  W test -s "$out/gate/$step/exit-code" || die "$step: no verdict written (an execution error, not a result)"
+  got=$(W cat "$out/gate/$step/exit-code")
   [ "$got" = "$rc" ] || die "$step: the verdict file says $got, the gate exited $rc"
   [ "$got" = "$want" ] || die "$step: gate exit $got, expected $want"
-  grep -q "$code" "$out/gate/$step/gate.txt" || die "$step: gate output lacks $code"
-  echo "  gate $step: exit $got as expected; $(head -1 "$out/gate/$step/gate.txt")"
+  W grep -q "$code" "$out/gate/$step/gate.txt" || die "$step: gate output lacks $code"
+  echo "  gate $step: exit $got as expected; $(W head -1 "$out/gate/$step/gate.txt")"
 }
 owner_sync() { Wgit -C "$repo" fetch -q "$1" "$2" && Wgit -C "$repo" merge -q --ff-only FETCH_HEAD; }
 
@@ -67,7 +71,7 @@ echo "== the fixture key is out of the workspace's reach"
   echo "workspace sudo: refused (exit $code)"
   R test -r "$key_file" || die "the reviewer cannot read its own key"
   echo "reviewer reads the key: yes"
-} | tee "$out/integrity/key-isolation.txt"
+} | W tee "$out/integrity/key-isolation.txt"
 
 echo "== 0. the protected test base passes its own gate"
 gate 0-base 0 "PASS"
@@ -92,22 +96,21 @@ ui inbox
 echo "== 4. reviewer (TEST-ONLY fixture key, its own OS user and clone) approves while the pages are open"
 ui approve &
 browser=$!
-for _ in $(seq 1 240); do [ -e "$out/ui/approve.ready" ] && break; kill -0 "$browser" 2> /dev/null || break; sleep 0.5; done
-[ -e "$out/ui/approve.ready" ] || die "the approve phase did not open its pages"
+for _ in $(seq 1 240); do W test -e "$out/ui/approve.ready" && break; kill -0 "$browser" 2> /dev/null || break; sleep 0.5; done
+W test -e "$out/ui/approve.ready" || die "the approve phase did not open its pages"
 R bash "$here/reviewer.sh" "$work" approve "$CHANGE" "$digest" | W tee "$out/review/approval.txt"
 owner_sync "$reviewer_repo" feature/full-course-notice
 wait "$browser" || die "the approve phase failed"
 R bash "$here/reviewer.sh" "$work" verify | W tee "$out/integrity/test-anchor.txt" > /dev/null
-head -1 "$out/integrity/test-anchor.txt"
+W head -1 "$out/integrity/test-anchor.txt"
 # The same history against the real repository's trust anchor (the owner's key only) must fail, and
 # for the right reason: the fixture key is not trusted there. A fixture signature is not the owner's.
-code=0
-Wvcv integrity "$repo" --trust-commit "$(cat "$work/upstream.sha")" --require-attestation > "$out/integrity/owner-anchor.raw" 2>&1 || code=$?
-scrub < "$out/integrity/owner-anchor.raw" > "$out/integrity/owner-anchor.txt"; rm "$out/integrity/owner-anchor.raw"
+code=0; res=$(Wvcv integrity "$repo" --trust-commit "$upstream" --require-attestation 2>&1) || code=$?
+printf '%s\n' "$res" | scrub | W tee "$out/integrity/owner-anchor.txt" > /dev/null
 [ "$code" = 1 ] || die "integrity against the owner's trust anchor exited $code, expected 1"
-grep -q "APPROVAL_NOT_ATTESTED: rev-5-[0-9a-f]* (change $CHANGE): approval untrusted-key: key [0-9a-f]* is not listed for $FIXTURE_REVIEWER" "$out/integrity/owner-anchor.txt" ||
+W grep -q "APPROVAL_NOT_ATTESTED: rev-5-[0-9a-f]* (change $CHANGE): approval untrusted-key: key [0-9a-f]* is not listed for $FIXTURE_REVIEWER" "$out/integrity/owner-anchor.txt" ||
   die "integrity against the owner's anchor failed, but not with the untrusted fixture key"
-[ "$(grep -c '✗' "$out/integrity/owner-anchor.txt")" = 1 ] || die "integrity against the owner's anchor reports other errors too"
+[ "$(W grep -c '✗' "$out/integrity/owner-anchor.txt")" = 1 ] || die "integrity against the owner's anchor reports other errors too"
 echo "  against the owner's real trust anchor: FAILED, APPROVAL_NOT_ATTESTED untrusted-key for $FIXTURE_REVIEWER (expected)"
 
 echo "== 5. host: the gate on the approved but unimplemented branch (the discrepancy)"
@@ -132,11 +135,11 @@ Wgit -C "$repo" show "$base:.github/vcv-policy.json" | W tee "$out/gate/base-pol
 ui evidence
 
 echo "== 9. owner: empty, invalid and conflicted copies of the checkout (browser)"
-states="$work/states"
+states="$ws/states"
 W rm -rf "$states"; W mkdir -p "$states"
 Wgit init -q "$states/empty"
 Wgit clone -q --branch test-base "$repo" "$states/invalid"
-rev=$(node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).revision)' "$states/invalid/.vcv/HEAD")
+rev=$(W node -e 'console.log(JSON.parse(require("fs").readFileSync(process.argv[1])).revision)' "$states/invalid/.vcv/HEAD")
 W sh -c "printf 'not: [a model\n' > '$states/invalid/.vcv/revisions/$rev.yaml'"
 Wgit clone -q --branch test-base "$repo" "$states/conflicted"
 Wgit -C "$states/conflicted" checkout -q -b competing
@@ -149,9 +152,9 @@ ui states
 {
   echo "M5.7 acceptance walkthrough: all steps ran and every verdict matched its expectation."
   echo "test base: $base (TEST ONLY: adds $FIXTURE_REVIEWER to the owner's trust list; never pushed)"
-  echo "upstream:  $(cat "$work/upstream.sha") (TheBluemist1404/course-desk main, rev-4, approved by user:hoang)"
+  echo "upstream:  $upstream (TheBluemist1404/course-desk main, rev-4, approved by user:hoang)"
   echo "users:     workspace $WS_USER (explorer, agent, gate); reviewer $RV_USER (the only one that can open the key)"
   echo "branch:    feature/full-course-notice"
   Wgit -C "$repo" log --format='  %h %an: %s' "$base"..HEAD
-  for s in 0-base 1-approved 2-implemented-claims-stale 3-implemented; do echo "gate $s: $(head -1 "$out/gate/$s/gate.txt")"; done
+  for s in 0-base 1-approved 2-implemented-claims-stale 3-implemented; do echo "gate $s: $(W head -1 "$out/gate/$s/gate.txt")"; done
 } | W tee "$out/summary.txt"

@@ -1,12 +1,12 @@
 integrity: ok (prj-course-desk at rev-5-6a1f0d8df2df)
-  base:  845d4224dba9c90cef2c26f27360376eab5a536c 845d4224dba9 at rev-4-d704dd46aee2
-  trust: .vcv/reviewers.json at 845d4224dba9c90cef2c26f27360376eab5a536c (845d4224dba9), 2 reviewer(s); commit 845d4224dba9 pinned by the caller: an immutability pin, not proof of origin; that it is the protected branch is caller-asserted and unverified
+  base:  4f3ce58089865354ba91682c89ab3a1154bb5ca9 4f3ce5808986 at rev-4-d704dd46aee2
+  trust: .vcv/reviewers.json at 4f3ce58089865354ba91682c89ab3a1154bb5ca9 (4f3ce5808986), 2 reviewer(s); commit 4f3ce5808986 pinned by the caller: an immutability pin, not proof of origin; that it is the protected branch is caller-asserted and unverified
   authorization: caller-asserted: ok means consistent and attested under the trust anchor given here; it authorizes a change only when that anchor (and --base) is supplied by the host from the hosting service's protected branch, in a check the change under review cannot edit
   1. rev-1: initial; approval not-applicable (initial revision (created by init; provenance not provable))
-  2. rev-2-a21d7aa4915e: verified by chg-baseline; approval attested (signed by user:hoang (key eeb164eea1d2c320), trusted per .vcv/reviewers.json at 845d4224dba9c90cef2c26f27360376eab5a536c (845d4224dba9))
-  3. rev-3-bd922e630c6e: verified by chg-enrollment-criteria; approval attested (signed by user:hoang (key eeb164eea1d2c320), trusted per .vcv/reviewers.json at 845d4224dba9c90cef2c26f27360376eab5a536c (845d4224dba9))
-  4. rev-4-d704dd46aee2: verified by chg-quiet-rejections-2; approval attested (signed by user:hoang (key eeb164eea1d2c320), trusted per .vcv/reviewers.json at 845d4224dba9c90cef2c26f27360376eab5a536c (845d4224dba9))
-  5. rev-5-6a1f0d8df2df (new): verified by chg-full-course-notice; approval attested (signed by user:fixture-reviewer (key 51d0b15f826b2cc9), trusted per .vcv/reviewers.json at 845d4224dba9c90cef2c26f27360376eab5a536c (845d4224dba9))
+  2. rev-2-a21d7aa4915e: verified by chg-baseline; approval attested (signed by user:hoang (key eeb164eea1d2c320), trusted per .vcv/reviewers.json at 4f3ce58089865354ba91682c89ab3a1154bb5ca9 (4f3ce5808986))
+  3. rev-3-bd922e630c6e: verified by chg-enrollment-criteria; approval attested (signed by user:hoang (key eeb164eea1d2c320), trusted per .vcv/reviewers.json at 4f3ce58089865354ba91682c89ab3a1154bb5ca9 (4f3ce5808986))
+  4. rev-4-d704dd46aee2: verified by chg-quiet-rejections-2; approval attested (signed by user:hoang (key eeb164eea1d2c320), trusted per .vcv/reviewers.json at 4f3ce58089865354ba91682c89ab3a1154bb5ca9 (4f3ce5808986))
+  5. rev-5-6a1f0d8df2df (new): verified by chg-full-course-notice; approval attested (signed by user:fixture-reviewer (key 2c6fc1a94b54b6ba), trusted per .vcv/reviewers.json at 4f3ce58089865354ba91682c89ab3a1154bb5ca9 (4f3ce5808986))
   not provable here:
     - An attestation proves that the holder of a trusted reviewer key signed this exact change; it does not prove which person held the key, or that the key was not shared or stolen.
     - Trust is only as strong as its source. A trust list in the checkout under review can be changed by that same change; in CI, read it from the protected base branch (--trust-ref) and protect who may change it there. Git pins the commit the list was read from; it cannot prove that the branch is protected. An unpinned --trust-ref is a local name anyone with a shell in the checkout can create or move: rely on it only where the host provides the ref (a CI checkout), or pin it with --trust-commit.

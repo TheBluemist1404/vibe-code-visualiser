@@ -18,8 +18,8 @@ the same scripts on every pull request and uploads the run, including its screen
 
 | Role | Process and place | Identity | Can | Cannot |
 | ---- | ----------------- | -------- | --- | ------ |
-| Owner | the explorer (`apps/ui`, its own process) on `<work>/course-desk`, driven by [`walkthrough.ts`](../examples/reference-app/acceptance/walkthrough.ts) in Chromium, as OS user `vcv-acc-workspace` | the person at the screen | explore, pin, stage a local draft, export the handoff, read the inbox, evidence and pre-merge pages | submit, approve, write `.vcv/` (the explorer has no route for any of these) |
-| Coding agent | [`agent.sh`](../examples/reference-app/acceptance/agent.sh) in its **own clone**, `<work>/agent/course-desk`, as OS user `vcv-acc-workspace` | `agent:coder`, fixed by `VCV_HOST_PRINCIPAL` (`model:propose`, `binding:record`) | integrate, submit a proposal, change code and tests, reassert claims, record its report | approve (refused, see below); `--as`/`--perm` (refused); read the reviewer key or the explorer's state |
+| Owner | the explorer (`apps/ui`, its own process) on `<work>/ws/course-desk`, driven by [`walkthrough.ts`](../examples/reference-app/acceptance/walkthrough.ts) in Chromium, as OS user `vcv-acc-workspace` | the person at the screen | explore, pin, stage a local draft, export the handoff, read the inbox, evidence and pre-merge pages | submit, approve, write `.vcv/` (the explorer has no route for any of these) |
+| Coding agent | [`agent.sh`](../examples/reference-app/acceptance/agent.sh) in its **own clone**, `<work>/ws/agent/course-desk`, as OS user `vcv-acc-workspace` | `agent:coder`, fixed by `VCV_HOST_PRINCIPAL` (`model:propose`, `binding:record`) | integrate, submit a proposal, change code and tests, reassert claims, record its report | approve (refused, see below); `--as`/`--perm` (refused); read the reviewer key or the explorer's state |
 | Fixture reviewer | [`reviewer.sh`](../examples/reference-app/acceptance/reviewer.sh), as OS user `vcv-acc-reviewer`, in its own clone `<work>/reviewer/course-desk` | `user:fixture-reviewer` (**TEST ONLY**) | open the key; preview, then sign one exact digest against the pinned test base; commit the approval in its clone | run as any other OS user or under an agent identity (it refuses) |
 | Host | [`premerge/ci.sh`](../examples/reference-app/premerge/ci.sh): identity, then the app's own Vitest, then `vcv gate`, as OS user `vcv-acc-workspace` | the trusted CLI | capture the run it started (host-observed) and decide by the base's policy | run the candidate's code next to the verifier |
 
@@ -53,6 +53,15 @@ reproducible in CI. It is not a fresh, independent agent session.
   refuses to continue if it can open the key. The orchestrating scripts run as root only to start
   each context as its user; root is the machine's administrator, so this is a boundary between the
   contexts, not against root.
+- **Root and each user keep to their own directories.** `<work>` itself belongs to root. The
+  workspace owns `<work>/ws` (its checkout, the agent's clone, the explorer's state) and the output
+  directory; the reviewer owns `<work>/reviewer`. Root never opens, writes or removes a file in the
+  workspace's directories: `run.sh` reads and writes them only as `vcv-acc-workspace`.
+- **The reviewer pins its own trust anchor.** During setup, after the workspace has made the test
+  base, the reviewer clones it, checks that `.vcv/reviewers.json` at that commit lists its public key,
+  and writes the commit to `<work>/reviewer/trust-anchor.sha` (read-only, and it refuses to pin
+  twice). Every approval and integrity check it makes uses that file, never the workspace's
+  `ws/main.sha`, which the workspace could rewrite. `run.sh` checks the two agree before any step.
 - **The fixture approval is not the owner's.** The run checks the approved branch against the real
   repository's trust anchor (`5d966ed`) and requires it to fail. It does:
   `APPROVAL_NOT_ATTESTED … approval untrusted-key: key … is not listed for user:fixture-reviewer`.
@@ -85,8 +94,8 @@ count as the trust boundary holding. Screenshots go to `my-run/shots/`, and what
 To look around yourself after a run, start the explorer on the same checkout and state:
 
 ```sh
-sudo -u vcv-acc-workspace env PATH="$PATH" VCV_UI_STATE_DIR=/tmp/acceptance/state npm run ui -- /tmp/acceptance/course-desk \
-  --protected-base test-base --base-commit "$(cat /tmp/acceptance/main.sha)" --policy /tmp/my-run/gate/base-policy.json
+sudo -u vcv-acc-workspace env PATH="$PATH" VCV_UI_STATE_DIR=/tmp/acceptance/ws/state npm run ui -- /tmp/acceptance/ws/course-desk \
+  --protected-base test-base --base-commit "$(cat /tmp/acceptance/ws/main.sha)" --policy /tmp/my-run/gate/base-policy.json
 ```
 
 ## The walkthrough

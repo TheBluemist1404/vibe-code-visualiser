@@ -1,7 +1,9 @@
 // The browser half of the M5.7 acceptance walkthrough (Issue #46): the owner's view of the real
 // Course Desk in the explorer, driven in Chromium against a host started as its own process.
 //
-//   node --experimental-strip-types walkthrough.ts <phase> <work-dir> <out-dir>
+//   node --experimental-strip-types walkthrough.ts <phase> <work-dir>/ws <out-dir>
+//
+// It runs as the workspace OS user (run.sh starts it), in the workspace directory.
 //
 // Phases, in run.sh order:
 //   explore   open the project; ready, branch and revision; Enrollment → Notifications in the
@@ -41,10 +43,11 @@ import type { Browser, Page } from "playwright";
 
 const [phase, workArg, outArg] = process.argv.slice(2);
 if (!phase || !workArg || !outArg) {
-  console.error("usage: walkthrough.ts <phase> <work-dir> <out-dir>");
+  console.error("usage: walkthrough.ts <phase> <work-dir>/ws <out-dir>");
   process.exit(2);
 }
-const work = resolve(workArg);
+const work = resolve(workArg); // the workspace: <work-dir>/ws
+const root = resolve(work, ".."); // <work-dir>, root's
 const out = resolve(outArg);
 const here = import.meta.dirname;
 const vcvHome = resolve(here, "../../..");
@@ -287,7 +290,7 @@ const phases: Record<string, () => Promise<void>> = {
     const { path, draft } = draftFile();
     assert.equal(draft.rationale, RATIONALE, "the rationale was saved to the draft");
     assert.ok(!path.startsWith(repo), "the draft lives outside the checkout");
-    record("draftPath", path.replace(work, "<work>"));
+    record("draftPath", path.replace(root, "<work>"));
     record("draftVersion", draft.version);
     writeFileSync(join(out, "ui", "draft-before-restart.json"), `${JSON.stringify(draft, null, 2)}\n`);
     assert.deepEqual(tree(repo), before, "staging wrote nothing to the checkout");
@@ -509,7 +512,7 @@ const phases: Record<string, () => Promise<void>> = {
  * and for a host process started for the purpose, whose real and effective user IDs are recorded.
  */
 async function keyIsolation() {
-  const keyFile = join(work, "reviewer", "key", "fixture-reviewer.pem");
+  const keyFile = join(root, "reviewer", "key", "fixture-reviewer.pem");
   const probe = (): string => {
     try {
       closeSync(openSync(keyFile, "r"));
@@ -538,7 +541,7 @@ try {
   await run();
   assert.deepEqual(errors, [], "no page errors");
   record("pageErrors", errors);
-  const scrubbed = JSON.stringify(facts, null, 2).replaceAll(repo, "<repo>").replaceAll(work, "<work>");
+  const scrubbed = JSON.stringify(facts, null, 2).replaceAll(repo, "<repo>").replaceAll(root, "<work>");
   writeFileSync(join(out, "ui", `${phase}.json`), `${scrubbed}\n`);
   console.log(`walkthrough ${phase}: ok`);
 } finally {

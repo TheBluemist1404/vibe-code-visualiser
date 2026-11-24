@@ -1,4 +1,4 @@
-reconciliation of prj-course-desk: candidate df6c95c300d3 (feature/full-course-notice) against base 845d4224dba9
+reconciliation of prj-course-desk: candidate 649019692e91 (feature/full-course-notice) against base 4f3ce5808986
   model: extends, rev-4-d704dd46aee2 → rev-5-6a1f0d8df2df; integrity ok; 5 object change(s), 3 impact candidate(s), cross-module yes
     rev-5-6a1f0d8df2df: verified by chg-full-course-notice; approval attested
     modified criterion crt-rejection-notified (name, statement)

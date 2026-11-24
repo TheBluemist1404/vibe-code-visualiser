@@ -1,7 +1,7 @@
 {
   "changeId": "chg-full-course-notice",
-  "baseCommit": "b179b8663339947934ad0aee6c891303178b4ed1",
-  "handoffDigest": "fcca383680f49b274923cc19d3eae8a9a06869438b8ead1515d6bab0b6d66421",
+  "baseCommit": "59f0f95189c8504404cca4fef058b7b1124052b3",
+  "handoffDigest": "75b4ddc7e3b87a7be55b43cb1ddefc0f99d6b7adaba445dea851fff350cf60f8",
   "testsRun": [
     {
       "command": "npm run typecheck && npm test && npm run build && npm run smoke",

@@ -4,17 +4,24 @@
 #   $WS_USER   the workspace: the owner's explorer and Git, the coding agent, the host's gate.
 #              No sudo, no group in common with the reviewer.
 #   $RV_USER   the fixture reviewer: the only user that can open reviewer/key/ (mode 0700).
-# Layout of <work> (mode 0755, owned by $WS_USER):
-#   course-desk/      the owner's checkout of the real Course Desk repository (the UI points here)
-#   agent/            the coding agent's own clone: a distinct working context
-#   state/            the explorer's state (drafts, layout), outside every checkout
-#   reviewer/         owned by $RV_USER: its own clone (course-desk/) and key/ (0700, the key 0600)
-#   main.sha          the protected test base (the commit the gate and the trust anchor are pinned to)
+# Layout of <work> (owned by root, the supervisor; neither user can rename or replace what is in it):
+#   ws/                 $WS_USER's, 0755
+#     course-desk/      the owner's checkout of the real Course Desk repository (the UI points here)
+#     agent/            the coding agent's own clone: a distinct working context
+#     state/            the explorer's state (drafts, layout), outside every checkout
+#     main.sha          the workspace's copy of the test base (the gate's base); checked against the pin
+#   reviewer/           $RV_USER's, 0755
+#     key/              0700, the key 0600: only $RV_USER can open it
+#     trust-anchor.sha  the test base, pinned by the reviewer during setup; the only anchor it signs and
+#                       verifies against
+#     course-desk/      the reviewer's own clone
 here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 vcv_home=$(cd "$here/../../.." && pwd)
-repo="$work/course-desk"
-agent_repo="$work/agent/course-desk"
+ws="$work/ws"
+repo="$ws/course-desk"
+agent_repo="$ws/agent/course-desk"
 keys="$work/reviewer/key"
+anchor_file="$work/reviewer/trust-anchor.sha"
 key_file="$keys/fixture-reviewer.pem"
 reviewer_repo="$work/reviewer/course-desk"
 WS_USER=${VCV_ACCEPTANCE_WS_USER:-vcv-acc-workspace}

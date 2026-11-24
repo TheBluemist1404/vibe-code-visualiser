@@ -1,6 +1,6 @@
 {
   "format": "vcv-ui-draft-1",
-  "draftId": "d-20261124-162651-dce3",
+  "draftId": "d-20261124-163834-52bd",
   "version": 5,
   "checkoutRoot": "<repo>",
   "projectId": "prj-course-desk",
@@ -8,7 +8,7 @@
     "revision": "rev-4-d704dd46aee2",
     "modelKey": "rev-4-d704dd46aee2@360e1e8e8344e030c783f0ad6ea25bd3d472092f2fa7873b3934d1d8cb639cda",
     "branch": "test-base",
-    "commit": "845d4224dba9c90cef2c26f27360376eab5a536c"
+    "commit": "4f3ce58089865354ba91682c89ab3a1154bb5ca9"
   },
   "steps": [
     {
@@ -55,6 +55,6 @@
     }
   ],
   "rationale": "Students turned away from a full course should hear about it (they may pick another course); a repeat request stays quiet because the student already holds the seat.",
-  "createdAt": "2026-11-24T16:26:51.496Z",
-  "updatedAt": "2026-11-24T16:26:58.433Z"
+  "createdAt": "2026-11-24T16:38:34.990Z",
+  "updatedAt": "2026-11-24T16:38:42.322Z"
 }

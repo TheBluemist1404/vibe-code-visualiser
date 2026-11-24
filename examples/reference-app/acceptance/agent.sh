@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The coding agent, in its own clone (<work>/agent/course-desk): a distinct working context with no
+# The coding agent, in its own clone (<work>/ws/agent/course-desk): a distinct working context with no
 # reviewer key and no access to the explorer's state (Issue #46, M5.7).
 #
 #   agent.sh <work-dir> <out-dir> integrate   read the owner's exported handoff and the agent's own
@@ -56,7 +56,7 @@ case "$step" in
     A proposal submit "$agent_repo" "$notes/proposal.json" | scrub | tee "$notes/submit.txt"
     echo "== the agent tries to approve its own proposal"
     code=0
-    A review approve "$agent_repo" "$CHANGE" --digest 0000 --key /dev/null --trust-commit "$(cat "$work/main.sha")" > "$notes/self-approve.txt" 2>&1 || code=$?
+    A review approve "$agent_repo" "$CHANGE" --digest 0000 --key /dev/null --trust-commit "$(cat "$ws/main.sha")" > "$notes/self-approve.txt" 2>&1 || code=$?
     echo "exit $code" >> "$notes/self-approve.txt"
     [ "$code" != 0 ] || { echo "agent.sh: the agent's approval was not refused" >&2; exit 3; }
     echo "refused (exit $code): $(head -1 "$notes/self-approve.txt" | scrub)"
