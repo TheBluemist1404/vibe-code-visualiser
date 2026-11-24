@@ -31,6 +31,7 @@ import {
 import type { ChangeRecord } from "@vcv/core";
 import type { Model } from "@vcv/ir";
 import { readdirSync, lstatSync } from "node:fs";
+import { lstatContained, readdirContained } from "@vcv/core";
 import { join } from "node:path";
 import {
   APPROVALS_DIR,
@@ -476,9 +477,9 @@ function baseEvidence(
 
 function listDir(dir: string): string[] {
   try {
-    const st = lstatSync(dir);
-    if (st.isSymbolicLink() || !st.isDirectory()) return [];
-    return readdirSync(dir).sort();
+    const st = lstatContained(dir);
+    if (!st || st.isSymbolicLink() || !st.isDirectory()) return [];
+    return readdirContained(dir).sort();
   } catch {
     return [];
   }

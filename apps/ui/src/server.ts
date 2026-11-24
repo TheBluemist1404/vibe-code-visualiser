@@ -13,6 +13,9 @@ import { DraftConflict, DraftMissing, DraftUnreadable } from "./drafts/store.ts"
 import { PreviewFailed } from "./drafts/preview.ts";
 import { BadEdit } from "./edits.ts";
 import { NotFoundError } from "./inspector.ts";
+import { ContainmentUnavailable } from "@vcv/core";
+import { ObservationLimit } from "./observe.ts";
+import { InboxUnavailable, ProposalInbox } from "./proposals.ts";
 import { StateChangedError } from "./session.ts";
 import type { ProjectSession } from "./session.ts";
 
@@ -33,14 +36,17 @@ export type HostOptions = {
   port?: number;
   /** Where local drafts are kept: the UI state directory, outside every checkout. Default: the layout store's. */
   stateDir?: string;
+  /** A Git ref naming the protected base (e.g. origin/main): the inbox checks integrity against it. */
+  protectedBase?: string;
 };
 
 export type Host = { server: Server; url: string; close(): Promise<void> };
 
-export async function startHost({ session, webDir, port = 0, stateDir }: HostOptions): Promise<Host> {
+export async function startHost({ session, webDir, port = 0, stateDir, protectedBase }: HostOptions): Promise<Host> {
   const desk = new DraftDesk(session, stateDir ?? session.stateDir);
+  const inbox = new ProposalInbox(session, protectedBase ? { protectedBase } : {});
   const server = createServer((req, res) => {
-    handle(req, res, session, desk, webDir, server).catch((err: unknown) => {
+    handle(req, res, session, desk, inbox, webDir, server).catch((err: unknown) => {
       send(res, 500, { error: { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) } });
     });
   });
@@ -52,7 +58,14 @@ export async function startHost({ session, webDir, port = 0, stateDir }: HostOpt
   return {
     server,
     url: `http://127.0.0.1:${bound}/`,
-    close: () => new Promise((ok) => server.close(() => ok())),
+    // Pages poll over keep-alive connections; server.close() alone waits for every one of them to
+    // go idle and time out. Drop idle ones at once, then any still open after a short grace.
+    close: () =>
+      new Promise((ok) => {
+        server.close(() => ok());
+        server.closeIdleConnections();
+        setTimeout(() => server.closeAllConnections(), 500).unref();
+      }),
   };
 }
 
@@ -66,6 +79,7 @@ async function handle(
   res: ServerResponse,
   session: ProjectSession,
   desk: DraftDesk,
+  inbox: ProposalInbox,
   webDir: string,
   server: Server,
 ) {
@@ -96,14 +110,38 @@ async function handle(
       if (parts[2] === "tidy") return send(res, 200, { positions: session.tidy() });
       return send(res, 400, err("INVALID_REQUEST", "unknown layout request"));
     }
+    if (parts[1] === "proposals") {
+      // Read-only by design (Issue #44): submitting and approving happen through the CLI, and
+      // approval needs a reviewer key this host never holds. There is no write route here.
+      if (method !== "GET")
+        return send(
+          res,
+          405,
+          err(
+            "READ_ONLY",
+            "proposals are read-only here; submit with `vcv proposal submit`, approve with `vcv review approve`",
+          ),
+        );
+      if (parts.length === 2) return send(res, 200, inbox.list());
+      if (parts.length === 3 && parts[2]) return send(res, 200, inbox.review(parts[2]));
+      return send(res, 404, err("NOT_FOUND", `no API route ${method} ${url.pathname}`));
+    }
     const draft = await draftRoute(desk, method, parts, () => readJson(req));
     if (draft) return send(res, draft.status, draft.body);
     return send(res, 404, err("NOT_FOUND", `no API route ${method} ${url.pathname}`));
   } catch (e) {
     if (e instanceof NotFoundError) return send(res, e.code === "NOT_READY" ? 409 : 404, err(e.code, e.message));
     if (e instanceof StateChangedError) return send(res, 409, err(e.code, e.message));
+    if (e instanceof ObservationLimit) return send(res, 422, err(e.code, e.message));
+    if (e instanceof ContainmentUnavailable) return send(res, 422, err("OBSERVATION_LIMIT", e.message));
     if (e instanceof BadRequest) return send(res, 400, err("INVALID_REQUEST", e.message));
     if (e instanceof BadEdit) return send(res, 400, err(e.code, e.message));
+    if (e instanceof InboxUnavailable)
+      return send(
+        res,
+        e.code === "UNKNOWN_CHANGE" ? 404 : e.code === "INVALID_REQUEST" ? 400 : 409,
+        err(e.code, e.message),
+      );
     if (e instanceof DraftMissing) return send(res, 404, err(e.code, e.message));
     if (e instanceof DraftConflict)
       return send(res, 409, { ...err(e.code, e.message), ...(e.current ? { current: e.current } : {}) });

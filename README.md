@@ -50,7 +50,7 @@ draft model edits and hand them to a coding agent.
 | **M2** Repository integration | `.vcv/` in the repo, branch-safe revisions, a reference app, agent-drafted first models, portable model↔code binding claims resolved for TypeScript, source evidence queries | ✅ Done ([#6](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/6)) |
 | **M3** Approved model → code | Agent proposes model changes, a reviewer approves with a signed attestation, a coding agent implements from a bounded handoff, VCV records what was implemented | ✅ Done ([#17](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/17)) |
 | **M4** Code → model reconciliation | Pre-merge reconciliation of a PR against its base, acceptance criteria mapped to tests, per-test runner evidence, a policy gate for CI | ✅ Done ([#22](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/22)) |
-| **M5** Local visual product | Module graph, change review and evidence panels in a local UI | In progress: explorer and drafted edits ([#39](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/39)) |
+| **M5** Local visual product | Module graph, change review and evidence panels in a local UI | In progress: explorer, drafted edits and the proposal inbox ([#39](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/39)) |
 
 M0 to M4 make up the technical MVP; M5 makes it usable without reading code. Everything is
 single-user and local for now. CLI, agent and UI processes writing the same checkout take turns
@@ -129,7 +129,21 @@ The engine checks the draft as you go (errors, warnings, before and after, modul
 --file` accepts, for your coding agent to integrate and submit. The explorer never submits or
 approves anything, and a draft whose model has moved is marked stale rather than moved onto the
 new model. Fields without a typed operation, such as a module's purpose, are read-only with the
-reason. See [docs/ui.md](docs/ui.md).
+reason.
+
+The **Proposals** page lists every proposal recorded in the checkout (pending, stale, rejected,
+applied or unreadable) and, for one of them, the engine's check, the before and after, the
+modules and code it touches, and where it stands as separate facts: submitted, signed by a
+reviewer, attested under the protected base, applied to the model, and implemented (never
+claimed here). A pending proposal shows the exact `vcv review approve` command for its digest:
+approval happens in the reviewer's own terminal with their key, never in the browser. Start the
+explorer with `--protected-base origin/main` to have it check attestations against that ref; it
+labels the result caller-asserted, because CI's `vcv integrity` is the authority. See
+[docs/ui.md](docs/ui.md).
+
+The Proposals page needs Linux. It reads the checkout only through folder handles that cannot
+be redirected outside it, and macOS and Windows offer no such reads to Node. On those systems the
+page says the checkout cannot be observed safely. The `vcv` CLI works everywhere.
 
 ### Connect a coding agent
 

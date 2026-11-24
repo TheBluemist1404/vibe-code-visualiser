@@ -1,8 +1,8 @@
 // Source locators (ADR 0007 §4): parsing, the portable path rules, and resolving a path inside a
 // checkout without following anything out of it. Nothing here interprets code.
-import { lstatSync, readdirSync, realpathSync, statSync } from "node:fs";
+import { realpathSync } from "node:fs";
 import { join, sep } from "node:path";
-import { HTTP_METHODS } from "@vcv/core";
+import { HTTP_METHODS, lstatContained, readdirContained, statContained } from "@vcv/core";
 import type { HttpMethod, Selector, SourceLocator } from "@vcv/core";
 
 /** Directories a locator may never point into: VCV's own store, Git internals, installed packages. */
@@ -54,7 +54,7 @@ export function resolveInside(root: string, rel: string): PathResolution {
     const name = segments[i]!;
     let entries: string[];
     try {
-      entries = readdirSync(dir);
+      entries = readdirContained(dir);
     } catch (e) {
       const at = segments.slice(0, i).join("/") || ".";
       return absence(e)
@@ -73,7 +73,7 @@ export function resolveInside(root: string, rel: string): PathResolution {
         : { ok: false, reason: "missing", message: `${at} does not exist` };
     }
     let next = join(dir, name);
-    if (lstatSync(next).isSymbolicLink()) {
+    if (lstatContained(next)?.isSymbolicLink()) {
       let target: string;
       try {
         target = realpathSync(next);
@@ -93,7 +93,7 @@ export function resolveInside(root: string, rel: string): PathResolution {
     }
     dir = next;
   }
-  if (!statSync(dir).isFile()) return { ok: false, reason: "not-a-file", message: `${rel} is not a regular file` };
+  if (!statContained(dir).isFile()) return { ok: false, reason: "not-a-file", message: `${rel} is not a regular file` };
   return { ok: true, abs: dir };
 }
 

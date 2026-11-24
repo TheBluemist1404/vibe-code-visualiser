@@ -297,8 +297,10 @@ test("bad input is refused: unknown objects, read-only fields, oversized bodies,
   );
   assert.equal((await o.call("/api/drafts/not-a-draft")).status, 404);
   assert.equal((await o.call(`/api/drafts/${d.draftId}/preview`, {})).body.error?.code, "EMPTY_DRAFT");
-  for (const path of ["/api/proposals/submit", `/api/drafts/${d.draftId}/submit`, `/api/drafts/${d.draftId}/approve`])
+  for (const path of [`/api/drafts/${d.draftId}/submit`, `/api/drafts/${d.draftId}/approve`])
     assert.equal((await o.call(path, {})).status, 404, path);
+  // The proposal inbox (M5.4) is read-only: any write there is refused, not routed.
+  assert.equal((await o.call("/api/proposals/submit", {})).status, 405);
 });
 
 test("drafts are refused while the project is not ready, and nothing is written", async () => {

@@ -1,5 +1,7 @@
 // Real checkouts for the UI tests: Git repositories with a .vcv/ store made by the same code
 // the CLI uses (initProject, ModelEngine). Test-only.
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -147,3 +149,55 @@ export function tree(dir: string): Record<string, string> {
   walk(dir);
   return out;
 }
+
+// Proposal lifecycle through the real CLI (M5.4): an agent submits, a reviewer approves with a
+// test-only key. Never a real user key.
+const CLI = join(import.meta.dirname, "../../cli/src/main.ts");
+export const clean = () => {
+  const env = { ...process.env };
+  delete env.VCV_HOST_PRINCIPAL;
+  delete env.VCV_HOST_PERMISSIONS;
+  return env;
+};
+export const agentEnv = () => ({
+  ...clean(),
+  VCV_HOST_PRINCIPAL: "agent:coder",
+  VCV_HOST_PERMISSIONS: "model:propose",
+});
+export const vcv = (env: NodeJS.ProcessEnv, ...args: string[]) =>
+  spawnSync(process.execPath, ["--experimental-strip-types", "--no-warnings", CLI, ...args], { encoding: "utf8", env });
+
+/** Course Desk with a test-only reviewer key trusted on main, then a feature branch (M5.4). */
+export function setup() {
+  const repo = courseDesk();
+  const key = join(tempDir("vcv-ui-keys-"), "reviewer.pem");
+  const init = vcv(clean(), "reviewer", "init", key, "--id", "user:reviewer", "--add", repo);
+  assert.equal(init.status, 0, init.stderr);
+  git(repo, "add", "-A");
+  git(repo, "commit", "-qm", "trust user:reviewer");
+  git(repo, "checkout", "-qb", "feature");
+  return { repo, key, mainSha: git(repo, "rev-parse", "main") };
+}
+
+export function submit(repo: string, changeId: string, operations: unknown[], expectedRevision?: string) {
+  const file = join(tempDir("vcv-ui-change-"), `${changeId}.json`);
+  const rev = expectedRevision ?? projectStatus(repo).model!.revision;
+  writeFileSync(
+    file,
+    JSON.stringify({
+      changeId,
+      projectId: "prj-course-desk",
+      expectedRevision: rev,
+      rationale: `test ${changeId}`,
+      operations,
+    }),
+  );
+  return vcv(agentEnv(), "proposal", "submit", repo, file, "--json");
+}
+export const describeWeb = (text: string) => [{ type: "setDescription", objectId: "mod-web", description: text }];
+export const cliPreview = (repo: string, id: string) =>
+  JSON.parse(vcv(clean(), "proposal", "preview", repo, id, "--json").stdout).data as {
+    proposal: { proposalDigest: string; operations: { summary: string }[] };
+  };
+export const approve = (repo: string, id: string, digest: string, key: string, ...trust: string[]) =>
+  vcv(clean(), "review", "approve", repo, id, "--digest", digest, "--key", key, ...trust);

@@ -2,12 +2,14 @@
 
 `apps/ui` is the local explorer from M5 ([Issue #39](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/39)):
 one canvas of the project's modules beside a structured inspector, where edits can be staged
-into local drafts and handed off to a coding agent ([Issue #41](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/41)).
+into local drafts and handed off to a coding agent ([Issue #41](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/41)),
+and a read-only proposal inbox shows recorded proposals and how a reviewer approves one
+([Issue #44](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/44)).
 This page explains how it is built and what it deliberately does not do. For running it, see
 the [README](../README.md).
 
 ```sh
-npm run ui -- <checkout> [--port N]   # default port 4870, bound to 127.0.0.1 only
+npm run ui -- <checkout> [--port N] [--protected-base <ref>]   # default port 4870, bound to 127.0.0.1 only
 ```
 
 ## Shape
@@ -159,7 +161,99 @@ empty name) comes back as a `SCHEMA` error on that operation; it stays in the dr
 
 The dialog shows both, with Copy and Download and the CLI command to check the file.
 
-## Trust boundary## Trust boundary
+## The proposal inbox
+
+`#/proposals` (the **Proposals** tab, with the pending count) lists what `listProposals` finds in
+`.vcv/changes/`, whoever submitted it, polled every 3 s. Selecting one shows
+`previewProposal` and `checkIntegrity` results and nothing else (`src/proposals.ts`):
+
+- Header: change ID, lifecycle, the full `proposalDigest`, proposer and approver **as recorded**
+  (labelled as not proof), base revision and the model now.
+- **Where it stands**, five facts from five sources, each `done`, `not yet`, `failed` or
+  `unknown`, and none implying another:
+  1. *Submitted*: the record exists (rejected records say they are final).
+  2. *Reviewer signature*: `checkIntegrity` without a trust source. Done means an attestation for
+     this digest verifies and matches the record; whether the key is trusted is not checked.
+     No attestation is a failure, whatever approver the record names.
+  3. *Integrity under protected base*: `checkIntegrity` with `--base <ref>` and the trust list
+     from `<ref>`, only when the host was started with `--protected-base <ref>`. Otherwise
+     **unknown**, never green. When it passes, the step is relabelled *Integrity, checked locally
+     (caller-asserted base)*, and its detail says the ref was named by whoever started the
+     explorer and can be moved locally. It is not the hosting service's verdict; CI's check
+     against the protected branch is the authority.
+  4. *Model applied*: the resulting revision is in this checkout's history. Shown as done only on that positive evidence, taken from the record's own summary in the same read as the preview (`previewProposal`'s `record`), never from the capped list. A record that names no resulting revision, or one this history lacks, is unknown.
+  5. *Implementation*: always unknown here (reconciliation is M4's `vcv reconcile`).
+- The engine's check and delta, as for drafts. An applied change is shown against its base and
+  not rechecked (a recheck would always say `STALE_REVISION`).
+- Binding claims on changed or impacted objects, and what the integrity check cannot establish.
+- **Pending**: "Approve in your own terminal" with `vcv proposal preview` and `vcv review approve
+  … --digest <this digest> --key <your reviewer key file> --trust-commit <protected base commit>`.
+  The key path and the commit are placeholders: the host knows neither, and the commit must come
+  from the hosting service, not from this checkout.
+- **Stale, rejected or unreadable**: "Back to an agent", with what the agent reads. Nothing
+  offers a rebase, a retry or an edit of the recorded proposal.
+
+Each answer (the list, or one review) is composed from one observed state (`src/observe.ts`).
+An identity of the checkout is taken before the first read and after the last, and the reads
+are discarded and retried if the two differ. The identity covers:
+- the model key;
+- the Git commit, branch and dirty state;
+- every byte under `.vcv/` except `cache/`: records, attestations, the trust list, HEAD and
+  revisions;
+- the protected base's resolved commit.
+
+A checkout that keeps moving is `409 STATE_CHANGED`, so a review never shows a pending preview
+next to an applied summary or a signature from another state. The revision ID alone is not
+trusted, because two branches can share it and records change without HEAD moving.
+
+The identity is exact or it is refused with `422 OBSERVATION_LIMIT`; nothing is served then.
+- File contents are hashed in full. Size and mtime never stand in for bytes, since both can be
+  kept while the content changes.
+- A symlink is hashed by its link text.
+- A FIFO, socket or device, or an entry that cannot be read, is refused rather than skipped.
+- Past the budget (5,000 files or 64 MiB under `.vcv/`, outside `cache/`) the store is refused.
+- Files are opened by descriptor, never through a final symlink and never blocking on a FIFO
+  (`O_NOFOLLOW | O_NONBLOCK`). They are re-checked with `fstat` and streamed, and the bytes
+  actually read count against the budget. A swap after the `lstat` to a symlink, a FIFO or a
+  file that grew past the budget is refused, as is a directory replaced while it was listed.
+- Every read is contained during path resolution, not checked afterwards.
+  - The checkout's real root is opened once as a directory descriptor.
+  - Each folder below it is opened relative to its parent's descriptor (`/proc/self/fd/<fd>/<name>`) with `O_NOFOLLOW`, so no part of the path is ever followed through a symlink.
+  - A folder swapped for a symlink fails to open and is refused.
+  - A folder swapped after it was opened is still read through the descriptor that was opened, which is inside the checkout.
+  - Listings, `lstat`, `readlink` and file opens all go through the held descriptors.
+- Where the platform has no descriptor-relative open (no `/proc/self/fd`: macOS, Windows), nothing is observed. The inbox answers `422 OBSERVATION_LIMIT` there rather than fall back to a weaker path-based read.
+
+The answer itself is read under the same boundary, not only the identity. Both identity checks
+and the read between them run inside one contained scope (`withContainedReads` in
+`packages/core/src/contained.ts`):
+- While the scope is active, the repository readers behind the inbox (store files, change
+  records, attestations, the trust list, implementation reports, binding claims and source
+  files) resolve every path under the checkout from the root's descriptor, one folder at a time
+  with `O_NOFOLLOW`, as the identity walk does.
+- A folder on the way that is a symlink when it is reached is a containment violation. The whole
+  answer is then refused with `422 OBSERVATION_LIMIT`, even if a reader caught the error, so no
+  answer is built from a partial read.
+- A symlink inside the checkout that a binding legitimately goes through is still resolved: its
+  target is checked to be inside the checkout, and the read then walks the real path.
+- The scope is rooted at the checkout's real path and also accepts the path the host was given
+  (for a store outside Git opened through a symlink, that alias). A helper read of any path not
+  under either is a violation as well, so nothing falls back to a plain read.
+- Where the scope cannot be enforced, the inbox serves nothing (`422 OBSERVATION_LIMIT`).
+- Outside the host, for example in the CLI, the readers are the plain filesystem calls they were
+  before.
+- Git runs as a subprocess and is not inside the boundary. What the inbox takes from Git (the
+  commit, branch, dirty state and the protected base's commit) is part of the identity, and Git
+  objects are content-addressed.
+
+When a reviewer approves in their terminal, the page follows on its next poll: the record turns
+applied, the signature step verifies, and the pending count drops.
+
+There is no browser submit in this version. Issue #44 allows one only after the writer lock
+(#43) is merged; when it comes, it must go through `submitProposal` (proposal-only, `model:propose`)
+and so through the same lock as the CLI (ADR 0010).
+
+## Trust boundary
 
 The browser is not a trust boundary, and neither is this host for anything beyond reading.
 
@@ -168,11 +262,12 @@ The browser is not a trust boundary, and neither is this host for anything beyon
 - Every write takes a JSON body (a cross-site form cannot send one) and writes only files in
   the UI state directory: the layout file and draft files. Nothing under the checkout, `.vcv/`
   or Git is written; tests compare the checkout byte for byte.
-- There is no submit, apply or approve route. Recording a proposal is the agent's step (`vcv
-  proposal submit`); approval stays the reviewer's `vcv review approve` with their own key
-  ([approvals](approvals.md)).
-- `FileStore`'s fingerprint and HEAD check is not an inter-process lock. Serialized canonical
-  writes are M5.6, and no endpoint that writes the model may be added before them.
+- There is no submit, apply or approve route. `/api/proposals` answers GET only; any other
+  method is `405 READ_ONLY`. Recording a proposal is the agent's step (`vcv proposal submit`);
+  approval stays the reviewer's `vcv review approve` with their own key
+  ([approvals](approvals.md)). The host never reads, receives or stores a private key.
+- Cooperating VCV writers are serialized by the store's writer lock (ADR 0010). A future
+  browser-triggered write must use the `@vcv/repo` functions that take it, never its own mutex.
 
 ## What the canvas shows
 
@@ -207,6 +302,42 @@ The browser is not a trust boundary, and neither is this host for anything beyon
 - `apps/ui/e2e/editing.e2e.ts`: in Chromium, the golden path from inspector edits across two
   modules to the handoff (10), an error and a warning (11), reload, host restart and a second
   tab (12), a stale draft (13), and an unreadable draft file (14).
+- `apps/ui/test/proposals.test.ts`: the inbox over HTTP with the real CLI and a test-only
+  reviewer key: an agent's proposal with the CLI's digest and operations; no write route
+  (`POST`/`PUT`/`DELETE` → 405, no `approve`); stale and rejected proposals with agent hand-offs;
+  a wrong digest refused by the CLI; after the reviewer's approval, applied + signed with
+  integrity unknown, then checked under `main`; an untrusted key never shown as attested.
+  Consistency is tested with a hook between the reads:
+  - an approval landing between them yields a wholly applied review;
+  - records changing on every read, or a branch switch, are `STATE_CHANGED`.
+
+  With the identity check removed, that test fails.
+- `apps/ui/test/observe.test.ts`: the identity itself.
+  - A store file rewritten with the same size and mtime between reads is retried.
+  - Past a lowered budget the read is `OBSERVATION_LIMIT` (422 over HTTP), and nothing is read.
+  - A symlink with a same-length new target changes the identity; a FIFO is refused.
+  - `Host.close()` resolves while a keep-alive client is connected.
+  - A hook between `lstat` and open swaps a store file for a symlink to an outside file, for a
+    FIFO, or appends past the budget. Each is refused, and a swapped directory is refused too.
+    With a plain path open and no directory re-check, both tests fail.
+  - A store folder swapped for a symlink before it is opened is refused.
+  - A parent folder swapped out of the checkout after it was opened is never read through. The outside name is a FIFO, so following it would fail, and the identity equals the clean one.
+  - Without `O_NOFOLLOW` on folder opens, both tests fail.
+  - A platform without descriptor-relative opens gets `OBSERVATION_LIMIT`.
+
+  With the old size/mtime and skip fallbacks put back, three of these fail.
+- `apps/ui/test/contained.test.ts`: the boundary, over HTTP.
+  - `GET /api/proposals/:id` with the records folder swapped for a symlink to an outside copy
+    just before the proposal read opens the record, and put back before the closing identity
+    check: `422 OBSERVATION_LIMIT`, and nothing from the outside copy is in the body. With the
+    scope turned off, the test fails.
+  - The same swap on a store outside Git, opened through a symlinked path, is `422` too. With
+    the alias left out of the scope, the test fails.
+  - Where contained reads are unavailable, `GET /api/proposals` and `GET /api/proposals/:id`
+    answer `422 OBSERVATION_LIMIT`.
+- `apps/ui/e2e/proposals.e2e.ts`: the same in Chromium, with the page open while the reviewer
+  approves in a terminal (20 to 25), keyboard reachability, and a check that no button on the
+  page approves, signs, submits, applies, rejects or rebases.
 - `apps/ui/e2e/explorer.e2e.ts`: the built client in Chromium (Playwright), covering the first
   PR's acceptance tests 1 to 5, plus: no mixed-model inspector across a branch switch, cross-module
   object links, the viewport surviving refreshes, and reduced motion. `npm run test:ui`; set
@@ -216,7 +347,7 @@ The browser is not a trust boundary, and neither is this host for anything beyon
 ## Not yet
 
 Editing purpose, contracts, nested elements and creating or removing objects from the
-inspector; submitting, reviewing and approving proposals (M5.4); serialized canonical writes
-(M5.6); source and test evidence (M5.5); and opening a
+inspector; submitting from the browser (after #43 merges, if at all) and approving in it (never:
+approval stays the reviewer's CLI step); source and test evidence (M5.5); and opening a
 different checkout from the browser. Projects with more than
 1000 modules show the first 1000 and say so.

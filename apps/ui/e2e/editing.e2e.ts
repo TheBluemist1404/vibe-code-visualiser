@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { after, before, test } from "node:test";
+import { after, before, beforeEach, test } from "node:test";
 import { proposedChangeSchema } from "@vcv/core";
 import { previewProposal, projectStatus } from "@vcv/repo";
 import { chromium } from "playwright";
@@ -21,15 +21,26 @@ const WEB = join(import.meta.dirname, "../dist");
 const SHOTS = process.env.VCV_UI_SHOTS;
 let browser: Browser;
 const hosts: Host[] = [];
+const pages: Page[] = [];
 
 before(async () => {
   assert.ok(existsSync(join(WEB, "index.html")), "build the client first: npm run build -w @vcv/ui");
   browser = await chromium.launch();
   if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 });
+// Pages a finished test left open keep polling hosts on this process's event loop and slow every
+// later test; close them before the next one starts.
+beforeEach(async () => {
+  await Promise.allSettled(pages.splice(0).map((p) => p.close()));
+});
+// Pages first (they poll the hosts), then the hosts, even when a test failed.
 after(async () => {
-  await Promise.all(hosts.map((h) => h.close()));
-  await browser?.close();
+  try {
+    await Promise.allSettled(pages.map((p) => p.close()));
+    await browser?.close();
+  } finally {
+    await Promise.all(hosts.map((h) => h.close()));
+  }
 });
 
 async function host(repo: string, stateDir: string) {
@@ -40,6 +51,7 @@ async function host(repo: string, stateDir: string) {
 
 async function tab(h: Host) {
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  pages.push(page);
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(String(e)));
   await page.goto(h.url);

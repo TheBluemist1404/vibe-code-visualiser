@@ -70,6 +70,7 @@ jobs:
   # M5: the local architecture explorer, built and driven in a real browser against real checkouts.
   ui:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

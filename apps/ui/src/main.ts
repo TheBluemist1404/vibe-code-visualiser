@@ -5,11 +5,11 @@ import { defaultStateDir, LayoutFileStore } from "./layout-store.ts";
 import { startHost } from "./server.ts";
 import { ProjectSession } from "./session.ts";
 
-const USAGE = "usage: npm run ui -- <checkout> [--port N]";
+const USAGE = "usage: npm run ui -- <checkout> [--port N] [--protected-base <ref, e.g. origin/main>]";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
-  options: { port: { type: "string" }, help: { type: "boolean", short: "h" } },
+  options: { port: { type: "string" }, "protected-base": { type: "string" }, help: { type: "boolean", short: "h" } },
 });
 if (values.help || positionals.length !== 1) {
   console.log(USAGE);
@@ -23,8 +23,20 @@ if (!Number.isInteger(port) || port < 0 || port > 65535) {
 
 const stateDir = defaultStateDir();
 const session = new ProjectSession(positionals[0] as string, new LayoutFileStore(stateDir));
-const host = await startHost({ session, webDir: join(import.meta.dirname, "../dist"), port, stateDir });
+const protectedBase = values["protected-base"];
+const host = await startHost({
+  session,
+  webDir: join(import.meta.dirname, "../dist"),
+  port,
+  stateDir,
+  ...(protectedBase ? { protectedBase } : {}),
+});
 const { observation } = session.view();
 console.log(`VCV explorer for ${observation.root} (${observation.state})`);
 console.log(`open ${host.url}`);
+console.log(
+  protectedBase
+    ? `proposal integrity is checked against ${protectedBase} (a local ref: caller-asserted; CI is the authority)`
+    : "proposal integrity: unknown here (no --protected-base); CI's vcv integrity is the authority",
+);
 console.log(`canvas positions and local drafts are kept in ${stateDir}, never in the checkout or .vcv/`);
