@@ -89,6 +89,49 @@ test("GET /api/proposals/:id never reads through a records folder swapped for a 
   assert.equal(again.status, 200, "served again once nothing is swapped");
 });
 
+test("a store outside Git opened through a symlinked path is contained the same way: a records folder swapped mid-read is 422", async () => {
+  const { repo } = setup();
+  assert.equal(submit(repo, "chg-web", describeWeb("Pages for students.")).status, 0);
+  // The same initialized store, outside Git, reached through an alias (a symlink to its folder).
+  const real = join(tempDir("vcv-nogit-"), "store");
+  cpSync(repo, real, { recursive: true });
+  rmSync(join(real, ".git"), { recursive: true, force: true });
+  const alias = join(tempDir("vcv-alias-"), "via-link");
+  symlinkSync(real, alias);
+  const call = await host(alias);
+  const clean = await call("/api/proposals/chg-web");
+  assert.equal(clean.status, 200, clean.text);
+
+  const keep = join(real, ".vcv", "changes.keep");
+  const outside = join(tempDir("vcv-outside-"), "changes");
+  cpSync(join(real, ".vcv", "changes"), outside, { recursive: true });
+  let state = "armed" as "armed" | "swapped" | "restored";
+  containedTestHooks.beforeOpen = (abs) => {
+    if (
+      state === "armed" &&
+      abs.endsWith("/.vcv/changes/chg-web.json") &&
+      /previewProposal/.test(new Error().stack ?? "")
+    ) {
+      renameSync(join(real, ".vcv", "changes"), keep);
+      symlinkSync(outside, join(real, ".vcv", "changes"));
+      state = "swapped";
+    }
+  };
+  try {
+    const r = await call("/api/proposals/chg-web");
+    assert.notEqual(state, "armed", "the swap happened");
+    assert.equal(r.status, 422, r.text);
+    assert.equal((JSON.parse(r.text) as { error: { code: string } }).error.code, "OBSERVATION_LIMIT");
+  } finally {
+    containedTestHooks.beforeOpen = undefined;
+    if (state === "swapped") {
+      rmSync(join(real, ".vcv", "changes"));
+      renameSync(keep, join(real, ".vcv", "changes"));
+    }
+  }
+  assert.equal((await call("/api/proposals/chg-web")).status, 200, "served again once nothing is swapped");
+});
+
 test("where reads cannot be contained in the checkout, GET /api/proposals and /api/proposals/:id serve nothing: 422 OBSERVATION_LIMIT", async () => {
   const { repo } = setup();
   assert.equal(submit(repo, "chg-web", describeWeb("Pages.")).status, 0);

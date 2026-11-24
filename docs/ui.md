@@ -239,6 +239,9 @@ and the read between them run inside one contained scope (`withContainedReads` i
   answer is built from a partial read.
 - A symlink inside the checkout that a binding legitimately goes through is still resolved: its
   target is checked to be inside the checkout, and the read then walks the real path.
+- The scope is rooted at the checkout's real path and also accepts the path the host was given
+  (for a store outside Git opened through a symlink, that alias). A helper read of any path not
+  under either is a violation as well, so nothing falls back to a plain read.
 - Where the scope cannot be enforced, the inbox serves nothing (`422 OBSERVATION_LIMIT`).
 - Outside the host, for example in the CLI, the readers are the plain filesystem calls they were
   before.
@@ -431,6 +434,8 @@ The browser is not a trust boundary, and neither is this host for anything beyon
     just before the proposal read opens the record, and put back before the closing identity
     check: `422 OBSERVATION_LIMIT`, and nothing from the outside copy is in the body. With the
     scope turned off, the test fails.
+  - The same swap on a store outside Git, opened through a symlinked path, is `422` too. With
+    the alias left out of the scope, the test fails.
   - Where contained reads are unavailable, `GET /api/proposals` and `GET /api/proposals/:id`
     answer `422 OBSERVATION_LIMIT`.
 - `apps/ui/e2e/proposals.e2e.ts`: the same in Chromium, with the page open while the reviewer
