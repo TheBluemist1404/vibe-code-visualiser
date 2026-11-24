@@ -274,7 +274,8 @@ export function checkoutIdentity(path: string, opts: ObserveOptions = {}): strin
  */
 function contained<T>(path: string, fn: () => T): T {
   try {
-    return withContainedReads(realpathSync(resolveProjectRoot(path).root), fn);
+    const { root } = resolveProjectRoot(path);
+    return withContainedReads(realpathSync(root), fn, [root]);
   } catch (e) {
     if (e instanceof ContainmentUnavailable)
       throw new ObservationLimit(`a read could not be contained in the checkout: ${e.message}`);

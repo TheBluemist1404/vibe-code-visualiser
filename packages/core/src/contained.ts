@@ -25,7 +25,7 @@ export class ContainmentUnavailable extends Error {
   readonly code = "CONTAINMENT_UNAVAILABLE";
 }
 
-type Scope = { root: string; fd: number; violation?: string };
+type Scope = { root: string; aliases: string[]; fd: number; violation?: string };
 let scope: Scope | null = null;
 
 /**
@@ -63,10 +63,12 @@ export function containedReadsAvailable(): boolean {
 
 /**
  * Run `fn` with every helper read under `rootReal` (a real path: no symlink in it) contained in
- * that folder. Throws ContainmentUnavailable when the platform cannot enforce it, or when any read
- * in `fn` met a symlinked folder. Re-entrant for the same root.
+ * that folder. `aliases` are other spellings of the same folder (the path callers were given, before
+ * realpath); paths under them are contained the same way. Throws ContainmentUnavailable when the
+ * platform cannot enforce it, or when any read in `fn` met a symlinked folder. Re-entrant for the
+ * same root.
  */
-export function withContainedReads<T>(rootReal: string, fn: () => T): T {
+export function withContainedReads<T>(rootReal: string, fn: () => T, aliases: string[] = []): T {
   if (scope) {
     if (scope.root === resolve(rootReal)) return fn();
     throw new ContainmentUnavailable("contained reads are already active for another checkout");
@@ -81,7 +83,8 @@ export function withContainedReads<T>(rootReal: string, fn: () => T): T {
   } catch (e) {
     throw new ContainmentUnavailable(`the checkout root cannot be opened (${(e as NodeJS.ErrnoException).code})`);
   }
-  const s: Scope = { root: resolve(rootReal), fd };
+  const root = resolve(rootReal);
+  const s: Scope = { root, aliases: [...new Set(aliases.map((a) => resolve(a)))].filter((a) => a !== root), fd };
   scope = s;
   try {
     const out = fn();
@@ -120,8 +123,10 @@ function parentOf(p: string): { s: Scope; fd: number; owned: boolean; base: stri
   const s = scope;
   if (!s) return null;
   const abs = resolve(p);
-  if (abs !== s.root && !abs.startsWith(s.root + sep)) return null;
-  const rel = relative(s.root, abs);
+  const under = (r: string) => abs === r || abs.startsWith(r + sep);
+  const base = [s.root, ...s.aliases].find(under);
+  if (base === undefined) return null;
+  const rel = relative(base, abs);
   if (rel === "") return { s, fd: s.fd, owned: false, base: ".", rel: "." };
   const parts = rel.split(sep);
   let dir = s.fd;
