@@ -216,12 +216,13 @@ The identity is exact or it is refused with `422 OBSERVATION_LIMIT`; nothing is 
   (`O_NOFOLLOW | O_NONBLOCK`). They are re-checked with `fstat` and streamed, and the bytes
   actually read count against the budget. A swap after the `lstat` to a symlink, a FIFO or a
   file that grew past the budget is refused, as is a directory replaced while it was listed.
-- Every read is contained in the checkout. Before and after each open, every folder from the
-  checkout's real root down to the file must still be a plain directory, not a symlink. After
-  the open, the path must still name the very file that was opened (same device and inode). A
-  parent folder swapped for a symlink out of the checkout is refused, even if it is swapped back
-  right after the open. A listing read through a swapped parent can only add names, and each
-  name is then opened the same contained way.
+- Every read is contained during path resolution, not checked afterwards.
+  - The checkout's real root is opened once as a directory descriptor.
+  - Each folder below it is opened relative to its parent's descriptor (`/proc/self/fd/<fd>/<name>`) with `O_NOFOLLOW`, so no part of the path is ever followed through a symlink.
+  - A folder swapped for a symlink fails to open and is refused.
+  - A folder swapped after it was opened is still read through the descriptor that was opened, which is inside the checkout.
+  - Listings, `lstat`, `readlink` and file opens all go through the held descriptors.
+- Where the platform has no descriptor-relative open (no `/proc/self/fd`: macOS, Windows), nothing is observed. The inbox answers `422 OBSERVATION_LIMIT` there rather than fall back to a weaker path-based read.
 
 When a reviewer approves in their terminal, the page follows on its next poll: the record turns
 applied, the signature step verifies, and the pending count drops.
@@ -297,9 +298,10 @@ The browser is not a trust boundary, and neither is this host for anything beyon
   - A hook between `lstat` and open swaps a store file for a symlink to an outside file, for a
     FIFO, or appends past the budget. Each is refused, and a swapped directory is refused too.
     With a plain path open and no directory re-check, both tests fail.
-  - Hooks around the open swap a parent folder for a symlink to an outside folder, then leave it
-    or swap it back right after the open. Both are refused. Without the checks after the open,
-    the test fails.
+  - A store folder swapped for a symlink before it is opened is refused.
+  - A parent folder swapped out of the checkout after it was opened is never read through. The outside name is a FIFO, so following it would fail, and the identity equals the clean one.
+  - Without `O_NOFOLLOW` on folder opens, both tests fail.
+  - A platform without descriptor-relative opens gets `OBSERVATION_LIMIT`.
 
   With the old size/mtime and skip fallbacks put back, three of these fail.
 - `apps/ui/e2e/proposals.e2e.ts`: the same in Chromium, with the page open while the reviewer

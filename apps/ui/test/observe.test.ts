@@ -5,10 +5,12 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
+  closeSync,
   mkdirSync,
   readFileSync,
   renameSync,
   readdirSync,
+  realpathSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -26,6 +28,7 @@ import {
   checkoutIdentity,
   consistentRead,
   observeTestHooks,
+  openContained,
 } from "../src/observe.ts";
 import { startHost } from "../src/server.ts";
 import { ProjectSession } from "../src/session.ts";
@@ -246,7 +249,7 @@ test("a store file swapped after its lstat for a symlink, a FIFO or a bigger fil
   }
 });
 
-test("a store directory swapped for a symlink while it is listed is refused", () => {
+test("a store folder swapped for a symlink before it is opened is refused, never followed", () => {
   const { repo } = setup();
   const dir = join(repo, ".vcv", "odd-dir");
   mkdirSync(dir);
@@ -259,54 +262,73 @@ test("a store directory swapped for a symlink while it is listed is refused", ()
       renameSync(dir, `${dir}.keep`);
       symlinkSync(elsewhere, dir);
     },
-    () => assert.throws(() => checkoutIdentity(repo), /replaced while it was listed|no longer a plain folder/),
+    () => assert.throws(() => checkoutIdentity(repo), /no longer a plain folder/),
   );
 });
 
-test("a parent folder swapped for a symlink out of the checkout around the open is refused, even when it is swapped back", () => {
+test("a parent folder swapped out of the checkout after it was opened is never read through: the read stays on the folder that was opened", () => {
   const { repo } = setup();
   const dir = join(repo, ".vcv", "odd-dir");
   mkdirSync(dir);
   writeFileSync(join(dir, "a.json"), '{"inside":true}');
+  // Outside, the same name is a FIFO: following the swapped path would be refused (or block), so a
+  // clean result proves the read went through the held descriptor, not the path.
   const elsewhere = tempDir("vcv-outside-");
-  writeFileSync(join(elsewhere, "a.json"), '{"outside":true}');
-  const out = () => {
+  execFileSync("mkfifo", [join(elsewhere, "a.json")]);
+  const clean = checkoutIdentity(repo);
+
+  // Store walk: the folder is held open while its entries are read.
+  onceBeforeOpen(
+    "odd-dir/a.json",
+    () => {
+      renameSync(dir, `${dir}.keep`);
+      symlinkSync(elsewhere, dir);
+    },
+    () => assert.equal(checkoutIdentity(repo), clean, "the inside bytes, read through the opened folder"),
+  );
+  unlinkSync(dir);
+  renameSync(`${dir}.keep`, dir);
+
+  // openContained: parent folders are held while the file is opened.
+  observeTestHooks.atOpen = (r) => {
+    if (r !== ".vcv/odd-dir/a.json") return;
     renameSync(dir, `${dir}.keep`);
     symlinkSync(elsewhere, dir);
   };
-  const back = () => {
-    unlinkSync(dir);
-    renameSync(`${dir}.keep`, dir);
-  };
-  const target = ".vcv/odd-dir/a.json";
-  const run = (hooks: typeof observeTestHooks) => {
-    Object.assign(observeTestHooks, hooks);
+  try {
+    const fd = openContained(realpathSync(repo), ".vcv/odd-dir/a.json", (why) => {
+      throw new ObservationLimit(why);
+    });
+    assert.ok(fd !== null);
     try {
-      return checkoutIdentity(repo);
+      assert.equal(readFileSync(fd, "utf8"), '{"inside":true}');
     } finally {
-      observeTestHooks.atOpen = undefined;
-      observeTestHooks.afterOpen = undefined;
+      closeSync(fd);
     }
-  };
-  const clean = run({});
-
-  // Swapped just before the open and left there: the open goes through it, the re-check refuses.
-  assert.throws(
-    () => run({ atOpen: (r) => r === target && out() }),
-    (e: { code?: string; message?: string }) =>
-      e.code === "OBSERVATION_LIMIT" && /no longer a plain folder/.test(e.message ?? ""),
-  );
-  back();
-
-  // Swapped before the open and back right after it: the opened file is not the one at the path.
+  } finally {
+    observeTestHooks.atOpen = undefined;
+  }
+  // With the swap in place, a fresh contained open refuses the symlinked parent.
   assert.throws(
     () =>
-      run({
-        atOpen: (r) => r === target && out(),
-        afterOpen: (r) => r === target && back(),
+      openContained(realpathSync(repo), ".vcv/odd-dir/a.json", (why) => {
+        throw new ObservationLimit(why);
       }),
-    (e: { code?: string; message?: string }) =>
-      e.code === "OBSERVATION_LIMIT" && /not the one at this path/.test(e.message ?? ""),
+    /no longer a plain folder/,
   );
-  assert.equal(run({}), clean, "the checkout itself is unchanged");
+});
+
+test("without a descriptor-relative open (macOS, Windows) nothing is observed: OBSERVATION_LIMIT, not a weaker path-based read", () => {
+  const { repo } = setup();
+  observeTestHooks.noDescriptorReads = true;
+  try {
+    assert.throws(
+      () => checkoutIdentity(repo),
+      (e: { code?: string; message?: string }) =>
+        e.code === "OBSERVATION_LIMIT" && /cannot be contained/.test(e.message ?? ""),
+    );
+  } finally {
+    observeTestHooks.noDescriptorReads = undefined;
+  }
+  checkoutIdentity(repo);
 });

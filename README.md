@@ -141,6 +141,10 @@ explorer with `--protected-base origin/main` to have it check attestations again
 labels the result caller-asserted, because CI's `vcv integrity` is the authority. See
 [docs/ui.md](docs/ui.md).
 
+The Proposals page needs Linux. It reads the checkout only through folder handles that cannot
+be redirected outside it, and macOS and Windows offer no such reads to Node. On those systems the
+page says the checkout cannot be observed safely. The `vcv` CLI works everywhere.
+
 ### Connect a coding agent
 
 ```sh
