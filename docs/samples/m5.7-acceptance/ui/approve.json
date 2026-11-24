@@ -1,7 +1,7 @@
 {
   "phase": "approve",
   "checkout": "<repo>",
-  "base": "4f3ce58089865354ba91682c89ab3a1154bb5ca9",
+  "base": "0a8c77f2ec88ea6b74f9ebdadd62ec59c6bace71",
   "keyIsolation": {
     "user": "vcv-acc-workspace",
     "uid": 30033,
@@ -10,8 +10,8 @@
   },
   "reviewSteps": [
     "Submitted : yesRecorded in .vcv/changes/ by agent:coder (as written in the record).",
-    "Reviewer signature : yesAn attestation for this digest verifies, signed by key 2c6fc1a94b54b6ba for user:fixture-reviewer. Whether that key is trusted is not checked here.",
-    "Integrity, checked locally (caller-asserted base) : yesChecked on this computer against local branch test-base at 4f3ce5808986: a local ref, not pinned; anyone with a shell here can create or move it; branch protection is asserted by whoever chose this anchor, not verified by Git, a ref named when the explorer was started: signed by user:fixture-reviewer (key 2c6fc1a94b54b6ba), trusted per .vcv/reviewers.json at test-base (4f3ce5808986). That ref is caller-asserted and can be moved by anyone with a shell here, so this is not the hosting service's verdict; CI's check against the protected branch is the authority.",
+    "Reviewer signature : yesAn attestation for this digest verifies, signed by key 1378c849fcd50663 for user:fixture-reviewer. Whether that key is trusted is not checked here.",
+    "Integrity, checked locally (caller-asserted base) : yesChecked on this computer against local branch test-base at 0a8c77f2ec88: a local ref, not pinned; anyone with a shell here can create or move it; branch protection is asserted by whoever chose this anchor, not verified by Git, a ref named when the explorer was started: signed by user:fixture-reviewer (key 1378c849fcd50663), trusted per .vcv/reviewers.json at test-base (0a8c77f2ec88). That ref is caller-asserted and can be moved by anyone with a shell here, so this is not the hosting service's verdict; CI's check against the protected branch is the authority.",
     "Model applied : yesCommitted as rev-5-6a1f0d8df2df in .vcv/HEAD's history.",
     "Implementation : unknownNot verified. Approving intent says nothing about code; see vcv reconcile and the pre-merge gate."
   ],

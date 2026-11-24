@@ -7,18 +7,21 @@
 # Runs as root, because it creates two OS users (common.sh): the workspace user, which runs the
 # explorer, the agent and the gate, and the fixture reviewer, the only user that can open the
 # fixture key. Neither gets sudo. <work-dir> must not exist or be empty, and every directory above it
-# must be traversable by both users (for example under /tmp). Steps:
+# must be traversable by both users (for example under /tmp). Steps, in this order:
 #  1. the users, and <work> (0755, root's) with ws/ (the workspace's) and reviewer/ (the reviewer's);
 #  2. as the reviewer: create the key in reviewer/key (0700, key 0600); only the public entry leaves;
-#  3. as the workspace, in ws/: clone Course Desk (COURSE_DESK_URL, default the public repository) at
-#     COURSE_DESK_COMMIT (default 5d966ed, its main after M4.5: rev-4, approved by the owner);
-#  4. one local commit, `test-base`, ADDS the fixture reviewer's public entry to .vcv/reviewers.json
-#     next to the owner's. It is the protected base of this rehearsal only: the gate, the integrity
-#     checks and the approval are pinned to it. It is never pushed; the real repository's trust
-#     list stays the owner's alone, and a fixture approval fails integrity against it (see run.sh);
-#  5. the coding agent's own clone in ws/agent, and `npm ci` in both (skipped with NO_INSTALL=1);
-#  6. as the reviewer: pin `test-base` in reviewer/trust-anchor.sha, after checking that its trust list
-#     holds the fixture key. Signing and verifying read the anchor only from there.
+#  3. as the reviewer, before the workspace exists: clone Course Desk (COURSE_DESK_URL, default the
+#     public repository) at COURSE_DESK_COMMIT (default 5d966ed, its main after M4.5: rev-4, approved
+#     by the owner) into its own clone, and make the TEST base there: one commit that ADDS the fixture
+#     reviewer's public entry to .vcv/reviewers.json next to the owner's. It checks that the commit's
+#     only parent is that upstream commit and that its only change is that one added entry, then pins
+#     it in reviewer/trust-anchor.sha. It is the protected base of this rehearsal only: the gate, the
+#     integrity checks and the approval are pinned to it. It is never pushed; the real repository's
+#     trust list stays the owner's alone, and a fixture approval fails integrity against it (run.sh);
+#  4. as the workspace, in ws/: clone that pinned commit from the reviewer's clone (no ref of its own
+#     is ever selected as the anchor) and check it is the pinned one; the agent's own clone in ws/agent;
+#  5. as the workspace, only now: `npm ci` in both (dependency lifecycle scripts run after the anchor
+#     is fixed; skipped with NO_INSTALL=1).
 set -euo pipefail
 work=${1:?usage: setup.sh <work-dir>}
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
@@ -37,51 +40,42 @@ if [ "$(id -u)" = 0 ]; then
   done
   echo "== the fixture reviewer (OS user $RV_USER; TEST ONLY)"
   as "$RV_USER" bash "$here/reviewer.sh" "$work" init
-  echo "== the workspace (OS user $WS_USER)"
-  as "$WS_USER" bash "$0" "$work"
-  echo "== the reviewer pins the test base (OS user $RV_USER)"
+  echo "== the reviewer makes and pins the test base (OS user $RV_USER)"
   as "$RV_USER" bash "$here/reviewer.sh" "$work" pin
+  echo "== the workspace (OS user $WS_USER)"
+  as "$WS_USER" bash "$0" "$work" prepare
+  if [ "${NO_INSTALL:-}" != 1 ]; then
+    echo "== install the app in the workspace's checkouts (after the anchor is pinned)"
+    as "$WS_USER" bash "$0" "$work" install
+  fi
   echo "setup: ok"
   exit
 fi
 
 require_user "$WS_USER"
 work=$(cd "$work" && pwd)
+step=${2:?setup.sh <work-dir> prepare|install (as the workspace user)}
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
-export GIT_AUTHOR_DATE="2026-11-24T00:00:00Z" GIT_COMMITTER_DATE="2026-11-24T00:00:00Z"
-url=${COURSE_DESK_URL:-https://github.com/TheBluemist1404/course-desk}
-pin=${COURSE_DESK_COMMIT:-5d966ed599e401cd92a04436245998e1aca6a57b}
 
-echo "== the real Course Desk at $pin"
-git clone -q --no-checkout "$url" "$repo"
-git -C "$repo" checkout -q -B test-base "$pin"
-git -C "$repo" remote rename origin upstream
-git -C "$repo" branch -q -D main 2>/dev/null || true
-vcv project status "$repo" | scrub
-vcv integrity "$repo" --trust-commit "$pin" --require-attestation | head -1
-echo "$pin" > "$ws/upstream.sha"
-
-echo "== the test base: the fixture reviewer's public entry next to the owner's"
-node -e '
-  const fs = require("fs");
-  const [file, entryFile] = process.argv.slice(1);
-  const list = JSON.parse(fs.readFileSync(file, "utf8"));
-  const entry = JSON.parse(fs.readFileSync(entryFile, "utf8"));
-  if (list.reviewers.some((r) => r.id === entry.id)) throw new Error("already listed");
-  list.reviewers.push(entry);
-  fs.writeFileSync(file, JSON.stringify(list, null, 2) + "\n");
-' "$repo/.vcv/reviewers.json" "$work/reviewer/fixture-reviewer.public.json"
-git -C "$repo" add .vcv/reviewers.json
-git -C "$repo" commit -q -m "TEST ONLY: trust the fixture reviewer for the M5.7 rehearsal (never push)"
-git -C "$repo" rev-parse HEAD > "$ws/main.sha"
-echo "test base: $(cat "$ws/main.sha") (trust list: user:hoang, $FIXTURE_REVIEWER)"
-
-echo "== the coding agent's own clone"
-mkdir -p "$ws/agent" "$ws/state"
-git clone -q --branch test-base "$repo" "$agent_repo"
-
-if [ "${NO_INSTALL:-}" != 1 ]; then
-  echo "== install the app in both checkouts (for its own test runner)"
-  for d in "$repo" "$agent_repo"; do (cd "$d" && npm ci --no-audit --no-fund --loglevel=error >/dev/null); done
-fi
-echo "workspace: ok"
+case "$step" in
+  prepare)
+    anchor=$(cat "$anchor_file")
+    echo "== the pinned test base, from the reviewer's clone"
+    git clone -q --branch test-base "$reviewer_repo" "$repo"
+    git -C "$repo" remote remove origin
+    [ "$(git -C "$repo" rev-parse HEAD)" = "$anchor" ] || { echo "setup: test-base is not the pinned $anchor" >&2; exit 1; }
+    echo "$anchor" > "$ws/main.sha"
+    cp "$work/reviewer/upstream.sha" "$ws/upstream.sha"
+    vcv project status "$repo" | scrub
+    echo "test base: $anchor (trust list: user:hoang, $FIXTURE_REVIEWER)"
+    echo "== the coding agent's own clone"
+    mkdir -p "$ws/agent" "$ws/state"
+    git clone -q --branch test-base "$repo" "$agent_repo"
+    echo "workspace: ok"
+    ;;
+  install)
+    for d in "$repo" "$agent_repo"; do (cd "$d" && npm ci --no-audit --no-fund --loglevel=error >/dev/null); done
+    echo "install: ok"
+    ;;
+  *) echo "setup: unknown step $step" >&2; exit 2 ;;
+esac

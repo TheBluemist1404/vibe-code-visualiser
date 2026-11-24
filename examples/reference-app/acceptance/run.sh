@@ -39,7 +39,7 @@ Wgit() {
 }
 R() { as "$RV_USER" "$@"; }                       # the fixture reviewer
 ui() { W node --experimental-strip-types --no-warnings "$here/walkthrough.ts" "$1" "$ws" "$out"; }
-base=$(W cat "$ws/main.sha"); upstream=$(W cat "$ws/upstream.sha")
+base=$(W cat "$ws/main.sha"); upstream=$(R cat "$work/reviewer/upstream.sha")
 [ "$base" = "$(R cat "$anchor_file")" ] || die "the workspace's test base differs from the anchor the reviewer pinned"
 gate() { # gate <step> <expected exit 0|1> <expected reason code>
   local step=$1 want=$2 code=$3 rc=0 got

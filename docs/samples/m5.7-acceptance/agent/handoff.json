@@ -56,7 +56,7 @@
   },
   "approval": {
     "attestation": "valid-signature",
-    "keyFingerprint": "2c6fc1a94b54b6ba",
+    "keyFingerprint": "1378c849fcd50663",
     "trustVerification": "caller-asserted",
     "note": "Signature checked against the record; key trust is decided by the host gate (docs/approvals.md)."
   },
@@ -385,7 +385,7 @@
     "truncated": false
   },
   "git": {
-    "baseCommit": "59f0f95189c8504404cca4fef058b7b1124052b3",
+    "baseCommit": "b9444716450503f2e9d5d6d92cb2d73cb59e4df6",
     "branch": "agent/full-course-notice",
     "dirty": false,
     "worktree": {
@@ -408,5 +408,5 @@
     "The attestation's signature was checked against the change record; whether its key is trusted is decided by the host gate (vcv integrity against the protected base), not here.",
     "Nothing in this handoff is reconciled against the code; that is pre-merge reconciliation (`vcv reconcile`, `vcv gate`)."
   ],
-  "digest": "75b4ddc7e3b87a7be55b43cb1ddefc0f99d6b7adaba445dea851fff350cf60f8"
+  "digest": "6ac32cdaa46e0b8616396f43ab5214782b7b6c8a0f9f01aefb1de853f06a0d75"
 }

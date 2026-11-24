@@ -34,7 +34,7 @@ reproducible in CI. It is not a fresh, independent agent session.
 - **Upstream:** Course Desk `main` at
   [`5d966ed`](https://github.com/TheBluemist1404/course-desk/commit/5d966ed599e401cd92a04436245998e1aca6a57b),
   rev-4, approved by the owner (`user:hoang`). Its `.vcv/reviewers.json` lists only the owner.
-- **Test base:** one local commit, `test-base`, adds the fixture reviewer's public key **next to** the
+- **Test base:** one local commit, `test-base`, made by the fixture reviewer (below), adds the fixture reviewer's public key **next to** the
   owner's. It is the protected base of this rehearsal only. The gate, `vcv integrity`, the reviewer's
   `--trust-commit` and the explorer's `--protected-base`/`--base-commit` are all pinned to it. It is
   never pushed.
@@ -57,11 +57,17 @@ reproducible in CI. It is not a fresh, independent agent session.
   workspace owns `<work>/ws` (its checkout, the agent's clone, the explorer's state) and the output
   directory; the reviewer owns `<work>/reviewer`. Root never opens, writes or removes a file in the
   workspace's directories: `run.sh` reads and writes them only as `vcv-acc-workspace`.
-- **The reviewer pins its own trust anchor.** During setup, after the workspace has made the test
-  base, the reviewer clones it, checks that `.vcv/reviewers.json` at that commit lists its public key,
-  and writes the commit to `<work>/reviewer/trust-anchor.sha` (read-only, and it refuses to pin
-  twice). Every approval and integrity check it makes uses that file, never the workspace's
-  `ws/main.sha`, which the workspace could rewrite. `run.sh` checks the two agree before any step.
+- **The reviewer makes and pins its own trust anchor, before the workspace exists.** In its own
+  clone of Course Desk at the upstream commit, the reviewer commits the test base itself. It then
+  checks that the commit has exactly one parent, the upstream commit; that it changes only
+  `.vcv/reviewers.json`; and that the new list is the upstream list plus its own entry, nothing else.
+  It writes the commit to `<work>/reviewer/trust-anchor.sha` (read-only; it refuses to pin twice).
+  Only then does the workspace clone that commit from the reviewer's clone and check that it is the
+  pinned one. Nothing the workspace owns, no ref and no file, is ever read as the anchor. Course
+  Desk's `npm ci`, whose dependency lifecycle scripts run as the workspace user, runs as a separate
+  setup step after the pin. Every approval and integrity check the reviewer makes uses the pin;
+  `run.sh` checks that the workspace's copy (`ws/main.sha`) agrees with it before any step, and reads
+  the upstream commit for the owner-anchor check from the reviewer's directory too.
 - **The fixture approval is not the owner's.** The run checks the approved branch against the real
   repository's trust anchor (`5d966ed`) and requires it to fail. It does:
   `APPROVAL_NOT_ATTESTED … approval untrusted-key: key … is not listed for user:fixture-reviewer`.
@@ -75,7 +81,7 @@ the work directory (for example `/tmp/...`); `setup.sh` checks.
 
 ```sh
 run() { sudo env PATH="$PATH" PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" "$@"; }
-run examples/reference-app/acceptance/setup.sh /tmp/acceptance              # users, key, clone, test base, npm ci
+run examples/reference-app/acceptance/setup.sh /tmp/acceptance              # users, key, test base and pin, workspace clones, then npm ci
 run examples/reference-app/acceptance/run.sh   /tmp/acceptance /tmp/my-run  # the walkthrough; about 3 minutes
 ```
 
