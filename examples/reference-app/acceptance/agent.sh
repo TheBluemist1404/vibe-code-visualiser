@@ -11,6 +11,7 @@
 #   agent.sh <work-dir> <out-dir> claims      reassert the test mappings and code claims the change
 #                                             moved, record the implementation report, commit, push
 #
+# It runs as the workspace OS user, which cannot open the fixture key (checked at start).
 # The agent's decisions are this repository's recorded work (agent/: own-draft.json,
 # integrate.mjs, implement.mjs, reassert.tsv, report.json), written by the Claude Code session that
 # built M5.7 acting as agent:coder, and replayed here. VCV runs none of it: every VCV call below is
@@ -22,6 +23,12 @@ mkdir -p "${2:?}"
 out=$(cd "$2" && pwd)
 step=${3:?usage: agent.sh <work-dir> <out-dir> integrate|implement|claims}
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+require_user "$WS_USER"
+# The agent's context cannot open the fixture key: the kernel refuses, not a convention.
+if node -e 'require("fs").closeSync(require("fs").openSync(process.argv[1], "r"))' "$key_file" 2> /dev/null; then
+  echo "agent.sh: the agent's context can open the fixture key; refusing to continue" >&2
+  exit 3
+fi
 export GIT_AUTHOR_NAME="agent:coder" GIT_AUTHOR_EMAIL="agent-coder@course-desk.invalid"
 export GIT_AUTHOR_DATE="2026-11-24T12:00:00Z" GIT_COMMITTER_DATE="2026-11-24T12:00:00Z"
 CHANGE=chg-full-course-notice

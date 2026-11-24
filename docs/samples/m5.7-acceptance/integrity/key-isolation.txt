@@ -1,0 +1,6 @@
+workspace: uid=30033(vcv-acc-workspace) gid=30033(vcv-acc-workspace) groups=30033(vcv-acc-workspace)
+reviewer:  uid=30034(vcv-acc-reviewer) gid=30034(vcv-acc-reviewer) groups=30034(vcv-acc-reviewer)
+key dir:   drwx------ vcv-acc-reviewer:vcv-acc-reviewer  key file: -rw------- vcv-acc-reviewer:vcv-acc-reviewer
+workspace reads the key: refused (cat: <work>/reviewer/key/fixture-reviewer.pem: Permission denied)
+workspace sudo: refused (exit 1)
+reviewer reads the key: yes

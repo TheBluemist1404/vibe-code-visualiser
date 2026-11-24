@@ -1,6 +1,6 @@
 # Integration note (agent:coder)
 
-Inputs: the owner's handoff `ui-20261124-160840-22c9-v5` (3 operations, base rev-4-d704dd46aee2) and the agent's own draft `agent-draft-notification-docs` (2 operations, same base, never submitted).
+Inputs: the owner's handoff `ui-20261124-162651-dce3-v5` (3 operations, base rev-4-d704dd46aee2) and the agent's own draft `agent-draft-notification-docs` (2 operations, same base, never submitted).
 Output: one fresh proposal, `chg-full-course-notice`, 7 operations.
 
 | From | Operation | Decision |

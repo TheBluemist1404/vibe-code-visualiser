@@ -1,11 +1,17 @@
 {
   "phase": "states",
   "checkout": "<repo>",
-  "base": "9d37615f7473be495953796944cfefb337d32089",
+  "base": "845d4224dba9c90cef2c26f27360376eab5a536c",
+  "keyIsolation": {
+    "user": "vcv-acc-workspace",
+    "uid": 30033,
+    "hostUids": "30033\t30033\t30033\t30033",
+    "openKey": "EACCES"
+  },
   "states": {
-    "conflicted": "state-conflicted: The model has unresolved merge conflicts<work>/states/conflictedFiles under .vcv/ contain Git conflict markers. VCV does not merge model histories, so nothing is shown until the merge is resolved.CONFLICTEDunresolved Git co",
-    "empty": "state-absent: No VCV project in this checkout<work>/states/emptyThere is no .vcv/ directory here. VCV does not create one on its own.NO_PROJECTno .vcv/ directory in <work>/states/empty; create one explicitly with `vcv pr",
-    "invalid": "state-invalid: The model store cannot be read<work>/states/invalidHEAD or a committed revision is unreadable or inconsistent. Nothing was overwritten or repaired.INVALID_STOREcommitted revision rev-4-d704dd46aee2 is unreadable: Flow seque"
+    "conflicted": "state-conflicted: The model has unresolved merge conflicts<work>/states/conflictedFiles under .vcv/ contain Git conflict markers. VCV does not merge model histories, so nothing is shown until the merge is resolved.CONFLICTEDunresolved Git conflic",
+    "empty": "state-absent: No VCV project in this checkout<work>/states/emptyThere is no .vcv/ directory here. VCV does not create one on its own.NO_PROJECTno .vcv/ directory in <work>/states/empty; create one explicitly with `vcv project init",
+    "invalid": "state-invalid: The model store cannot be read<work>/states/invalidHEAD or a committed revision is unreadable or inconsistent. Nothing was overwritten or repaired.INVALID_STOREcommitted revision rev-4-d704dd46aee2 is unreadable: Flow sequence i"
   },
   "pageErrors": []
 }

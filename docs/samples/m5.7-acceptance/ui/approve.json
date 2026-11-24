@@ -1,11 +1,17 @@
 {
   "phase": "approve",
   "checkout": "<repo>",
-  "base": "9d37615f7473be495953796944cfefb337d32089",
+  "base": "845d4224dba9c90cef2c26f27360376eab5a536c",
+  "keyIsolation": {
+    "user": "vcv-acc-workspace",
+    "uid": 30033,
+    "hostUids": "30033\t30033\t30033\t30033",
+    "openKey": "EACCES"
+  },
   "reviewSteps": [
     "Submitted : yesRecorded in .vcv/changes/ by agent:coder (as written in the record).",
-    "Reviewer signature : yesAn attestation for this digest verifies, signed by key 5a3be563f44cdde8 for user:fixture-reviewer. Whether that key is trusted is not checked here.",
-    "Integrity, checked locally (caller-asserted base) : yesChecked on this computer against local branch test-base at 9d37615f7473: a local ref, not pinned; anyone with a shell here can create or move it; branch protection is asserted by whoever chose this anchor, not verified by Git, a ref named when the explorer was started: signed by user:fixture-reviewer (key 5a3be563f44cdde8), trusted per .vcv/reviewers.json at test-base (9d37615f7473). That ref is caller-asserted and can be moved by anyone with a shell here, so this is not the hosting service's verdict; CI's check against the protected branch is the authority.",
+    "Reviewer signature : yesAn attestation for this digest verifies, signed by key 51d0b15f826b2cc9 for user:fixture-reviewer. Whether that key is trusted is not checked here.",
+    "Integrity, checked locally (caller-asserted base) : yesChecked on this computer against local branch test-base at 845d4224dba9: a local ref, not pinned; anyone with a shell here can create or move it; branch protection is asserted by whoever chose this anchor, not verified by Git, a ref named when the explorer was started: signed by user:fixture-reviewer (key 51d0b15f826b2cc9), trusted per .vcv/reviewers.json at test-base (845d4224dba9). That ref is caller-asserted and can be moved by anyone with a shell here, so this is not the hosting service's verdict; CI's check against the protected branch is the authority.",
     "Model applied : yesCommitted as rev-5-6a1f0d8df2df in .vcv/HEAD's history.",
     "Implementation : unknownNot verified. Approving intent says nothing about code; see vcv reconcile and the pre-merge gate."
   ],

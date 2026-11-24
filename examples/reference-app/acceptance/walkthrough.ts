@@ -24,7 +24,8 @@
 import assert from "node:assert/strict";
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { userInfo } from "node:os";
 import { join, relative, resolve } from "node:path";
 import { chromium } from "playwright";
 import type { Browser, Page } from "playwright";
@@ -357,22 +358,11 @@ const phases: Record<string, () => Promise<void>> = {
     const review = await open(h, `#/proposals/${CHANGE}`);
     await review.getByTestId("review-state").filter({ hasText: "Pending review" }).waitFor();
 
-    // The fixture reviewer, in its own process; the host and the browser never see the key.
-    const approval = execFileSync("bash", [join(here, "reviewer.sh"), work, "approve", CHANGE, digest], {
-      encoding: "utf8",
-      env: Object.fromEntries(Object.entries(process.env).filter(([k]) => !k.startsWith("VCV_HOST_"))),
-    });
-    writeFileSync(join(out, "ui", "approval.txt"), approval.replaceAll(repo, "<repo>").replaceAll(work, "<work>"));
-    git(repo, "add", ".vcv");
-    git(
-      repo,
-      "commit",
-      "-q",
-      "-m",
-      `vcv: approve ${CHANGE} (TEST-ONLY fixture reviewer; digest ${digest.slice(0, 12)})`,
-    );
-
-    await review.getByTestId("review-state").filter({ hasText: "Applied to model" }).waitFor({ timeout: 20_000 });
+    // The pages are open on the pending proposal. run.sh now has the fixture reviewer approve as its
+    // own OS user, in its own clone, and the owner fast-forwards to the approval. This process
+    // (the workspace user) takes no part in it and could not: it cannot open the key.
+    writeFileSync(join(out, "ui", "approve.ready"), `${digest}\n`);
+    await review.getByTestId("review-state").filter({ hasText: "Applied to model" }).waitFor({ timeout: 120_000 });
     record("reviewSteps", await review.getByTestId("review-steps").locator("li").allTextContents());
     assert.equal(await review.getByTestId("reviewer-handoff").count(), 0);
     await shot(review, "10-inbox-applied");
@@ -500,6 +490,30 @@ const phases: Record<string, () => Promise<void>> = {
   },
 };
 
+/**
+ * The explorer's context (this process and the host it starts run as the workspace OS user) cannot
+ * open the fixture key: the kernel refuses with EACCES. Checked before every phase, for this process
+ * and for a host process started for the purpose, whose real and effective user IDs are recorded.
+ */
+async function keyIsolation() {
+  const keyFile = join(work, "reviewer", "key", "fixture-reviewer.pem");
+  const probe = (): string => {
+    try {
+      closeSync(openSync(keyFile, "r"));
+      return "OPENED";
+    } catch (e) {
+      return (e as NodeJS.ErrnoException).code ?? String(e);
+    }
+  };
+  const self = probe();
+  assert.equal(self, "EACCES", `the explorer's context must not open the fixture key (got ${self})`);
+  const h = await startHost(repo);
+  const uid = /^Uid:\s+(.*)$/m.exec(readFileSync(`/proc/${h.proc.pid}/status`, "utf8"))?.[1]?.trim();
+  await stopHost(h);
+  assert.equal(uid?.split(/\s+/)[0], String(process.getuid?.()), "the host runs as this user");
+  record("keyIsolation", { user: userInfo().username, uid: process.getuid?.(), hostUids: uid, openKey: self });
+}
+
 const run = phases[phase];
 if (!run) {
   console.error(`unknown phase ${phase}; one of ${Object.keys(phases).join(", ")}`);
@@ -507,6 +521,7 @@ if (!run) {
 }
 browser = await chromium.launch();
 try {
+  await keyIsolation();
   await run();
   assert.deepEqual(errors, [], "no page errors");
   record("pageErrors", errors);

@@ -1,5 +1,5 @@
 {
-  "changeId": "ui-20261124-160840-22c9-v5",
+  "changeId": "ui-20261124-162651-dce3-v5",
   "projectId": "prj-course-desk",
   "expectedRevision": "rev-4-d704dd46aee2",
   "rationale": "Students turned away from a full course should hear about it (they may pick another course); a repeat request stays quiet because the student already holds the seat.",

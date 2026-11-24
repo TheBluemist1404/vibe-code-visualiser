@@ -1,11 +1,12 @@
 M5.7 acceptance walkthrough: all steps ran and every verdict matched its expectation.
-test base: 9d37615f7473be495953796944cfefb337d32089 (TEST ONLY: adds user:fixture-reviewer to the owner's trust list; never pushed)
+test base: 845d4224dba9c90cef2c26f27360376eab5a536c (TEST ONLY: adds user:fixture-reviewer to the owner's trust list; never pushed)
 upstream:  5d966ed599e401cd92a04436245998e1aca6a57b (TheBluemist1404/course-desk main, rev-4, approved by user:hoang)
+users:     workspace vcv-acc-workspace (explorer, agent, gate); reviewer vcv-acc-reviewer (the only one that can open the key)
 branch:    feature/full-course-notice
-  41f41dc agent:coder: vcv: reassert claims and record the implementation of chg-full-course-notice
-  a82ed52 agent:coder: feat: announce full-course rejections (chg-full-course-notice)
-  cd04278 Course Desk Fixture: vcv: approve chg-full-course-notice (TEST-ONLY fixture reviewer; digest ad613a3d7d4a)
-  cc6e893 agent:coder: vcv: propose chg-full-course-notice (agent:coder; integrates the owner's UI handoff)
+  df6c95c agent:coder: vcv: reassert claims and record the implementation of chg-full-course-notice
+  2ed275b agent:coder: feat: announce full-course rejections (chg-full-course-notice)
+  b179b86 user:fixture-reviewer (TEST ONLY): vcv: approve chg-full-course-notice (TEST-ONLY fixture reviewer; digest ad613a3d7d4a)
+  fdc6e61 agent:coder: vcv: propose chg-full-course-notice (agent:coder; integrates the owner's UI handoff)
 gate 0-base: vcv gate: PASS: passed: 2/2 required criteria passed, host-observed
 gate 1-approved: vcv gate: BLOCK: blocked: 1 blocking reason (crt-rejection-notified)
 gate 2-implemented-claims-stale: vcv gate: BLOCK: blocked: 4 blocking reasons (crt-confirmation-notified, crt-rejection-notified, crt-rejection-notified, …)

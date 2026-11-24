@@ -1,12 +1,12 @@
 {
   "changeId": "chg-full-course-notice",
-  "baseCommit": "cd0427883d719ee78c7fa19838b6641537aac7b2",
-  "handoffDigest": "fc19e2c987dae24119f389c9e5354f33730a028cc1d614d265da8e43f1fbead6",
+  "baseCommit": "b179b8663339947934ad0aee6c891303178b4ed1",
+  "handoffDigest": "fcca383680f49b274923cc19d3eae8a9a06869438b8ead1515d6bab0b6d66421",
   "testsRun": [
     {
       "command": "npm run typecheck && npm test && npm run build && npm run smoke",
       "outcome": "passed",
-      "summary": "Test Files  3 passed (3); Tests  8 passed (8); Test Files  1 passed (1); Tests  3 passed (3); smoke: ok"
+      "summary": "\u001b[2m Test Files \u001b[22m \u001b[1m\u001b[32m3 passed\u001b[39m\u001b[22m\u001b[90m (3)\u001b[39m; \u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m8 passed\u001b[39m\u001b[22m\u001b[90m (8)\u001b[39m; \u001b[2m Test Files \u001b[22m \u001b[1m\u001b[32m1 passed\u001b[39m\u001b[22m\u001b[90m (1)\u001b[39m; \u001b[2m      Tests \u001b[22m \u001b[1m\u001b[32m3 passed\u001b[39m\u001b[22m\u001b[90m (3)\u001b[39m; smoke: ok"
     }
   ],
   "acceptance": [

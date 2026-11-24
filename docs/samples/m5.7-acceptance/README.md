@@ -8,8 +8,11 @@ files, `<repo>` is the owner's checkout, `<agent>` the agent's clone and `<work>
 directory.
 
 **The approval in this run is a TEST-ONLY fixture signature (`user:fixture-reviewer`). It is not
-the owner's approval.** Against the real repository's trust list it fails
-([integrity/owner-anchor.txt](integrity/owner-anchor.txt)).
+the owner's approval.** Against the real repository's trust list it fails with exactly one error,
+`APPROVAL_NOT_ATTESTED … untrusted-key` ([integrity/owner-anchor.txt](integrity/owner-anchor.txt)).
+The key belongs to OS user `vcv-acc-reviewer`. The explorer, the agent and the gate run as
+`vcv-acc-workspace`, and they are refused when they try to open it
+([integrity/key-isolation.txt](integrity/key-isolation.txt), `keyIsolation` in each `ui/*.json`).
 
 ## Result
 
@@ -20,7 +23,7 @@ the owner's approval.** Against the real repository's trust list it fails
 | upstream | `5d966ed` | Course Desk `main`, rev-4, approved by `user:hoang` |
 | test base | `test-base` (local, new each run) | adds the fixture reviewer to the trust list; the gate's base and the trust anchor |
 | 1 | `vcv: propose chg-full-course-notice` | agent:coder, 7 operations, digest `ad613a3d7d4a…` |
-| 2 | `vcv: approve chg-full-course-notice` | fixture reviewer → `rev-5-6a1f0d8df2df` |
+| 2 | `vcv: approve chg-full-course-notice` | fixture reviewer, in its own clone → `rev-5-6a1f0d8df2df`; the owner fast-forwards to it |
 | 3 | `feat: announce full-course rejections` | agent:coder: `enroll()`, unit and e2e tests, README, smoke |
 | 4 | `vcv: reassert claims and record the implementation` | agent:coder: 9 claims, the report |
 
@@ -49,8 +52,8 @@ not from keys, times or commit IDs.
   [source diff](agent/source.diff), [its own checks](agent/agent-checks.txt),
   [reassertions](agent/reassert.txt), [report](agent/report.json),
   [record](agent/implementation-record.txt), [show](agent/implementation-show.txt).
-- **Review**: [the owner's CLI preview](review/preview.txt), [the fixture approval](ui/approval.txt).
-- **Integrity**: [against the test base](integrity/test-anchor.txt) (ok),
+- **Review**: [the owner's CLI preview](review/preview.txt), [the fixture approval](review/approval.txt).
+- **Integrity**: [key isolation](integrity/key-isolation.txt), [against the test base](integrity/test-anchor.txt) (ok),
   [against the owner's real anchor](integrity/owner-anchor.txt) (fails, as required).
 
 ## Screenshots
