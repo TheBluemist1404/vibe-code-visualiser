@@ -21,10 +21,10 @@ if (!Number.isInteger(port) || port < 0 || port > 65535) {
   process.exit(2);
 }
 
-const layouts = new LayoutFileStore(defaultStateDir());
-const session = new ProjectSession(positionals[0] as string, layouts);
-const host = await startHost({ session, webDir: join(import.meta.dirname, "../dist"), port });
+const stateDir = defaultStateDir();
+const session = new ProjectSession(positionals[0] as string, new LayoutFileStore(stateDir));
+const host = await startHost({ session, webDir: join(import.meta.dirname, "../dist"), port, stateDir });
 const { observation } = session.view();
 console.log(`VCV explorer for ${observation.root} (${observation.state})`);
 console.log(`open ${host.url}`);
-console.log(`canvas positions are kept in ${layouts.dir}, never in .vcv/`);
+console.log(`canvas positions and local drafts are kept in ${stateDir}, never in the checkout or .vcv/`);

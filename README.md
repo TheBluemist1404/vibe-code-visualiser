@@ -40,7 +40,8 @@ The IR is approved intent; source code and verification evidence remain distinct
 Early and pre-release. The engine works from the command line and from coding agents over MCP.
 A model lives in a `.vcv/` folder inside your Git repository, is bound to the source code it
 describes, changes only through reviewed proposals, and is checked against every pull request
-before it merges. A first, read-only architecture explorer runs locally in the browser.
+before it merges. An architecture explorer runs locally in the browser, where you can also
+draft model edits and hand them to a coding agent.
 
 | Milestone | What it delivers | Status |
 |---|---|---|
@@ -49,7 +50,7 @@ before it merges. A first, read-only architecture explorer runs locally in the b
 | **M2** Repository integration | `.vcv/` in the repo, branch-safe revisions, a reference app, agent-drafted first models, portable model↔code binding claims resolved for TypeScript, source evidence queries | ✅ Done ([#6](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/6)) |
 | **M3** Approved model → code | Agent proposes model changes, a reviewer approves with a signed attestation, a coding agent implements from a bounded handoff, VCV records what was implemented | ✅ Done ([#17](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/17)) |
 | **M4** Code → model reconciliation | Pre-merge reconciliation of a PR against its base, acceptance criteria mapped to tests, per-test runner evidence, a policy gate for CI | ✅ Done ([#22](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/22)) |
-| **M5** Local visual product | Module graph, change review and evidence panels in a local UI | In progress: read-only explorer ([#39](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/39)) |
+| **M5** Local visual product | Module graph, change review and evidence panels in a local UI | In progress: explorer and drafted edits ([#39](https://github.com/TheBluemist1404/vibe-code-visualiser/issues/39)) |
 
 M0 to M4 make up the technical MVP; M5 makes it usable without reading code. Everything is
 single-user and local for now. The file store assumes one writer at a time.
@@ -116,8 +117,17 @@ drill into any capability, rule, data or criterion. Drag a module to pin it; pos
 on your computer (not in `.vcv/`) and survive restarts and branch switches. The explorer keeps
 watching the checkout: when the model changes on disk it says so, keeps your layout, and places
 new modules in free space. An absent, conflicted or invalid project is reported as it is; the
-explorer never creates, repairs or writes anything in the checkout. It is read-only for now:
-editing, approval and evidence views come in later M5 slices. See [docs/ui.md](docs/ui.md).
+explorer never creates, repairs or rewrites anything in the checkout.
+
+You can also draft edits in the inspector: a module's or object's name and description, a
+rule's or criterion's statement, and a module's dependencies. Each staged edit is a typed
+operation in a local draft, kept on your computer outside the checkout, so it survives restarts.
+The engine checks the draft as you go (errors, warnings, before and after, modules touched).
+**Hand off to agent** gives you the draft as a proposed change file that `vcv proposal preview
+--file` accepts, for your coding agent to integrate and submit. The explorer never submits or
+approves anything, and a draft whose model has moved is marked stale rather than moved onto the
+new model. Fields without a typed operation, such as a module's purpose, are read-only with the
+reason. See [docs/ui.md](docs/ui.md).
 
 ### Connect a coding agent
 

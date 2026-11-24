@@ -7,6 +7,11 @@ import { createServer } from "node:http";
 import type { IncomingMessage, Server, ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { extname, join, normalize, sep } from "node:path";
+import { draftRoute } from "./drafts/routes.ts";
+import { DraftRefused, DraftDesk } from "./drafts/service.ts";
+import { DraftConflict, DraftMissing, DraftUnreadable } from "./drafts/store.ts";
+import { PreviewFailed } from "./drafts/preview.ts";
+import { BadEdit } from "./edits.ts";
 import { NotFoundError } from "./inspector.ts";
 import { StateChangedError } from "./session.ts";
 import type { ProjectSession } from "./session.ts";
@@ -22,13 +27,20 @@ const TYPES: Record<string, string> = {
   ".json": "application/json",
 };
 
-export type HostOptions = { session: ProjectSession; webDir: string; port?: number };
+export type HostOptions = {
+  session: ProjectSession;
+  webDir: string;
+  port?: number;
+  /** Where local drafts are kept: the UI state directory, outside every checkout. Default: the layout store's. */
+  stateDir?: string;
+};
 
 export type Host = { server: Server; url: string; close(): Promise<void> };
 
-export async function startHost({ session, webDir, port = 0 }: HostOptions): Promise<Host> {
+export async function startHost({ session, webDir, port = 0, stateDir }: HostOptions): Promise<Host> {
+  const desk = new DraftDesk(session, stateDir ?? session.stateDir);
   const server = createServer((req, res) => {
-    handle(req, res, session, webDir, server).catch((err: unknown) => {
+    handle(req, res, session, desk, webDir, server).catch((err: unknown) => {
       send(res, 500, { error: { code: "INTERNAL", message: err instanceof Error ? err.message : String(err) } });
     });
   });
@@ -53,6 +65,7 @@ async function handle(
   req: IncomingMessage,
   res: ServerResponse,
   session: ProjectSession,
+  desk: DraftDesk,
   webDir: string,
   server: Server,
 ) {
@@ -83,11 +96,26 @@ async function handle(
       if (parts[2] === "tidy") return send(res, 200, { positions: session.tidy() });
       return send(res, 400, err("INVALID_REQUEST", "unknown layout request"));
     }
+    const draft = await draftRoute(desk, method, parts, () => readJson(req));
+    if (draft) return send(res, draft.status, draft.body);
     return send(res, 404, err("NOT_FOUND", `no API route ${method} ${url.pathname}`));
   } catch (e) {
     if (e instanceof NotFoundError) return send(res, e.code === "NOT_READY" ? 409 : 404, err(e.code, e.message));
     if (e instanceof StateChangedError) return send(res, 409, err(e.code, e.message));
     if (e instanceof BadRequest) return send(res, 400, err("INVALID_REQUEST", e.message));
+    if (e instanceof BadEdit) return send(res, 400, err(e.code, e.message));
+    if (e instanceof DraftMissing) return send(res, 404, err(e.code, e.message));
+    if (e instanceof DraftConflict)
+      return send(res, 409, { ...err(e.code, e.message), ...(e.current ? { current: e.current } : {}) });
+    if (e instanceof DraftUnreadable) return send(res, 422, err(e.code, e.message));
+    if (e instanceof DraftRefused)
+      return send(
+        res,
+        e.code === "INVALID_REQUEST" ? 400 : e.code === "UNKNOWN_STEP" ? 404 : 409,
+        err(e.code, e.message),
+      );
+    if (e instanceof PreviewFailed)
+      return send(res, e.code === "PROJECT_NOT_READY" ? 409 : 422, err(e.code, e.message));
     throw e;
   }
 }
@@ -100,7 +128,7 @@ async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> 
   let raw = "";
   for await (const chunk of req) {
     raw += chunk;
-    if (raw.length > 16_384) throw new BadRequest("request body too large");
+    if (raw.length > 65_536) throw new BadRequest("request body too large");
   }
   try {
     const v = JSON.parse(raw || "{}");

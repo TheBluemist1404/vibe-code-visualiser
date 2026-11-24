@@ -62,6 +62,11 @@ export class ProjectSession {
     this.hooks = hooks;
   }
 
+  /** The UI state directory (outside the checkout) this session keeps its layout in. */
+  get stateDir(): string {
+    return this.layouts.dir;
+  }
+
   /** Observe the checkout and build the canvas view. */
   view(): ProjectView {
     const snap = this.read();
@@ -71,12 +76,12 @@ export class ProjectSession {
   }
 
   module(id: string): ModuleView {
-    const s = this.requireReady();
+    const s = this.ready();
     return moduleView(s.model, s.query, id, s.key);
   }
 
   object(id: string): ObjectView {
-    const s = this.requireReady();
+    const s = this.ready();
     return objectView(s.model, s.query, id, s.key);
   }
 
@@ -108,7 +113,7 @@ export class ProjectSession {
       edges: { from: string; to: string }[],
     ) => Record<string, Position>,
   ): Record<string, Position> {
-    const s = this.requireReady();
+    const s = this.ready();
     const view = this.graph(s.status, s.model, s.query, s.key);
     const ids = view.modules.map((m) => m.id);
     const next = fn(ids, view.positions, view.edges);
@@ -116,7 +121,8 @@ export class ProjectSession {
     return next;
   }
 
-  private requireReady() {
+  /** One consistent snapshot of a ready checkout, or NOT_READY. */
+  ready() {
     const snap = this.read();
     if (!snap.model)
       throw new NotFoundError("NOT_READY", `the project is ${snap.status.state}; nothing can be read from it`);
