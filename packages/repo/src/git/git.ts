@@ -4,7 +4,7 @@
 // Only read commands are run, with GIT_OPTIONAL_LOCKS=0 so `git status` does not refresh and
 // rewrite the index. VCV never fetches, pulls, checks out or merges.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsContained, statContained } from "@vcv/core";
 import { isAbsolute, join, resolve } from "node:path";
 
 export type GitOperation = "merge" | "rebase" | "cherry-pick" | "revert";
@@ -165,7 +165,7 @@ function driverOptions(cwd: string): string[] {
 
 const isDirectory = (p: string) => {
   try {
-    return statSync(p).isDirectory();
+    return statContained(p).isDirectory();
   } catch {
     return false;
   }
@@ -250,7 +250,7 @@ function gitOperation(root: string): GitOperation | null {
   const marker = (name: string) => {
     const p = git(root, ["rev-parse", "--git-path", name])?.trim();
     if (!p) return false;
-    return existsSync(isAbsolute(p) ? p : join(root, p));
+    return existsContained(isAbsolute(p) ? p : join(root, p));
   };
   if (marker("MERGE_HEAD")) return "merge";
   if (marker("rebase-merge") || marker("rebase-apply")) return "rebase";

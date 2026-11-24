@@ -29,7 +29,17 @@ import { join } from "node:path";
 import { z } from "zod";
 import { buildIndex } from "@vcv/ir";
 import type { Id } from "@vcv/ir";
-import { canonicalJson, sha256Hex, digestOf, OPEN_READ_NOFOLLOW, readUpTo } from "@vcv/core";
+import {
+  canonicalJson,
+  sha256Hex,
+  digestOf,
+  lstatContained,
+  OPEN_READ_NOFOLLOW,
+  openForRead,
+  readdirContained,
+  readlinkContained,
+  readUpTo,
+} from "@vcv/core";
 import { criteriaEvidence } from "./criteria.ts";
 import type { CriteriaReport, CriterionEvidence, RunSummary } from "./criteria.ts";
 import { MAX_CLAIM_BYTES } from "../bindings/bindings.ts";
@@ -562,7 +572,7 @@ function storeDigest(dir: string, budget: StoreBudget): string | null {
     if (depth > budget.depth) return false;
     let names: string[];
     try {
-      names = readdirSync(abs).sort();
+      names = readdirContained(abs).sort();
     } catch {
       return false;
     }
@@ -572,10 +582,11 @@ function storeDigest(dir: string, budget: StoreBudget): string | null {
       if (++entries > budget.entries) return false;
       let st;
       try {
-        st = lstatSync(a);
+        st = lstatContained(a);
       } catch {
         return false;
       }
+      if (!st) return false;
       if (st.isDirectory()) {
         h.update(`dir\0${r}\0`);
         if (!walk(a, r, depth + 1)) return false;
@@ -597,7 +608,7 @@ function storeDigest(dir: string, budget: StoreBudget): string | null {
 }
 const safeReadlink = (a: string): string | null => {
   try {
-    return readlinkSync(a);
+    return readlinkContained(a);
   } catch {
     return null;
   }
@@ -789,7 +800,7 @@ function readCandidate(root: string, rel: string): Buffer | null | "unreadable" 
 function boundedRead(abs: string, max: number): Buffer | null {
   let fd: number;
   try {
-    fd = openSync(abs, OPEN_READ_NOFOLLOW);
+    fd = openForRead(abs, OPEN_READ_NOFOLLOW);
   } catch {
     return null;
   }

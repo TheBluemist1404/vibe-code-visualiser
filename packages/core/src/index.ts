@@ -46,3 +46,16 @@ export { branchSafeRevisionId, isChildRevision, parseRevisionId, revisionDigest 
 export type { ParsedRevisionId } from "./revisions.ts";
 export { canonicalJson, digestOf, sha256Hex } from "./digest.ts";
 export { OPEN_READ, OPEN_READ_NOFOLLOW, readChunks, readUpTo } from "./fs.ts";
+export {
+  ContainmentUnavailable,
+  containedReadsAvailable,
+  containedRoot,
+  containedTestHooks,
+  existsContained,
+  lstatContained,
+  openForRead,
+  readdirContained,
+  readlinkContained,
+  statContained,
+  withContainedReads,
+} from "./contained.ts";

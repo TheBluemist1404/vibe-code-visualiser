@@ -36,6 +36,7 @@ import {
   writeFileSync,
   writeSync,
 } from "node:fs";
+import { lstatContained, openForRead } from "@vcv/core";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { z } from "zod";
 import { persistedIdProblem } from "@vcv/ir";
@@ -157,8 +158,11 @@ export class ApprovalError extends Error {
 export function readPlainFile(path: string, max: number, what: string): Buffer {
   let st;
   try {
-    st = lstatSync(path);
+    st = lstatContained(path);
   } catch {
+    st = null;
+  }
+  if (!st) {
     throw new ApprovalError("NOT_FOUND", `${what} ${path} does not exist`);
   }
   if (st.isSymbolicLink() || !st.isFile())
@@ -167,7 +171,7 @@ export function readPlainFile(path: string, max: number, what: string): Buffer {
       `${what} ${path} is ${st.isSymbolicLink() ? "a symlink" : "not a regular file"}; it was not read`,
     );
   if (st.size > max) throw new ApprovalError("UNSAFE_PATH", `${what} ${path} is larger than ${max} bytes`);
-  const fd = openSync(path, OPEN_READ_NOFOLLOW);
+  const fd = openForRead(path, OPEN_READ_NOFOLLOW);
   try {
     if (!fstatSync(fd).isFile()) throw new ApprovalError("UNSAFE_PATH", `${what} ${path} is not a regular file`);
     const read = readUpTo(fd, max);

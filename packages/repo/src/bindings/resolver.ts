@@ -13,7 +13,7 @@ import ts from "typescript";
 import type { HttpMethod, LocatorState, Selector, SourceLocator, SymbolDeclaration } from "@vcv/core";
 import { normalizeRoute, resolveInside, selectorProblem } from "./locator.ts";
 import type { PathResolution } from "./locator.ts";
-import { sha256Hex, OPEN_READ, readUpTo, readChunks } from "@vcv/core";
+import { sha256Hex, OPEN_READ, openForRead, readUpTo, readChunks } from "@vcv/core";
 
 /** Identifies the fingerprint algorithm. A claim fingerprinted by another version is compared as unknown, not as changed. */
 export const RESOLVER_ID = `vcv-ts-subset-1/typescript-${ts.version}`;
@@ -48,7 +48,7 @@ const CHUNK = 1 << 20;
 
 function openRegular(abs: string): number | null {
   try {
-    const fd = openSync(abs, OPEN_READ);
+    const fd = openForRead(abs, OPEN_READ);
     if (fstatSync(fd).isFile()) return fd;
     closeSync(fd);
   } catch {

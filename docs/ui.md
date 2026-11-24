@@ -226,6 +226,26 @@ The identity is exact or it is refused with `422 OBSERVATION_LIMIT`; nothing is 
   - Listings, `lstat`, `readlink` and file opens all go through the held descriptors.
 - Where the platform has no descriptor-relative open (no `/proc/self/fd`: macOS, Windows), nothing is observed. The inbox answers `422 OBSERVATION_LIMIT` there rather than fall back to a weaker path-based read.
 
+The answer itself is read under the same boundary, not only the identity, for the inbox and the
+evidence views alike. Both identity checks
+and the read between them run inside one contained scope (`withContainedReads` in
+`packages/core/src/contained.ts`):
+- While the scope is active, the repository readers behind the inbox (store files, change
+  records, attestations, the trust list, implementation reports, binding claims, source files
+  and the pre-merge worktree walk) resolve every path under the checkout from the root's descriptor, one folder at a time
+  with `O_NOFOLLOW`, as the identity walk does.
+- A folder on the way that is a symlink when it is reached is a containment violation. The whole
+  answer is then refused with `422 OBSERVATION_LIMIT`, even if a reader caught the error, so no
+  answer is built from a partial read.
+- A symlink inside the checkout that a binding legitimately goes through is still resolved: its
+  target is checked to be inside the checkout, and the read then walks the real path.
+- Where the scope cannot be enforced, the inbox serves nothing (`422 OBSERVATION_LIMIT`).
+- Outside the host, for example in the CLI, the readers are the plain filesystem calls they were
+  before.
+- Git runs as a subprocess and is not inside the boundary. What the inbox takes from Git (the
+  commit, branch, dirty state and the protected base's commit) is part of the identity, and Git
+  objects are content-addressed.
+
 When a reviewer approves in their terminal, the page follows on its next poll: the record turns
 applied, the signature step verifies, and the pending count drops.
 
@@ -402,6 +422,17 @@ The browser is not a trust boundary, and neither is this host for anything beyon
   - A platform without descriptor-relative opens gets `OBSERVATION_LIMIT`.
 
   With the old size/mtime and skip fallbacks put back, three of these fail.
+- `apps/ui/test/contained.test.ts`: the boundary, over HTTP.
+  - `GET /api/evidence/objects/:id`: a claim through an in-checkout symlinked folder still
+    resolves. The source folder swapped for a symlink to an outside copy just before the evidence
+    read opens the file, and put back before the closing identity check, is `422
+    OBSERVATION_LIMIT`. With the scope turned off, the read goes through the swap.
+  - `GET /api/proposals/:id` with the records folder swapped for a symlink to an outside copy
+    just before the proposal read opens the record, and put back before the closing identity
+    check: `422 OBSERVATION_LIMIT`, and nothing from the outside copy is in the body. With the
+    scope turned off, the test fails.
+  - Where contained reads are unavailable, `GET /api/proposals` and `GET /api/proposals/:id`
+    answer `422 OBSERVATION_LIMIT`.
 - `apps/ui/e2e/proposals.e2e.ts`: the same in Chromium, with the page open while the reviewer
   approves in a terminal (20 to 25), keyboard reachability, and a check that no button on the
   page approves, signs, submits, applies, rejects or rebases.

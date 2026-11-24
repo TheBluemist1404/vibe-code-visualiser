@@ -13,6 +13,7 @@
 // digest, or null for "there is none"), so a claim read on one branch can never overwrite a
 // different same-ID claim after `git checkout`.
 import { closeSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, rmSync } from "node:fs";
+import { lstatContained, openForRead, readdirContained } from "@vcv/core";
 import { join } from "node:path";
 import { z } from "zod";
 import { buildIndex, loadModel, persistedIdProblem } from "@vcv/ir";
@@ -223,7 +224,7 @@ type ClaimFile =
 
 function lstatOrNull(p: string) {
   try {
-    return lstatSync(p);
+    return lstatContained(p);
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw e;
@@ -274,7 +275,7 @@ function readClaimFile(root: string, id: string): ClaimFile {
   if (st.size > MAX_CLAIM_BYTES) return unsafeFile(id, "oversize", `is larger than ${MAX_CLAIM_BYTES} bytes`);
   let fd: number;
   try {
-    fd = openSync(p, OPEN_READ_NOFOLLOW);
+    fd = openForRead(p, OPEN_READ_NOFOLLOW);
   } catch (e) {
     const code = (e as NodeJS.ErrnoException).code;
     if (code === "ENOENT") return { kind: "absent" };
@@ -317,7 +318,7 @@ export function readBinding(path: string, bindingId: string): ClaimEntry | null 
 export function listBindings(path: string): ClaimEntry[] {
   const { root } = resolveProjectRoot(path);
   if (!checkBindingsDir(root)) return [];
-  return readdirSync(bindingsDir(root))
+  return readdirContained(bindingsDir(root))
     .filter((f) => f.endsWith(".json") && !f.includes(".tmp-"))
     .sort()
     .map((f) => {

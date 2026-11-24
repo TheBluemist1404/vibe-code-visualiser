@@ -1,6 +1,6 @@
 // Git-aware, read-only inspection of a store directory (ADR 0007): conflict markers, revisions
 // HEAD does not list, change records, and fingerprints of what was read.
-import { existsSync } from "node:fs";
+import { existsContained } from "../contained.ts";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { loadModel, persistedIdProblem } from "@vcv/ir";
@@ -70,7 +70,7 @@ export function unlistedRevisions(
   head: { revision: string; history: readonly string[] },
 ): UnlistedRevision[] {
   const committed = new Set(head.history);
-  if (!existsSync(join(dir, "revisions"))) return [];
+  if (!existsContained(join(dir, "revisions"))) return [];
   const seq = head.history.length + 1;
   const applied = appliedRevisions(dir);
   const found: UnlistedRevision[] = [];
@@ -233,8 +233,8 @@ export type StoreInspection =
  * Used by project loading to decide whether a checkout's model can be served, and why not.
  */
 export function inspectStore(dir: string): StoreInspection {
-  if (!existsSync(dir)) return { state: "absent", dir };
-  if (!existsSync(join(dir, "HEAD"))) return { state: "uninitialized", dir };
+  if (!existsContained(dir)) return { state: "absent", dir };
+  if (!existsContained(join(dir, "HEAD"))) return { state: "uninitialized", dir };
   const files = conflictedFiles(dir);
   if (files.length) return { state: "conflicted", dir, files };
   let head: Head;

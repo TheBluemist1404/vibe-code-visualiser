@@ -25,8 +25,8 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { closeSync, constants, fstatSync, lstatSync, openSync, readdirSync, readlinkSync, realpathSync } from "node:fs";
 import { join, relative, sep } from "node:path";
-import { OPEN_READ_NOFOLLOW, readChunks } from "@vcv/core";
-import { projectStatus, resolveInside } from "@vcv/repo";
+import { ContainmentUnavailable, OPEN_READ_NOFOLLOW, readChunks, withContainedReads } from "@vcv/core";
+import { projectStatus, resolveInside, resolveProjectRoot } from "@vcv/repo";
 import { StateChangedError, modelKey } from "./session.ts";
 
 /** Budget for hashing .vcv/. Mutable for tests only. Past it, nothing is served (no size/mtime stand-in). */
@@ -433,14 +433,35 @@ function claimedPaths(rootReal: string): string[] {
 }
 
 /**
+ * Run `fn` with every repository read under the checkout resolved from a descriptor held on its
+ * root (@vcv/core withContainedReads): no folder on the way is followed through a symlink, so a
+ * swap while an answer is composed cannot make it read outside the checkout. Where that cannot be
+ * enforced, or a read met a swapped folder, nothing is served: OBSERVATION_LIMIT.
+ */
+function contained<T>(path: string, fn: () => T): T {
+  try {
+    const { root } = resolveProjectRoot(path);
+    return withContainedReads(realpathSync(root), fn, [root]);
+  } catch (e) {
+    if (e instanceof ContainmentUnavailable)
+      throw new ObservationLimit(`a read could not be contained in the checkout: ${e.message}`);
+    throw e;
+  }
+}
+
+/**
  * Run `read` between two identity observations and return its answer only if they match;
- * retry a few times, then STATE_CHANGED. `read` must not write.
+ * retry a few times, then STATE_CHANGED. `read` must not write. Both observations and the read
+ * run in one contained scope, so none of them reads through a folder swapped out of the checkout.
  */
 export function consistentRead<T>(path: string, read: () => T, opts: ObserveOptions = {}): T {
   for (let i = 0; i < ATTEMPTS; i++) {
-    const before = checkoutIdentity(path, opts);
-    const out = read();
-    if (checkoutIdentity(path, opts) === before) return out;
+    const answer = contained(path, () => {
+      const before = checkoutIdentity(path, opts);
+      const out = read();
+      return checkoutIdentity(path, opts) === before ? { out } : null;
+    });
+    if (answer) return answer.out;
   }
   throw new StateChangedError(
     "the checkout kept changing while this was read (model, Git, proposal records or attestations); nothing was combined from two states. Try again.",

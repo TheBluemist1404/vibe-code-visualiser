@@ -30,6 +30,7 @@ import {
   renameSync,
   rmSync,
 } from "node:fs";
+import { existsContained } from "../contained.ts";
 import { join } from "node:path";
 import { dumpModel, persistedIdProblem } from "@vcv/ir";
 import type { Model } from "@vcv/ir";
@@ -98,7 +99,7 @@ export class FileStore implements ModelStore {
   constructor(dir: string, opts: FileStoreOptions = {}) {
     this.dir = dir;
     this.opts = opts;
-    if (!existsSync(join(dir, "HEAD")))
+    if (!existsContained(join(dir, "HEAD")))
       throw new StoreError("NOT_INITIALIZED", `${dir} is not an initialized model store (run init first)`);
     // Recovery moves and rewrites files, so it runs as a writer: never while another process is
     // between the steps of a commit (its new revision file would look like a leftover).
@@ -131,7 +132,7 @@ export class FileStore implements ModelStore {
     withStoreLock(
       dir,
       () => {
-        if (existsSync(join(dir, "HEAD")))
+        if (existsContained(join(dir, "HEAD")))
           throw new StoreError("ALREADY_INITIALIZED", `${dir} already holds a model store`);
         opts.beforeStep?.("init.checked");
         inLock?.();
@@ -332,7 +333,7 @@ export class FileStore implements ModelStore {
     const foreign = unlisted.filter((u) => u.kind === "foreign");
     if (foreign.length) throw divergedError(foreign);
     for (const rev of head.history) {
-      if (!existsSync(join(this.dir, "revisions", `${rev}.yaml`))) {
+      if (!existsContained(join(this.dir, "revisions", `${rev}.yaml`))) {
         throw new StoreError("CORRUPT", `HEAD lists revision ${rev} but its file is missing`);
       }
       readRevisionFile(this.dir, rev, head.history); // parses and verifies branch-safe digests
@@ -435,7 +436,7 @@ export class FileStoreReader {
 
   constructor(dir: string) {
     this.dir = dir;
-    if (!existsSync(join(dir, "HEAD")))
+    if (!existsContained(join(dir, "HEAD")))
       throw new StoreError("NOT_INITIALIZED", `${dir} is not an initialized model store (run init first)`);
     this.current(); // fail at open, not on the first query, if HEAD or the current revision is unreadable
   }
