@@ -13,6 +13,7 @@ import { DraftConflict, DraftMissing, DraftUnreadable } from "./drafts/store.ts"
 import { PreviewFailed } from "./drafts/preview.ts";
 import { BadEdit } from "./edits.ts";
 import { NotFoundError } from "./inspector.ts";
+import { ObservationLimit } from "./observe.ts";
 import { InboxUnavailable, ProposalInbox } from "./proposals.ts";
 import { StateChangedError } from "./session.ts";
 import type { ProjectSession } from "./session.ts";
@@ -56,7 +57,14 @@ export async function startHost({ session, webDir, port = 0, stateDir, protected
   return {
     server,
     url: `http://127.0.0.1:${bound}/`,
-    close: () => new Promise((ok) => server.close(() => ok())),
+    // Pages poll over keep-alive connections; server.close() alone waits for every one of them to
+    // go idle and time out. Drop idle ones at once, then any still open after a short grace.
+    close: () =>
+      new Promise((ok) => {
+        server.close(() => ok());
+        server.closeIdleConnections();
+        setTimeout(() => server.closeAllConnections(), 500).unref();
+      }),
   };
 }
 
@@ -123,6 +131,7 @@ async function handle(
   } catch (e) {
     if (e instanceof NotFoundError) return send(res, e.code === "NOT_READY" ? 409 : 404, err(e.code, e.message));
     if (e instanceof StateChangedError) return send(res, 409, err(e.code, e.message));
+    if (e instanceof ObservationLimit) return send(res, 422, err(e.code, e.message));
     if (e instanceof BadRequest) return send(res, 400, err("INVALID_REQUEST", e.message));
     if (e instanceof BadEdit) return send(res, 400, err(e.code, e.message));
     if (e instanceof InboxUnavailable)
