@@ -7,8 +7,9 @@
 // when it is reached is a containment violation: the helper fails, and the whole scope fails with
 // ContainmentUnavailable even if a caller swallowed the error, so no answer is built from it.
 //
-// Outside a scope, and for paths outside the root, the helpers are the plain node:fs calls, so the
-// CLI behaves exactly as before. Where the platform has no descriptor-relative open (no
+// Inside a scope, a helper read of a path that is not under the root (or an alias of it) is a
+// violation too: nothing falls back to a plain read. Outside a scope the helpers are the plain
+// node:fs calls, so the CLI behaves exactly as before. Where the platform has no descriptor-relative open (no
 // /proc/self/fd: macOS, Windows), withContainedReads refuses instead of reading less safely.
 import { closeSync, constants, existsSync, lstatSync, openSync, readdirSync, readlinkSync, statSync } from "node:fs";
 import type { Stats } from "node:fs";
@@ -108,16 +109,20 @@ function errno(code: string, message: string): NodeJS.ErrnoException {
   return e;
 }
 
-function violate(s: Scope, rel: string): never {
-  const why = `${rel} is not a plain folder inside the checkout (a symlink was met during a contained read)`;
+function violate(
+  s: Scope,
+  rel: string,
+  what = "is not a plain folder inside the checkout (a symlink was met during a contained read)",
+): never {
+  const why = `${rel} ${what}`;
   s.violation ??= why;
   throw errno("ELOOP", why);
 }
 
 /**
  * For a path under the active root: its parent folder opened from the root descriptor (the caller
- * closes it when `owned`) and its last name ("." for the root itself). Null when no scope is active
- * or the path is outside the root, so the caller uses plain fs.
+ * closes it when `owned`) and its last name ("." for the root itself). Null when no scope is active,
+ * so the caller uses plain fs; a violation when the path is not under the root.
  */
 function parentOf(p: string): { s: Scope; fd: number; owned: boolean; base: string; rel: string } | null {
   const s = scope;
@@ -125,7 +130,8 @@ function parentOf(p: string): { s: Scope; fd: number; owned: boolean; base: stri
   const abs = resolve(p);
   const under = (r: string) => abs === r || abs.startsWith(r + sep);
   const base = [s.root, ...s.aliases].find(under);
-  if (base === undefined) return null;
+  // A read the scope cannot tie to the checkout is refused, never done with plain fs.
+  if (base === undefined) violate(s, abs, "is outside the checkout this contained read is rooted at");
   const rel = relative(base, abs);
   if (rel === "") return { s, fd: s.fd, owned: false, base: ".", rel: "." };
   const parts = rel.split(sep);

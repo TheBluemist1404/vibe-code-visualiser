@@ -4,7 +4,8 @@
 // Only read commands are run, with GIT_OPTIONAL_LOCKS=0 so `git status` does not refresh and
 // rewrite the index. VCV never fetches, pulls, checks out or merges.
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsContained, statContained } from "@vcv/core";
+import { existsSync } from "node:fs";
+import { statContained } from "@vcv/core";
 import { isAbsolute, join, resolve } from "node:path";
 
 export type GitOperation = "merge" | "rebase" | "cherry-pick" | "revert";
@@ -250,7 +251,9 @@ function gitOperation(root: string): GitOperation | null {
   const marker = (name: string) => {
     const p = git(root, ["rev-parse", "--git-path", name])?.trim();
     if (!p) return false;
-    return existsContained(isAbsolute(p) ? p : join(root, p));
+    // Git's own metadata (which may live outside the checkout, for a linked worktree): an
+    // existence check, not data a contained read serves, so plain fs.
+    return existsSync(isAbsolute(p) ? p : join(root, p));
   };
   if (marker("MERGE_HEAD")) return "merge";
   if (marker("rebase-merge") || marker("rebase-apply")) return "rebase";
