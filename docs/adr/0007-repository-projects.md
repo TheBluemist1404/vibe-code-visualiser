@@ -85,8 +85,8 @@ paths differ from Git HEAD, and any merge/rebase/cherry-pick/revert in progress.
 read (`rev-parse`, `symbolic-ref`, `status`), with `GIT_OPTIONAL_LOCKS=0` so `git status` does
 not rewrite the index. VCV never fetches, pulls, checks out or merges.
 
-Writers use `FileStore` on `.vcv/`, still single writer (ADR 0003); UI and MCP must not write
-concurrently, and MCP stays read-only. A single writer is not enough in a checkout, though:
+Writers use `FileStore` on `.vcv/`; VCV writers are serialized by the writer lock (ADR 0010), and
+MCP stays read-only. Serializing VCV writers is not enough in a checkout, though:
 `git checkout`/`pull` replace `.vcv/HEAD` under a writer that stays open. So:
 
 - **What "moved" means.** A store fingerprint covers HEAD's bytes, the current revision file's

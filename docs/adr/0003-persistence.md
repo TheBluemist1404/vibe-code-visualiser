@@ -59,9 +59,9 @@ store. Canonical object IDs are not file names and stay opaque, as the spec requ
 
 ## Limitations
 
-- **Single writer.** Two processes committing to the same directory can race (both read
-  HEAD at rev-N and the second rename wins). There is no lock file yet. Concurrent writers
-  need a lock or a different backend (event log or transactional store; spec open question 9).
+- **One writer at a time.** Concurrent VCV writers are serialized by the writer lock
+  (`cache/writer.lock`, [ADR 0010](0010-writer-lock.md)); writers that do not take it (Git,
+  editors) are detected, not prevented.
 - Durability depends on the filesystem honouring fsync and atomic rename. Network mounts
   may not.
 - The audit log is appended after the commit; a crash between the two can drop one audit

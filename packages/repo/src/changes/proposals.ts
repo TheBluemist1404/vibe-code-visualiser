@@ -29,6 +29,7 @@ import {
   checkChange,
   proposalDigest,
   proposedChangeSchema,
+  withStoreLock,
 } from "@vcv/core";
 import type { ChangeRecord, ChangeStatus, HostContext, ImplementationRequest, ProposedModelChange } from "@vcv/core";
 import type { ImpactCandidate } from "@vcv/query";
@@ -276,7 +277,7 @@ const NOT_IMPLEMENTED =
 export function submitProposal(path: string, input: unknown, host: HostContext): RepoResult<SubmitResult> {
   const status = projectStatus(path);
   if (status.state !== "ready" || !status.model) return notReady(status);
-  const before = status.model.revision;
+  let before = status.model.revision;
   const size = sizeProblem(input);
   const ctx: HostContext = {
     principalId: host.principalId,
@@ -298,37 +299,46 @@ export function submitProposal(path: string, input: unknown, host: HostContext):
       next: "Nothing was recorded.",
     });
   }
-  const existing =
-    typeof (input as { changeId?: unknown })?.changeId === "string" &&
-    !persistedIdProblem((input as { changeId: string }).changeId)
-      ? engine.record((input as { changeId: string }).changeId)
-      : undefined;
-  const outcome = engine.propose(input, ctx);
-  const afterModel = new FileStoreReader(status.storeDir).current();
-  const after = afterModel.project.modelRevision;
-  if (after !== before) {
-    // Unreachable by construction (no model:apply), but this is the guarantee the surface makes.
-    throw new Error(`proposal-only surface moved .vcv/HEAD from ${before} to ${after}`);
-  }
-  const record = outcome.record;
-  const recorded = !!record && !existing && outcome.status !== "denied";
-  const status_ = outcome.status === "applied" ? "rejected" : outcome.status; // never "applied" here
-  return okWith(status, afterModel, {
-    ok: outcome.status === "pending" && recorded,
-    status: status_,
-    changeId: outcome.changeId ?? null,
-    proposalDigest: record && recorded ? proposalDigest(record.change) : null,
-    recorded,
-    baseRevision: record && recorded ? record.baseRevision : null,
-    modelRevision: { before, after },
-    diagnostics: hinted(outcome.diagnostics),
-    next:
-      outcome.status === "pending"
-        ? `Recorded as pending; .vcv/HEAD is still ${after}. A separate reviewer must approve it before anything is implemented. Preview: vcv proposal preview <path> ${outcome.changeId}`
-        : recorded
-          ? "Recorded as rejected (the record keeps the diagnostics). Fix the proposal and submit it under a new changeId."
-          : "Nothing was recorded.",
-  });
+  // The replay check, the engine call and the HEAD comparison run under the store's writer lock
+  // (Issue #43), so a concurrent approval in another process cannot land between them.
+  return withStoreLock(
+    status.storeDir,
+    () => {
+      before = new FileStoreReader(status.storeDir).current().project.modelRevision;
+      const existing =
+        typeof (input as { changeId?: unknown })?.changeId === "string" &&
+        !persistedIdProblem((input as { changeId: string }).changeId)
+          ? engine.record((input as { changeId: string }).changeId)
+          : undefined;
+      const outcome = engine.propose(input, ctx);
+      const afterModel = new FileStoreReader(status.storeDir).current();
+      const after = afterModel.project.modelRevision;
+      if (after !== before) {
+        // Unreachable by construction (no model:apply), but this is the guarantee the surface makes.
+        throw new Error(`proposal-only surface moved .vcv/HEAD from ${before} to ${after}`);
+      }
+      const record = outcome.record;
+      const recorded = !!record && !existing && outcome.status !== "denied";
+      const status_ = outcome.status === "applied" ? "rejected" : outcome.status; // never "applied" here
+      return okWith(status, afterModel, {
+        ok: outcome.status === "pending" && recorded,
+        status: status_,
+        changeId: outcome.changeId ?? null,
+        proposalDigest: record && recorded ? proposalDigest(record.change) : null,
+        recorded,
+        baseRevision: record && recorded ? record.baseRevision : null,
+        modelRevision: { before, after },
+        diagnostics: hinted(outcome.diagnostics),
+        next:
+          outcome.status === "pending"
+            ? `Recorded as pending; .vcv/HEAD is still ${after}. A separate reviewer must approve it before anything is implemented. Preview: vcv proposal preview <path> ${outcome.changeId}`
+            : recorded
+              ? "Recorded as rejected (the record keeps the diagnostics). Fix the proposal and submit it under a new changeId."
+              : "Nothing was recorded.",
+      });
+    },
+    { purpose: "submit proposal" },
+  );
 }
 
 function sizeProblem(input: unknown): { path: string; message: string } | undefined {

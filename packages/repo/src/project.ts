@@ -269,8 +269,9 @@ export function initProject(path: string, initial: Model): ProjectStatus {
   const storeDir = join(root, VCV_DIR);
   if (existsSync(join(storeDir, "HEAD")))
     throw new StoreError("ALREADY_INITIALIZED", `${storeDir} already holds a model store`);
-  mkdirSync(storeDir, { recursive: true });
-  FileStore.init(storeDir, initial);
-  writeFileSync(join(storeDir, ".gitignore"), VCV_GITIGNORE);
+  // The decisive check and every init-owned file are under the writer lock (FileStore.init): a
+  // concurrent initializer that loses gets ALREADY_INITIALIZED and has written nothing, not even
+  // .gitignore. The check above only gives a fast answer for the common case.
+  FileStore.init(storeDir, initial, {}, () => writeFileSync(join(storeDir, ".gitignore"), VCV_GITIGNORE));
   return projectStatus(root);
 }

@@ -55,7 +55,7 @@ which, and guidance tells agents not to treat a draft as agreed intent); it must
   mitigation; their wording is a first draft.
 - **Agents rarely page.** In the demo the agent never followed a `truncated` context result
   with a larger budget. Fine on the small fixture; on a large model this could hide neighbours.
-- **File-store lifecycle.** Single writer is still assumed (ADR 0003). A reader racing a writer
+- **File-store lifecycle.** Writers are serialized by the writer lock (ADR 0010); readers never take it. A reader racing a writer
   is safe for the reasons above, but each call re-reads `HEAD` and may parse a new revision file;
   for very large models a cheaper change check (mtime) may be needed.
 - **Input budgets.** Tool arguments reach zod validation, so the zod minimum is `^4.6.6` in

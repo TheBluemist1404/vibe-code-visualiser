@@ -51,6 +51,7 @@ import {
   sha256Hex,
   OPEN_READ_NOFOLLOW,
   readUpTo,
+  withStoreLock,
 } from "@vcv/core";
 import type { ChangeRecord, Outcome } from "@vcv/core";
 import { currentBranchRef, fileAtCommit, fullRefName, refsContaining, resolveCommit } from "../git/git.ts";
@@ -349,14 +350,18 @@ export function createReviewerKey(id: string, keyPath: string): TrustEntry {
 export function addTrustedReviewer(path: string, entry: TrustEntry): string {
   const status = projectStatus(path);
   if (status.state !== "ready") throw new ApprovalError("PROJECT_NOT_READY", `the VCV project is ${status.state}`);
-  const f = readStoreFile(status.storeDir, REVIEWERS_FILE, MAX_TRUST_BYTES);
+  return withStoreLock(status.storeDir, () => addReviewerLocked(status.storeDir, entry), { purpose: "add reviewer" });
+}
+
+function addReviewerLocked(storeDir: string, entry: TrustEntry): string {
+  const f = readStoreFile(storeDir, REVIEWERS_FILE, MAX_TRUST_BYTES);
   if (f.kind === "unsafe") throw new ApprovalError("UNSAFE_PATH", f.problem);
   const list: TrustList =
     f.kind === "file" ? parseTrust(f.bytes, `${VCV_DIR}/${REVIEWERS_FILE}`) : { format: 1, reviewers: [] };
   if (list.reviewers.some((r) => r.publicKey === entry.publicKey))
     throw new ApprovalError("KEY_EXISTS", "this key is already listed");
   list.reviewers.push(entry);
-  const file = join(status.storeDir, REVIEWERS_FILE);
+  const file = join(storeDir, REVIEWERS_FILE);
   durableWrite(file, `${JSON.stringify(list, null, 2)}\n`);
   return `${VCV_DIR}/${REVIEWERS_FILE}`;
 }
@@ -620,9 +625,18 @@ export function reviewApprove(path: string, input: ReviewApproveInput): ReviewAp
       "--digest must be the 64-hex proposalDigest shown by vcv proposal preview",
     );
   const who = reviewerFor(status.root, input);
-  preflightAttestation(status.storeDir, input.changeId);
+  // One writer-lock hold covers the engine's recheck + commit and the attestation write
+  // (Issue #43): a concurrent approval or submission is either fully before or fully after this,
+  // and the attestation is signed over the record this very commit produced.
+  return withStoreLock(status.storeDir, () => approveLocked(status.storeDir, who, input), {
+    purpose: `review approve ${input.changeId}`,
+  });
+}
 
-  const engine = new ModelEngine(new FileStore(status.storeDir), { now: input.now });
+function approveLocked(storeDir: string, who: Reviewer, input: ReviewApproveInput): ReviewApproveResult {
+  preflightAttestation(storeDir, input.changeId);
+
+  const engine = new ModelEngine(new FileStore(storeDir), { now: input.now });
   const outcome = engine.approve(
     input.changeId,
     { principalId: who.entry.id, permissions: who.entry.permissions },
@@ -638,7 +652,7 @@ export function reviewApprove(path: string, input: ReviewApproveInput): ReviewAp
     return {
       outcome,
       reviewer: who.info,
-      attestation: { file: writeAttestation(status.storeDir, r, attestation), attestation },
+      attestation: { file: writeAttestation(storeDir, r, attestation), attestation },
       authorization: AUTHORIZATION_GATE,
     };
   } catch (e) {
@@ -666,7 +680,13 @@ export function reviewFinalize(path: string, input: ReviewFinalizeInput): Review
     );
   if (persistedIdProblem(input.changeId)) throw new ApprovalError("UNKNOWN_CHANGE", `no change ${input.changeId}`);
   const who = reviewerFor(status.root, input);
-  const r = listChangeRecords(status.storeDir).find((e) => e.record?.changeId === input.changeId)?.record;
+  return withStoreLock(status.storeDir, () => finalizeLocked(status.storeDir, who, input), {
+    purpose: `review finalize ${input.changeId}`,
+  });
+}
+
+function finalizeLocked(storeDir: string, who: Reviewer, input: ReviewFinalizeInput): ReviewApproveResult {
+  const r = listChangeRecords(storeDir).find((e) => e.record?.changeId === input.changeId)?.record;
   if (!r) throw new ApprovalError("UNKNOWN_CHANGE", `no change ${input.changeId}`);
   if (r.status !== "applied" || !r.resultingRevision)
     throw new ApprovalError(
@@ -686,10 +706,10 @@ export function reviewFinalize(path: string, input: ReviewFinalizeInput): Review
       "DIGEST_MISMATCH",
       `the change's content digest is ${digest}, not the reviewed ${input.expectedDigest}; preview it again`,
     );
-  if (!new FileStoreReader(status.storeDir).revisions().includes(r.resultingRevision))
+  if (!new FileStoreReader(storeDir).revisions().includes(r.resultingRevision))
     throw new ApprovalError("NOT_IN_HISTORY", `${r.resultingRevision} is not in this checkout's model history`);
 
-  const existing = readAttestation(status.storeDir, r.changeId);
+  const existing = readAttestation(storeDir, r.changeId);
   if (existing) {
     const a = existing.attestation;
     const same =
@@ -714,12 +734,12 @@ export function reviewFinalize(path: string, input: ReviewFinalizeInput): Review
       `${VCV_DIR}/${APPROVALS_DIR}/${r.changeId}.json already exists and is not this reviewer's valid attestation of this change; it is never overwritten (${existing.problem ?? "different content"})`,
     );
   }
-  preflightAttestation(status.storeDir, r.changeId);
+  preflightAttestation(storeDir, r.changeId);
   const attestation = signFor(r, who, input.now);
   return {
     outcome: { status: "applied", changeId: r.changeId, record: r, diagnostics: [] },
     reviewer: who.info,
-    attestation: { file: writeAttestation(status.storeDir, r, attestation), attestation },
+    attestation: { file: writeAttestation(storeDir, r, attestation), attestation },
     authorization: AUTHORIZATION_GATE,
   };
 }

@@ -39,6 +39,7 @@ import {
   digestOf,
   OPEN_READ_NOFOLLOW,
   readUpTo,
+  withStoreLock,
 } from "@vcv/core";
 import type { HostContext, ImplementationRequest } from "@vcv/core";
 import { isAncestor, resolveCommit } from "../git/git.ts";
@@ -246,7 +247,22 @@ export function recordImplementation(
     );
   }
   const req = parsed.data;
-  return observed(path, hooks, (obs) => {
+  return observed(path, hooks, (obs) =>
+    // Observation, re-check and report write run under the store's writer lock (Issue #43).
+    withStoreLock(obs.status.storeDir, () => recordLocked(obs, req, host, expected, hooks), {
+      purpose: `implementation ${req.changeId}`,
+    }),
+  );
+}
+
+function recordLocked(
+  obs: Observation,
+  req: ImplementationReportInput,
+  host: HostContext,
+  expected: string | null,
+  hooks: ObserveHooks,
+): RepoResult<RecordImplementationResult> {
+  {
     const attestation = attestationKey(obs, req.changeId);
     const brief = approvedChange(obs, req.changeId);
     if ("error" in brief) return failFinal(brief.error, obs, hooks);
@@ -360,7 +376,7 @@ export function recordImplementation(
         replaced: existing.kind === "file",
       },
     };
-  });
+  }
 }
 
 export type ImplementationStatus = {

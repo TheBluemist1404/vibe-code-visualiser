@@ -7,7 +7,9 @@
 //   <dir>/audit.jsonl               append-only log of every propose/approve attempt (best effort)
 //   <dir>/orphaned/                 uncommitted leftovers moved aside by recovery, kept for inspection
 //
-// Commit protocol (single writer; see docs/adr/0003-persistence.md):
+//   <dir>/cache/writer.lock         held while a VCV process writes (local, ignored by Git; store/lock.ts)
+//
+// Commit protocol (docs/adr/0003-persistence.md; one writer at a time via the writer lock, ADR 0010):
 //   1. write revisions/<rev>.yaml        (temp file + fsync + rename)
 //   2. write HEAD                        (temp file + fsync + rename)  ← the commit point
 //   3. write changes/<changeId>.json     (temp file + fsync + rename)
@@ -49,6 +51,8 @@ import {
   sameRecord,
 } from "./files.ts";
 import type { Head } from "./files.ts";
+import { withStoreLock } from "./lock.ts";
+import type { LockOptions } from "./lock.ts";
 import {
   conflictedFiles,
   inspectStore,
@@ -64,11 +68,15 @@ export type CommitStep =
   | "head.write"
   | "head.rename"
   | "change.write"
-  | "change.rename";
+  | "change.rename"
+  /** Initialization: under the writer lock, after HEAD was found absent and before anything is written. */
+  | "init.checked";
 
 export type FileStoreOptions = {
   /** Test hook: called before each step of a commit; throwing simulates a crash at that point. */
   beforeStep?: (step: CommitStep) => void;
+  /** Writer lock settings (timeout, test hooks). */
+  lock?: Omit<LockOptions, "purpose">;
 };
 
 export type RecoveryReport = {
@@ -92,20 +100,48 @@ export class FileStore implements ModelStore {
     this.opts = opts;
     if (!existsSync(join(dir, "HEAD")))
       throw new StoreError("NOT_INITIALIZED", `${dir} is not an initialized model store (run init first)`);
-    this.head = this.readHead();
-    this.recovery = this.recover();
-    this.validated = storeFingerprint(dir);
+    // Recovery moves and rewrites files, so it runs as a writer: never while another process is
+    // between the steps of a commit (its new revision file would look like a leftover).
+    const opened = this.exclusive(() => {
+      this.head = this.readHead();
+      const recovery = this.recover();
+      this.validated = storeFingerprint(dir);
+      return { recovery, head: this.head };
+    }, "open/recover");
+    this.head = opened.head;
+    this.recovery = opened.recovery;
   }
 
-  static init(dir: string, initial: Model, opts: FileStoreOptions = {}): FileStore {
-    if (existsSync(join(dir, "HEAD")))
-      throw new StoreError("ALREADY_INITIALIZED", `${dir} already holds a model store`);
+  /** Run `fn` holding this store's writer lock (reentrant). See store/lock.ts. */
+  exclusive<T>(fn: () => T, purpose = "write"): T {
+    return withStoreLock(this.dir, fn, { ...this.opts.lock, purpose });
+  }
+
+  /**
+   * Create a store. The whole "HEAD absent → write the initial revision and HEAD" decision runs
+   * under the writer lock (taken before HEAD exists; `cache/` is created for it), and HEAD is
+   * checked inside it: of several concurrent initializers exactly one writes, the others get
+   * ALREADY_INITIALIZED having written nothing. `inLock` runs inside the same lock, after the
+   * check, for a caller's own init-owned files.
+   */
+  static init(dir: string, initial: Model, opts: FileStoreOptions = {}, inLock?: () => void): FileStore {
     const rev = initial.project.modelRevision;
     assertPersistedId("revision", rev);
-    for (const sub of ["revisions", "changes", "orphaned"]) mkdirSync(join(dir, sub), { recursive: true });
-    durableWrite(join(dir, "revisions", `${rev}.yaml`), dumpModel(initial));
-    const head: Head = { format: 1, revision: rev, history: [rev] };
-    durableWrite(join(dir, "HEAD"), `${JSON.stringify(head, null, 2)}\n`); // initialized only once HEAD exists
+    mkdirSync(dir, { recursive: true });
+    withStoreLock(
+      dir,
+      () => {
+        if (existsSync(join(dir, "HEAD")))
+          throw new StoreError("ALREADY_INITIALIZED", `${dir} already holds a model store`);
+        opts.beforeStep?.("init.checked");
+        inLock?.();
+        for (const sub of ["revisions", "changes", "orphaned"]) mkdirSync(join(dir, sub), { recursive: true });
+        durableWrite(join(dir, "revisions", `${rev}.yaml`), dumpModel(initial));
+        const head: Head = { format: 1, revision: rev, history: [rev] };
+        durableWrite(join(dir, "HEAD"), `${JSON.stringify(head, null, 2)}\n`); // initialized only once HEAD exists
+      },
+      { ...opts.lock, purpose: "init" },
+    );
     return new FileStore(dir, opts);
   }
 
@@ -139,6 +175,10 @@ export class FileStore implements ModelStore {
   }
 
   commit(model: Model, record: ChangeRecord, guard?: string | ChangeGuard): void {
+    this.exclusive(() => this.commitLocked(model, record, guard), `commit ${record.changeId}`);
+  }
+
+  private commitLocked(model: Model, record: ChangeRecord, guard?: string | ChangeGuard): void {
     const g = typeof guard === "string" ? { token: guard } : guard;
     const token = g?.token;
     // Write guard: the change was validated against this.head. If HEAD on disk moved since then
@@ -192,6 +232,10 @@ export class FileStore implements ModelStore {
   }
 
   putChange(record: ChangeRecord, guard?: ChangeGuard): void {
+    this.exclusive(() => this.putChangeLocked(record, guard), `record ${record.changeId}`);
+  }
+
+  private putChangeLocked(record: ChangeRecord, guard?: ChangeGuard): void {
     if (record.status === "applied") throw new StoreError("BAD_COMMIT", "applied records are written only by commit()");
     const path = this.changePath(record.changeId);
     const before = storeFingerprint(this.dir);
@@ -337,13 +381,18 @@ export class FileStore implements ModelStore {
   //
   // "Moved" means any store file changed, not just HEAD's line: a merge resolved to this
   // writer's own HEAD adds foreign revisions without touching HEAD (round 4 of the PR #8 review).
+  //
+  // Recovery may move files, so a changed store is re-checked under the writer lock: a commit
+  // another VCV process has in flight finishes first, and its revision is never taken for a leftover.
   private sync(): void {
-    const fp = storeFingerprint(this.dir);
-    if (fp === this.validated) return;
-    const disk = readHeadFile(this.dir);
-    this.recoverFor(disk);
-    this.head = disk;
-    this.validated = storeFingerprint(this.dir); // recovery may have moved a leftover
+    if (storeFingerprint(this.dir) === this.validated) return;
+    this.exclusive(() => {
+      if (storeFingerprint(this.dir) === this.validated) return;
+      const disk = readHeadFile(this.dir);
+      this.recoverFor(disk);
+      this.head = disk;
+      this.validated = storeFingerprint(this.dir); // recovery may have moved a leftover
+    }, "sync/recover");
   }
 
   private recordOnDisk(id: string): ChangeRecord | null {

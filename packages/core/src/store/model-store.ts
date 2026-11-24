@@ -36,6 +36,12 @@ export interface ModelStore {
   putChange(record: ChangeRecord, guard?: ChangeGuard): void;
   appendAudit(event: AuditEvent): void;
   audit(): AuditEvent[];
+  /**
+   * Run `fn` as the only writer of this store (Issue #43). The engine runs each propose/approve
+   * decision (snapshot, checks, write) inside it, so cooperating processes serialize and each one
+   * decides on the state the previous one left. Stores without other writers may omit it.
+   */
+  exclusive?<T>(fn: () => T, purpose?: string): T;
 }
 
 export function assertCommittable(model: Model, record: ChangeRecord, history: readonly string[]) {

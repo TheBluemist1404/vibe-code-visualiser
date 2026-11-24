@@ -31,6 +31,7 @@ import {
   digestOf,
   OPEN_READ_NOFOLLOW,
   readUpTo,
+  withStoreLock,
 } from "@vcv/core";
 import type { BindingClaim, BindingRelation, BindingState, ClaimSource, Permission, SourceLocator } from "@vcv/core";
 import { fileWorkingState, headCommit } from "../git/git.ts";
@@ -420,6 +421,19 @@ function commitWrite(
   hooks?: WriteHooks,
 ): void {
   hooks?.beforeWrite?.();
+  // The re-check and the write run under the store's writer lock (Issue #43), so two VCV
+  // processes recording the same claim cannot both pass the check.
+  withStoreLock(snap.storeDir, () => commitWriteLocked(snap, bindingId, content, source), {
+    purpose: `binding ${bindingId}`,
+  });
+}
+
+function commitWriteLocked(
+  snap: Snapshot,
+  bindingId: string,
+  content: string | null,
+  source?: { rel: string; fingerprint: string },
+): void {
   const now = readClaimFile(snap.root, bindingId);
   const moved =
     storeFingerprint(snap.storeDir) !== snap.storeToken

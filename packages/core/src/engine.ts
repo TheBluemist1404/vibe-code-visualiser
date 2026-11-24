@@ -126,6 +126,12 @@ export class ModelEngine {
       return this.log("propose", ctx, { status: "rejected", changeId: claimedId, diagnostics });
     }
     const change = parsed.data;
+    return this.exclusive(() => this.proposeLocked(change, ctx), `propose ${change.changeId}`);
+  }
+
+  private proposeLocked(change: ProposedModelChange, ctx: HostContext): Outcome {
+    // Under the store's writer lock (Issue #43): no other cooperating writer can change the store
+    // between this snapshot and the write, and everything another writer finished is seen here.
     // Take the snapshot first and decide everything (replay check, validation, the write) on it,
     // so no decision is made on a checkout that is gone by the time of the write.
     const snap = this.store.snapshot();
@@ -184,6 +190,12 @@ export class ModelEngine {
         diagnostics: [diag("INVALID_ID", "changeId", `change id ${idProblem}`)],
       });
     }
+    return this.exclusive(() => this.approveLocked(changeId, ctx, opts), `approve ${changeId}`);
+  }
+
+  private approveLocked(changeId: string, ctx: HostContext, opts: ApproveOptions): Outcome {
+    // Under the writer lock, like propose: a concurrent approval or submission either finished
+    // before this snapshot (and is seen) or starts after this decision is written.
     const snap = this.store.snapshot();
     const record = this.store.getChange(changeId);
     if (!record) {
@@ -254,6 +266,10 @@ export class ModelEngine {
         record,
       ),
     );
+  }
+
+  private exclusive<T>(fn: () => T, purpose: string): T {
+    return this.store.exclusive ? this.store.exclusive(fn, purpose) : fn();
   }
 
   private dryRun(change: ProposedModelChange, current: Model): ChangeCheck {
