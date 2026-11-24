@@ -11,16 +11,27 @@
 // The identity is exact or it is refused: a store past the hashing budget, or an entry that is
 // not a regular file, directory or symlink, or cannot be read, is OBSERVATION_LIMIT. Size and
 // mtime never stand in for content, since both can be kept while the bytes change.
+//
+// The checkout is untrusted and may change while it is hashed. Files are opened by descriptor
+// without following a final symlink and without blocking on a FIFO, re-checked with fstat, and
+// streamed against the bytes actually read, so a swap after the lstat cannot redirect, block or
+// overrun the read (the same pattern as readStoreFile in @vcv/core). A directory that stops being
+// the directory that was listed is refused.
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { lstatSync, readFileSync, readdirSync, readlinkSync } from "node:fs";
+import { closeSync, fstatSync, lstatSync, openSync, readdirSync, readlinkSync } from "node:fs";
 import { join } from "node:path";
+import { OPEN_READ_NOFOLLOW, readChunks } from "@vcv/core";
 import { projectStatus } from "@vcv/repo";
 import { StateChangedError, modelKey } from "./session.ts";
 
 /** Budget for hashing .vcv/. Mutable for tests only. Past it, nothing is served (no size/mtime stand-in). */
 export const OBSERVE_LIMITS = { files: 5000, bytes: 64 * 1024 * 1024 };
 const ATTEMPTS = 3;
+const CHUNK = 64 * 1024;
+
+/** Test seam: runs after an entry's lstat and before it is opened or listed. */
+export const observeTestHooks: { beforeOpen?: (rel: string) => void } = {};
 
 /** The checkout cannot be observed exactly, so no answer is composed from it (HTTP 422). */
 export class ObservationLimit extends Error {
@@ -40,17 +51,53 @@ export function checkoutIdentity(path: string, opts: ObserveOptions = {}): strin
       `cannot observe .vcv/${rel} exactly (${why}); nothing is served from a state that cannot be pinned down`,
     );
   };
-  const walk = (dir: string, rel: string) => {
+  const errno = (e: unknown) => (e as NodeJS.ErrnoException).code ?? "unreadable";
+  /** Hash one regular file by descriptor; false if it vanished before it was opened. */
+  const hashFile = (p: string, r: string): boolean => {
+    let fd: number;
+    try {
+      fd = openSync(p, OPEN_READ_NOFOLLOW);
+    } catch (e) {
+      if (errno(e) === "ENOENT") return false;
+      if (errno(e) === "ELOOP") return refuse(r, "replaced by a symlink while it was read");
+      return refuse(r, errno(e));
+    }
+    try {
+      if (!fstatSync(fd).isFile()) refuse(r, "replaced by something other than a regular file while it was read");
+      const file = createHash("sha256");
+      let n = 0;
+      readChunks(fd, CHUNK, (chunk) => {
+        n += chunk.length;
+        bytes += chunk.length;
+        if (bytes > OBSERVE_LIMITS.bytes) refuse(r, `more than ${OBSERVE_LIMITS.bytes} bytes`);
+        file.update(chunk);
+        return true;
+      });
+      h.update(`\0file:${r}\0${n}\0${file.digest("hex")}`);
+      return true;
+    } catch (e) {
+      if (e instanceof ObservationLimit) throw e;
+      return refuse(r, errno(e));
+    } finally {
+      closeSync(fd);
+    }
+  };
+  const walk = (dir: string, rel: string, expect?: { dev: number; ino: number }) => {
     let names: string[];
     try {
       names = readdirSync(dir).sort();
     } catch (e) {
       // A directory removed between listing and reading is a change, not a hole to paper over.
-      if ((e as NodeJS.ErrnoException).code === "ENOENT") {
+      if (errno(e) === "ENOENT") {
         h.update(`\0missing:${rel}`);
         return;
       }
-      return refuse(rel || ".", (e as NodeJS.ErrnoException).code ?? "unreadable");
+      return refuse(rel || ".", errno(e));
+    }
+    if (expect) {
+      const again = lstatSync(dir, { throwIfNoEntry: false });
+      if (!again?.isDirectory() || again.dev !== expect.dev || again.ino !== expect.ino)
+        refuse(rel, "the directory was replaced while it was listed");
     }
     for (const n of names) {
       const r = rel ? `${rel}/${n}` : n;
@@ -61,39 +108,29 @@ export function checkoutIdentity(path: string, opts: ObserveOptions = {}): strin
         h.update(`\0gone:${r}`);
         continue;
       }
+      observeTestHooks.beforeOpen?.(r);
       if (s.isDirectory()) {
         h.update(`\0dir:${r}`);
-        walk(p, r);
+        walk(p, r, { dev: s.dev, ino: s.ino });
         continue;
       }
       files += 1;
-      bytes += s.size;
       if (files > OBSERVE_LIMITS.files) refuse(r, `more than ${OBSERVE_LIMITS.files} files`);
-      if (bytes > OBSERVE_LIMITS.bytes) refuse(r, `more than ${OBSERVE_LIMITS.bytes} bytes`);
       if (s.isSymbolicLink()) {
-        // The link itself is the state; where it points is outside the store.
+        // The link itself is the state; where it points is outside the store and never read.
         let target: string;
         try {
           target = readlinkSync(p);
         } catch (e) {
-          return refuse(r, (e as NodeJS.ErrnoException).code ?? "unreadable link");
+          return refuse(r, errno(e) === "EINVAL" ? "replaced by a non-link while it was read" : errno(e));
         }
+        bytes += Buffer.byteLength(target);
+        if (bytes > OBSERVE_LIMITS.bytes) refuse(r, `more than ${OBSERVE_LIMITS.bytes} bytes`);
         h.update(`\0link:${r}\0${target}`);
         continue;
       }
       if (!s.isFile()) refuse(r, "not a regular file, directory or symlink");
-      let content: Buffer;
-      try {
-        content = readFileSync(p);
-      } catch (e) {
-        if ((e as NodeJS.ErrnoException).code === "ENOENT") {
-          h.update(`\0gone:${r}`);
-          continue;
-        }
-        return refuse(r, (e as NodeJS.ErrnoException).code ?? "unreadable");
-      }
-      h.update(`\0file:${r}\0${content.length}\0`);
-      h.update(content);
+      if (!hashFile(p, r)) h.update(`\0gone:${r}`);
     }
   };
   if (st.storeDir) walk(st.storeDir, "");

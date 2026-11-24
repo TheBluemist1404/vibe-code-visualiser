@@ -4,7 +4,10 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import {
+  appendFileSync,
+  mkdirSync,
   readFileSync,
+  renameSync,
   readdirSync,
   rmSync,
   statSync,
@@ -14,10 +17,16 @@ import {
   writeFileSync,
 } from "node:fs";
 import { Agent, get } from "node:http";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { test } from "node:test";
 import { LayoutFileStore } from "../src/layout-store.ts";
-import { OBSERVE_LIMITS, ObservationLimit, checkoutIdentity, consistentRead } from "../src/observe.ts";
+import {
+  OBSERVE_LIMITS,
+  ObservationLimit,
+  checkoutIdentity,
+  consistentRead,
+  observeTestHooks,
+} from "../src/observe.ts";
 import { startHost } from "../src/server.ts";
 import { ProjectSession } from "../src/session.ts";
 import { setup, submit, describeWeb, tempDir } from "./fixtures.ts";
@@ -155,4 +164,101 @@ test("the host closes while a page keeps a keep-alive connection open", async ()
   } finally {
     agent.destroy();
   }
+});
+
+/** Run `fn` with a one-shot action between an entry's lstat and its open. */
+function onceBeforeOpen(rel: string, act: () => void, fn: () => void) {
+  let fired = false;
+  observeTestHooks.beforeOpen = (r) => {
+    if (r !== rel || fired) return;
+    fired = true;
+    act();
+  };
+  try {
+    fn();
+  } finally {
+    observeTestHooks.beforeOpen = undefined;
+  }
+  assert.ok(fired, `the swap of ${rel} happened`);
+}
+
+test("a store file swapped after its lstat for a symlink, a FIFO or a bigger file is refused: never followed, never blocking, never past the budget", () => {
+  const { repo } = setup();
+  const p = storeFile(repo);
+  const rel = relative(join(repo, ".vcv"), p);
+  const outside = join(tempDir("vcv-outside-"), "secret.txt");
+  writeFileSync(outside, "outside the checkout");
+  const keep = `${p}.keep`;
+  const restore = () => {
+    rmSync(p, { force: true });
+    renameSync(keep, p);
+  };
+
+  // Replaced by a symlink to a file outside the checkout.
+  onceBeforeOpen(
+    rel,
+    () => {
+      renameSync(p, keep);
+      symlinkSync(outside, p);
+    },
+    () => assert.throws(() => checkoutIdentity(repo), /replaced by a symlink/),
+  );
+  restore();
+
+  // Replaced by a FIFO: refused at once instead of blocking on open or read.
+  onceBeforeOpen(
+    rel,
+    () => {
+      renameSync(p, keep);
+      execFileSync("mkfifo", [p]);
+    },
+    () => assert.throws(() => checkoutIdentity(repo), /other than a regular file/),
+  );
+  restore();
+
+  // Grows after its lstat: the bytes actually read count against the budget.
+  const saved = { ...OBSERVE_LIMITS };
+  try {
+    checkoutIdentity(repo);
+    let total = 0;
+    const walk = (d: string, r: string) => {
+      for (const e of readdirSync(d, { withFileTypes: true })) {
+        const rr = r ? `${r}/${e.name}` : e.name;
+        if (rr === "cache") continue;
+        if (e.isDirectory()) walk(join(d, e.name), rr);
+        else if (e.isFile()) total += statSync(join(d, e.name)).size;
+      }
+    };
+    walk(join(repo, ".vcv"), "");
+    OBSERVE_LIMITS.bytes = total + 1024;
+    checkoutIdentity(repo); // within budget as listed
+    onceBeforeOpen(
+      rel,
+      () => appendFileSync(p, Buffer.alloc(256 * 1024, 0x20)),
+      () =>
+        assert.throws(
+          () => checkoutIdentity(repo),
+          (e: { code?: string }) => e.code === "OBSERVATION_LIMIT",
+        ),
+    );
+  } finally {
+    Object.assign(OBSERVE_LIMITS, saved);
+  }
+});
+
+test("a store directory swapped for a symlink while it is listed is refused", () => {
+  const { repo } = setup();
+  const dir = join(repo, ".vcv", "odd-dir");
+  mkdirSync(dir);
+  writeFileSync(join(dir, "a.json"), "{}");
+  const elsewhere = tempDir("vcv-outside-");
+  writeFileSync(join(elsewhere, "a.json"), "{}");
+  onceBeforeOpen(
+    "odd-dir",
+    () => {
+      renameSync(dir, `${dir}.keep`);
+      symlinkSync(elsewhere, dir);
+    },
+    () => assert.throws(() => checkoutIdentity(repo), /replaced while it was listed/),
+  );
 });

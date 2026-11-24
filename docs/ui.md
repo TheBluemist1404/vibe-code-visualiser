@@ -212,6 +212,10 @@ The identity is exact or it is refused with `422 OBSERVATION_LIMIT`; nothing is 
 - A symlink is hashed by its link text.
 - A FIFO, socket or device, or an entry that cannot be read, is refused rather than skipped.
 - Past the budget (5,000 files or 64 MiB under `.vcv/`, outside `cache/`) the store is refused.
+- Files are opened by descriptor, never through a final symlink and never blocking on a FIFO
+  (`O_NOFOLLOW | O_NONBLOCK`). They are re-checked with `fstat` and streamed, and the bytes
+  actually read count against the budget. A swap after the `lstat` to a symlink, a FIFO or a
+  file that grew past the budget is refused, as is a directory replaced while it was listed.
 
 When a reviewer approves in their terminal, the page follows on its next poll: the record turns
 applied, the signature step verifies, and the pending count drops.
@@ -284,6 +288,9 @@ The browser is not a trust boundary, and neither is this host for anything beyon
   - Past a lowered budget the read is `OBSERVATION_LIMIT` (422 over HTTP), and nothing is read.
   - A symlink with a same-length new target changes the identity; a FIFO is refused.
   - `Host.close()` resolves while a keep-alive client is connected.
+  - A hook between `lstat` and open swaps a store file for a symlink to an outside file, for a
+    FIFO, or appends past the budget. Each is refused, and a swapped directory is refused too.
+    With a plain path open and no directory re-check, both tests fail.
 
   With the old size/mtime and skip fallbacks put back, three of these fail.
 - `apps/ui/e2e/proposals.e2e.ts`: the same in Chromium, with the page open while the reviewer
