@@ -259,6 +259,54 @@ test("a store directory swapped for a symlink while it is listed is refused", ()
       renameSync(dir, `${dir}.keep`);
       symlinkSync(elsewhere, dir);
     },
-    () => assert.throws(() => checkoutIdentity(repo), /replaced while it was listed/),
+    () => assert.throws(() => checkoutIdentity(repo), /replaced while it was listed|no longer a plain folder/),
   );
+});
+
+test("a parent folder swapped for a symlink out of the checkout around the open is refused, even when it is swapped back", () => {
+  const { repo } = setup();
+  const dir = join(repo, ".vcv", "odd-dir");
+  mkdirSync(dir);
+  writeFileSync(join(dir, "a.json"), '{"inside":true}');
+  const elsewhere = tempDir("vcv-outside-");
+  writeFileSync(join(elsewhere, "a.json"), '{"outside":true}');
+  const out = () => {
+    renameSync(dir, `${dir}.keep`);
+    symlinkSync(elsewhere, dir);
+  };
+  const back = () => {
+    unlinkSync(dir);
+    renameSync(`${dir}.keep`, dir);
+  };
+  const target = ".vcv/odd-dir/a.json";
+  const run = (hooks: typeof observeTestHooks) => {
+    Object.assign(observeTestHooks, hooks);
+    try {
+      return checkoutIdentity(repo);
+    } finally {
+      observeTestHooks.atOpen = undefined;
+      observeTestHooks.afterOpen = undefined;
+    }
+  };
+  const clean = run({});
+
+  // Swapped just before the open and left there: the open goes through it, the re-check refuses.
+  assert.throws(
+    () => run({ atOpen: (r) => r === target && out() }),
+    (e: { code?: string; message?: string }) =>
+      e.code === "OBSERVATION_LIMIT" && /no longer a plain folder/.test(e.message ?? ""),
+  );
+  back();
+
+  // Swapped before the open and back right after it: the opened file is not the one at the path.
+  assert.throws(
+    () =>
+      run({
+        atOpen: (r) => r === target && out(),
+        afterOpen: (r) => r === target && back(),
+      }),
+    (e: { code?: string; message?: string }) =>
+      e.code === "OBSERVATION_LIMIT" && /not the one at this path/.test(e.message ?? ""),
+  );
+  assert.equal(run({}), clean, "the checkout itself is unchanged");
 });
