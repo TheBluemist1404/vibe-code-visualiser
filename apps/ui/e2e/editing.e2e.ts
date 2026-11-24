@@ -27,9 +27,13 @@ before(async () => {
   browser = await chromium.launch();
   if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 });
+// Pages first (they poll the hosts), then the hosts, even when a test failed.
 after(async () => {
-  await Promise.all(hosts.map((h) => h.close()));
-  await browser?.close();
+  try {
+    await browser?.close();
+  } finally {
+    await Promise.all(hosts.map((h) => h.close()));
+  }
 });
 
 async function host(repo: string, stateDir: string) {

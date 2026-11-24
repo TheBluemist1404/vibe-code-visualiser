@@ -69,7 +69,14 @@ export async function startHost({
   return {
     server,
     url: `http://127.0.0.1:${bound}/`,
-    close: () => new Promise((ok) => server.close(() => ok())),
+    // Pages poll over keep-alive connections; server.close() alone waits for every one of them to
+    // go idle and time out. Drop idle ones at once, then any still open after a short grace.
+    close: () =>
+      new Promise((ok) => {
+        server.close(() => ok());
+        server.closeIdleConnections();
+        setTimeout(() => server.closeAllConnections(), 500).unref();
+      }),
   };
 }
 

@@ -208,6 +208,13 @@ A checkout that keeps moving is `409 STATE_CHANGED`, so a review never shows a p
 next to an applied summary or a signature from another state. The revision ID alone is not
 trusted, because two branches can share it and records change without HEAD moving.
 
+The identity is exact or it is refused with `422 OBSERVATION_LIMIT`; nothing is served then.
+- File contents are hashed in full. Size and mtime never stand in for bytes, since both can be
+  kept while the content changes.
+- A symlink is hashed by its link text.
+- A FIFO, socket or device, or an entry that cannot be read, is refused rather than skipped.
+- Past the budget (5,000 files or 64 MiB under `.vcv/`, outside `cache/`) the store is refused.
+
 When a reviewer approves in their terminal, the page follows on its next poll: the record turns
 applied, the signature step verifies, and the pending count drops.
 
@@ -361,6 +368,13 @@ The browser is not a trust boundary, and neither is this host for anything beyon
   - records changing on every read, or a branch switch, are `STATE_CHANGED`.
 
   With the identity check removed, that test fails.
+- `apps/ui/test/observe.test.ts`: the identity itself.
+  - A store file rewritten with the same size and mtime between reads is retried.
+  - Past a lowered budget the read is `OBSERVATION_LIMIT` (422 over HTTP), and nothing is read.
+  - A symlink with a same-length new target changes the identity; a FIFO is refused.
+  - `Host.close()` resolves while a keep-alive client is connected.
+
+  With the old size/mtime and skip fallbacks put back, three of these fail.
 - `apps/ui/e2e/proposals.e2e.ts`: the same in Chromium, with the page open while the reviewer
   approves in a terminal (20 to 25), keyboard reachability, and a check that no button on the
   page approves, signs, submits, applies, rejects or rebases.
