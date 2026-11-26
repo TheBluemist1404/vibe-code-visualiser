@@ -4,7 +4,7 @@
 import { toStep } from "../edits.ts";
 import type { ProjectSession } from "../session.ts";
 import type { DraftExport, DraftList, DraftPreview, DraftView, ModelIdentity } from "../types.ts";
-import { DRAFT_LIMITS, newDraftId } from "./format.ts";
+import { DRAFT_LIMITS, EMPTY_REQUEST, isRequestDraft, newDraftId } from "./format.ts";
 import type { DraftFile } from "./format.ts";
 import { handoff, handoffChange } from "./handoff.ts";
 import { dryRun } from "./preview.ts";
@@ -124,6 +124,18 @@ export class DraftDesk {
     return this.save(scope, identity, draft, version(body), { rationale: body.rationale });
   }
 
+  /** Set what the coding agent is asked to implement; checked against the schema by the dry run. */
+  request(draftId: string, body: Record<string, unknown>): DraftView {
+    const { scope, identity } = this.now();
+    const draft = this.store.read(scope, draftId);
+    if (!isRequestDraft(body.request))
+      throw new DraftRefused(
+        "INVALID_REQUEST",
+        `request is { behavior, acceptanceCriteria, suggestedTests, scope }: behavior text of at most ${DRAFT_LIMITS.behavior} characters, then lists of lines of at most ${DRAFT_LIMITS.line} characters (at most ${DRAFT_LIMITS.acceptanceCriteria}, ${DRAFT_LIMITS.suggestedTests} and ${DRAFT_LIMITS.scope} lines)`,
+      );
+    return this.save(scope, identity, draft, version(body), { request: body.request });
+  }
+
   /** Delete a draft on purpose. `version: null` is accepted only for an unreadable file. */
   discard(draftId: string, body: Record<string, unknown>): { discarded: string } {
     const { scope } = this.now();
@@ -156,7 +168,7 @@ export class DraftDesk {
     identity: ModelIdentity,
     draft: DraftFile,
     expected: number,
-    change: Partial<Pick<DraftFile, "steps" | "rationale">>,
+    change: Partial<Pick<DraftFile, "steps" | "rationale" | "request">>,
   ): DraftView {
     const next: DraftFile = { ...draft, ...change, version: expected + 1, updatedAt: new Date().toISOString() };
     return view(this.store.write(scope, next, expected), identity);
@@ -173,6 +185,7 @@ function view(d: DraftFile, current: ModelIdentity): DraftView {
     base: d.base,
     steps: d.steps.map((s) => ({ ...s, key: stepKey(s) })),
     rationale: d.rationale,
+    request: d.request ?? EMPTY_REQUEST,
     createdAt: d.createdAt,
     updatedAt: d.updatedAt,
     stale: d.base.modelKey !== current.modelKey,

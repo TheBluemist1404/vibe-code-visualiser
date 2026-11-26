@@ -26,13 +26,18 @@ export function dryRun(checkout: string, change: HandoffChange, currentRevision:
       currentRevision: r.context?.modelRevision ?? currentRevision,
       validation: {
         appliesToCurrent: false,
-        errors: r.error.details.map((d) => ({
-          code: "SCHEMA",
-          severity: "error",
-          path: d.path.replace(/^change\./, ""),
-          message: d.message,
-          hint: "The operation does not match its typed schema. Remove the step and stage a corrected value, or hand the draft to an agent to repair.",
-        })),
+        errors: r.error.details.map((d) => {
+          const path = d.path.replace(/^change\./, "");
+          return {
+            code: "SCHEMA",
+            severity: "error",
+            path,
+            message: d.message,
+            hint: path.startsWith("implementation")
+              ? "The implementation request is incomplete: it needs a behavior and at least one acceptance criterion, and scope lines must be repository-relative paths or globs. Complete it, or clear every field to send none."
+              : "The operation does not match its typed schema. Remove the step and stage a corrected value, or hand the draft to an agent to repair.",
+          };
+        }),
         warnings: [],
       },
       delta: null,

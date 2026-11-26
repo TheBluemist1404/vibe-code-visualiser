@@ -3,6 +3,7 @@ import type {
   DraftExport,
   DraftList,
   DraftPreview,
+  DraftRequest,
   DraftView,
   GateView,
   ImplementationView,
@@ -86,6 +87,8 @@ export const api = {
     unstage: (id: string, version: number, key: string) => post<DraftView>(draft(id, "/unstage"), { version, key }),
     rationale: (id: string, version: number, rationale: string) =>
       post<DraftView>(draft(id, "/rationale"), { version, rationale }),
+    request: (id: string, version: number, request: DraftRequest) =>
+      post<DraftView>(draft(id, "/request"), { version, request }),
     /** `version: null` discards an unreadable file. */
     discard: (id: string, version: number | null) => post<{ discarded: string }>(draft(id, "/discard"), { version }),
     preview: (id: string) => post<DraftPreview>(draft(id, "/preview"), {}),

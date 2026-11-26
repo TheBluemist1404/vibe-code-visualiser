@@ -308,6 +308,40 @@ function Review({ changeId, inbox }: { changeId: string; inbox: Inbox | null }) 
       )}
 
       {r.lifecycle === "applied" && inbox && <ImplementationSection changeId={r.changeId} modelKey={inbox.modelKey} />}
+      {r.lifecycle !== "applied" && (
+        <section className="review-sec" data-testid="review-request" aria-labelledby="request-title">
+          <h3 id="request-title" className="sec-head">
+            <Icon name="pencil" /> Implementation request
+          </h3>
+          {r.implementation ? (
+            <>
+              <p className="declared">{r.implementation.behavior}</p>
+              <ul className="small handoff-notes">
+                {r.implementation.acceptanceCriteria.map((a) => (
+                  <li key={a}>{a}</li>
+                ))}
+              </ul>
+              {r.implementation.suggestedTests && (
+                <p className="small muted" style={{ margin: 0 }}>
+                  Suggested tests: {r.implementation.suggestedTests.join("; ")}
+                </p>
+              )}
+              {r.implementation.scope && (
+                <p className="small muted" style={{ margin: 0 }}>
+                  Scope: <span className="mono">{r.implementation.scope.join(", ")}</span>
+                </p>
+              )}
+              <p className="small muted" style={{ margin: 0 }}>
+                Part of the proposal: approving the digest approves this request too.
+              </p>
+            </>
+          ) : (
+            <p className="small muted" style={{ margin: 0 }}>
+              None. The implementing agent gets only the model edits, with no behavior, acceptance criteria or scope.
+            </p>
+          )}
+        </section>
+      )}
 
       <section className="review-sec" aria-labelledby="check-title">
         <h3 id="check-title" className="sec-head">

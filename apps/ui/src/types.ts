@@ -206,6 +206,8 @@ export type DraftView = {
   base: ModelIdentity;
   steps: DraftStepView[];
   rationale: string;
+  /** The implementation request for the coding agent; empty fields when none was written. */
+  request: DraftRequest;
   createdAt: string;
   updatedAt: string;
   /** True when the checkout no longer holds the base model: the draft needs agent integration. */
@@ -222,6 +224,22 @@ export type DraftList = { drafts: DraftView[]; problems: DraftProblem[]; current
  * The handoff for an external coding agent: a strict proposed change, exactly what
  * `vcv proposal preview --file` and `vcv proposal submit` read, and separate metadata.
  */
+/** What a proposal asks the coding agent to implement once approved (`@vcv/core`'s ImplementationRequest). */
+export type ImplementationRequestView = {
+  behavior: string;
+  acceptanceCriteria: string[];
+  suggestedTests?: string[];
+  scope?: string[];
+};
+
+/** The implementation request a draft holds while it is being written: blank lines and all. */
+export type DraftRequest = {
+  behavior: string;
+  acceptanceCriteria: string[];
+  suggestedTests: string[];
+  scope: string[];
+};
+
 export type DraftExport = {
   change: {
     changeId: string;
@@ -229,6 +247,7 @@ export type DraftExport = {
     expectedRevision: string;
     rationale?: string;
     operations: Record<string, unknown>[];
+    implementation?: ImplementationRequestView;
   };
   metadata: {
     format: "vcv-ui-draft-handoff-1";
@@ -298,6 +317,8 @@ export type ProposalReview = {
   currentRevision: string;
   modelKey: string;
   rationale?: string;
+  /** What the proposer asks to be implemented after approval; covered by the digest. */
+  implementation?: ImplementationRequestView;
   stale?: { reason: "superseded" | "other-line"; detail: string };
   resultingRevision?: string;
   recordedApproverId?: string;

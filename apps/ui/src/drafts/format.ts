@@ -2,7 +2,7 @@
 // file that fails them is reported, never repaired or replaced.
 import { randomBytes } from "node:crypto";
 import type { Step } from "../edits.ts";
-import type { EditableFieldName, ModelIdentity } from "../types.ts";
+import type { DraftRequest, EditableFieldName, ModelIdentity } from "../types.ts";
 
 export const DRAFT_FORMAT = "vcv-ui-draft-1";
 
@@ -13,7 +13,22 @@ export const DRAFT_LIMITS = {
   rationale: 4000,
   /** Drafts kept per checkout and project. */
   drafts: 20,
+  /** The implementation request, as the engine's schema bounds it. */
+  behavior: 4000,
+  line: 500,
+  acceptanceCriteria: 30,
+  suggestedTests: 30,
+  scope: 50,
 } as const;
+
+/**
+ * What the person asks the coding agent to build once the change is approved, as typed so far.
+ * Kept loose while editing (an empty behavior is allowed here); the engine's dry run checks it
+ * against the implementation request schema when the draft is previewed or exported.
+ */
+export type RequestDraft = DraftRequest;
+
+export const EMPTY_REQUEST: RequestDraft = { behavior: "", acceptanceCriteria: [], suggestedTests: [], scope: [] };
 
 export type DraftFile = {
   format: typeof DRAFT_FORMAT;
@@ -25,6 +40,8 @@ export type DraftFile = {
   base: ModelIdentity;
   steps: Step[];
   rationale: string;
+  /** Absent in drafts written before it existed, and until the person fills it in. */
+  request?: RequestDraft;
   createdAt: string;
   updatedAt: string;
 };
@@ -60,6 +77,24 @@ function checkIdentity(v: unknown): v is ModelIdentity {
     isStr(m.modelKey) &&
     (m.branch === null || isStr(m.branch)) &&
     (m.commit === null || isStr(m.commit))
+  );
+}
+
+const lines = (v: unknown, max: number) =>
+  Array.isArray(v) && v.length <= max && v.every((x) => isStr(x) && x.length <= DRAFT_LIMITS.line);
+
+/** The shape and bounds of a request draft, for files and for request bodies alike. */
+export function isRequestDraft(v: unknown): v is RequestDraft {
+  const r = v as RequestDraft;
+  return (
+    !!r &&
+    typeof r === "object" &&
+    isStr(r.behavior) &&
+    r.behavior.length <= DRAFT_LIMITS.behavior &&
+    lines(r.acceptanceCriteria, DRAFT_LIMITS.acceptanceCriteria) &&
+    lines(r.suggestedTests, DRAFT_LIMITS.suggestedTests) &&
+    lines(r.scope, DRAFT_LIMITS.scope) &&
+    Object.keys(r).length === 4
   );
 }
 
@@ -110,6 +145,7 @@ export function parseDraft(text: string, expect: { draftId: string; root: string
     d.steps.every(checkStep) &&
     isStr(d.rationale) &&
     d.rationale.length <= DRAFT_LIMITS.rationale &&
+    (d.request === undefined || isRequestDraft(d.request)) &&
     isStr(d.createdAt) &&
     isStr(d.updatedAt);
   if (!ok) throw new DraftFileProblem("CORRUPT", "the draft does not match the draft format");

@@ -15,6 +15,29 @@ const DECISION: Record<"pass" | "warn" | "block", { label: string; cls: string; 
   warn: { label: "Pass with warnings", cls: "s-warn", icon: "alert" },
   block: { label: "Blocked", cls: "s-danger", icon: "x" },
 };
+type Gate = NonNullable<GateView["gate"]>;
+
+/** Block reasons that say a pass is not proven here, as opposed to something failing. */
+const UNPROVEN = new Set(["RESULT_CLAIMED", "CRITERION_UNVERIFIED", "EVIDENCE_REQUIRED"]);
+
+/**
+ * A block where nothing fails, only proof is missing: every blocking reason is a claimed or
+ * missing pass, and no criterion failed, went stale or lost its tests. The gate's decision is
+ * unchanged (still "block"); this only tells a reader that it means "not proven yet", not "broken".
+ */
+export function unproven(g: Gate): { claimed: boolean; passed: number; required: number } | null {
+  if (g.decision !== "block" || g.reasonsTotal > g.reasons.length) return null;
+  const blocking = g.reasons.filter((r) => r.severity === "block");
+  if (!blocking.length || !blocking.every((r) => UNPROVEN.has(r.code))) return null;
+  if (!g.criteria.every((c) => c.result === "passed" || c.result === "unverified")) return null;
+  const required = g.criteria.filter((c) => c.verification === "required");
+  return {
+    claimed: g.runs.length > 0,
+    passed: required.filter((c) => c.result === "passed").length,
+    required: required.length,
+  };
+}
+
 const BASIS: Record<string, string> = {
   checked: "checked by VCV",
   observed: "observed by VCV",
@@ -122,10 +145,17 @@ function GateBody({ v, root }: { v: GateView; root: string }) {
   );
 }
 
-function Decision({ g }: { g: NonNullable<GateView["gate"]> }) {
-  const d = DECISION[g.decision];
+function Decision({ g }: { g: Gate }) {
+  const gap = unproven(g);
+  const d = gap ? { label: "Blocked: not proven yet", cls: "s-warn", icon: "info" as IconName } : DECISION[g.decision];
   return (
-    <section className="review-sec" data-testid="gate-decision" data-decision={g.decision} aria-labelledby="dec-title">
+    <section
+      className="review-sec"
+      data-testid="gate-decision"
+      data-decision={g.decision}
+      data-proof={gap ? "missing" : undefined}
+      aria-labelledby="dec-title"
+    >
       <div className="row">
         <h3 id="dec-title" className="sec-head" style={{ margin: 0 }}>
           <Icon name="shield" /> Gate decision
@@ -137,6 +167,25 @@ function Decision({ g }: { g: NonNullable<GateView["gate"]> }) {
       <p className="declared" style={{ margin: 0 }}>
         {g.headline}
       </p>
+      {gap && (
+        <div className="notice n-info" data-testid="gate-unproven">
+          <Icon name="info" />
+          <div className="notice-body">
+            <div className="notice-title">
+              {gap.claimed
+                ? `Nothing is failing: ${gap.passed}/${gap.required} required criteria passed in the results given here`
+                : "Nothing is failing, and nothing is proven: no test results were given"}
+            </div>
+            <span>
+              {gap.claimed
+                ? "Results handed to the explorer are claims, so they can show a failure but never prove a pass. "
+                : ""}
+              The merge decision comes from a test run the gate captures itself: CI, or{" "}
+              <span className="mono">vcv gate --junit</span> in the job that ran the tests.
+            </span>
+          </div>
+        </div>
+      )}
       <p className="small muted" style={{ margin: 0 }}>
         {g.changeKind} change · policy {g.policy.source}
         {g.policy.changedByCandidate && " (changed by this candidate)"}

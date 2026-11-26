@@ -99,6 +99,7 @@ export class ProposalInbox {
       currentRevision: current,
       modelKey: s.key,
       ...(p.proposal.rationale ? { rationale: p.proposal.rationale } : {}),
+      ...(p.proposal.implementation ? { implementation: p.proposal.implementation } : {}),
       ...(summary?.stale ? { stale: summary.stale } : {}),
       ...(summary?.resultingRevision ? { resultingRevision: summary.resultingRevision } : {}),
       ...(summary?.recordedApproverId ? { recordedApproverId: summary.recordedApproverId } : {}),

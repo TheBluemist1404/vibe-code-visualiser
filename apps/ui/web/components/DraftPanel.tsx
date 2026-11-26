@@ -1,8 +1,8 @@
-// The draft panel: this tab's local draft (staged typed operations, rationale), the engine's
+// The draft panel: this tab's local draft (staged typed operations, rationale, implementation request), the engine's
 // dry run of it, the handoff for a coding agent, and every other draft or unreadable draft file
 // for this checkout. It never submits or approves; a stale draft is shown as stale, not retargeted.
 import { useEffect, useRef, useState } from "react";
-import type { DraftView, GraphView } from "../../src/types.ts";
+import type { DraftRequest, DraftView, GraphView } from "../../src/types.ts";
 import { api } from "../api.ts";
 import { useDrafts } from "../drafts/DraftsProvider.tsx";
 import { Icon } from "../icons.tsx";
@@ -103,7 +103,11 @@ export function DraftPanel({ graph }: { graph: GraphView }) {
               type="button"
               className="btn btn-primary"
               disabled={active.steps.length === 0}
-              onClick={() => setExporting(true)}
+              onClick={() => {
+                // Finish the field being edited first: its blur starts the save the handoff waits for.
+                if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+                setExporting(true);
+              }}
               data-testid="export-draft"
             >
               <Icon name="send" small /> Hand off to agent
@@ -185,7 +189,8 @@ export function DraftPanel({ graph }: { graph: GraphView }) {
                     ))}
                   </ol>
                 )}
-                <Rationale draft={active} onSave={d.setRationale} />
+                <Rationale key={`r-${active.draftId}`} draft={active} onSave={d.setRationale} />
+                <Request key={`q-${active.draftId}`} draft={active} onSave={d.setRequest} />
               </div>
               <div className="tray-col">
                 <h3 className="tray-sub">Engine check</h3>
@@ -226,16 +231,44 @@ function StaleNotice({ draft }: { draft: DraftView }) {
   );
 }
 
-function Rationale({ draft, onSave }: { draft: DraftView; onSave(text: string): Promise<void> }) {
-  const [text, setText] = useState(draft.rationale);
-  const shown = useRef(draft.rationale);
-  // Take the stored text when the draft changes underneath (another tab, another draft).
+/**
+ * Form state for a stored value that is saved on blur. The stored value replaces the form only
+ * when it did not come from this form: an acknowledgment of an older save from here (a newer one
+ * still pending) keeps the newer local edits; a change from elsewhere (another tab, a reload
+ * after a conflict) is taken. Mounted per draft, so one draft's text never reaches another.
+ */
+function useSavedForm<S, F>(stored: S, keyOf: (s: S) => string, toForm: (s: S) => F) {
+  const key = keyOf(stored);
+  const [form, setForm] = useState(() => toForm(stored));
+  const shown = useRef(key); // what this form last sent or took
+  const sent = useRef<string[]>([]); // sent from here and not yet seen stored, oldest first
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `key` stands for `stored`
   useEffect(() => {
-    if (draft.rationale !== shown.current) {
-      shown.current = draft.rationale;
-      setText(draft.rationale);
+    const i = sent.current.indexOf(key);
+    if (i >= 0) {
+      sent.current = sent.current.slice(i + 1);
+      return;
     }
-  }, [draft.rationale]);
+    if (key === shown.current) return;
+    sent.current = [];
+    shown.current = key;
+    setForm(toForm(stored));
+  }, [key]);
+  /** Record a value about to be sent; false when it is what this form already sent or took. */
+  const submit = (value: S) => {
+    const k = keyOf(value);
+    if (k === shown.current) return false;
+    shown.current = k;
+    sent.current.push(k);
+    return true;
+  };
+  return { form, setForm, submit };
+}
+
+const same = <T,>(v: T) => v;
+
+function Rationale({ draft, onSave }: { draft: DraftView; onSave(draftId: string, text: string): Promise<void> }) {
+  const { form: text, setForm: setText, submit } = useSavedForm(draft.rationale, same, same);
   return (
     <>
       <label className="tray-sub" htmlFor="rationale">
@@ -251,10 +284,74 @@ function Rationale({ draft, onSave }: { draft: DraftView; onSave(text: string): 
         placeholder="What should the agent and the reviewer know?"
         onChange={(e) => setText(e.target.value)}
         onBlur={() => {
-          shown.current = text;
-          onSave(text);
+          submit(text);
+          onSave(draft.draftId, text);
         }}
       />
     </>
+  );
+}
+
+type RequestText = { behavior: string; acceptanceCriteria: string; suggestedTests: string; scope: string };
+
+const asText = (r: DraftRequest): RequestText => ({
+  behavior: r.behavior,
+  acceptanceCriteria: r.acceptanceCriteria.join("\n"),
+  suggestedTests: r.suggestedTests.join("\n"),
+  scope: r.scope.join("\n"),
+});
+const lines = (s: string) =>
+  s
+    .split("\n")
+    .map((x) => x.trim())
+    .filter(Boolean);
+const asRequest = (t: RequestText): DraftRequest => ({
+  behavior: t.behavior,
+  acceptanceCriteria: lines(t.acceptanceCriteria),
+  suggestedTests: lines(t.suggestedTests),
+  scope: lines(t.scope),
+});
+
+const REQUEST_FIELDS: { key: keyof RequestText; label: string; hint: string; rows: number }[] = [
+  { key: "behavior", label: "Behavior", hint: "What the code should do afterwards, in plain words", rows: 2 },
+  { key: "acceptanceCriteria", label: "Acceptance criteria", hint: "One checkable statement per line", rows: 3 },
+  { key: "suggestedTests", label: "Suggested tests", hint: "Optional, one per line", rows: 2 },
+  { key: "scope", label: "Scope", hint: "Optional: paths or globs the agent may change, one per line", rows: 2 },
+];
+
+/**
+ * What the coding agent is asked to build once the change is approved. It travels in the
+ * handoff as the proposal's implementation request, so the reviewer approves it together with
+ * the model edits and the digest covers it. Optional: a wording change may need none.
+ */
+function Request({ draft, onSave }: { draft: DraftView; onSave(draftId: string, r: DraftRequest): Promise<void> }) {
+  const { form: text, setForm: setText, submit } = useSavedForm(draft.request, JSON.stringify, asText);
+  const filled = Object.values(text).some((v) => v.trim());
+  return (
+    <details className="request" open={filled} data-testid="request">
+      <summary className="tray-sub">
+        Implementation request <span className="muted small">(optional; the agent builds this after approval)</span>
+      </summary>
+      {REQUEST_FIELDS.map((f) => (
+        <div key={f.key} className="request-field">
+          <label className="small" htmlFor={`request-${f.key}`}>
+            {f.label} <span className="muted">· {f.hint}</span>
+          </label>
+          <textarea
+            id={`request-${f.key}`}
+            className="input"
+            rows={f.rows}
+            value={text[f.key]}
+            disabled={draft.stale}
+            onChange={(e) => setText((t) => ({ ...t, [f.key]: e.target.value }))}
+            onBlur={() => {
+              const next = asRequest(text);
+              submit(next);
+              onSave(draft.draftId, next);
+            }}
+          />
+        </div>
+      ))}
+    </details>
   );
 }
