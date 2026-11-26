@@ -79,14 +79,35 @@ export function DraftsProvider({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const seq = useRef(0);
-  // Text saves (rationale, request) run one after another, each on the newest stored version of
-  // the draft it was made in, so a second blur does not race the first. `saves` is the tail of
-  // that chain. `unsaved` holds, per draft and field, why its last save was not stored; the
-  // field's next stored (or unchanged) save clears it. `stored` is the newest known state of
-  // every draft, by ID, updated as soon as a host answer arrives (before React renders it).
+  // Text saves (rationale, request) run one after another, so a second blur does not race the
+  // first. `saves` is the tail of that chain. `unsaved` holds, per draft and field, why its last
+  // save was not stored; the field's next stored (or unchanged) save clears it. `stored` is the
+  // newest known state of every draft, by ID, updated as soon as a host answer arrives (before
+  // React renders it).
+  //
+  // A save is sent on the version the edit was made on, advanced only across this tab's own
+  // acknowledged writes (`acked`: draft ID -> version written on -> version it produced). A
+  // version this tab only learned from a reload (another tab's write) is never used for an edit
+  // made before it, so that edit gets an explicit conflict instead of overwriting the other tab.
   const saves = useRef<Promise<void>>(Promise.resolve());
   const unsaved = useRef(new Map<string, string>());
   const stored = useRef(new Map<string, DraftView>());
+  const acked = useRef(new Map<string, Map<number, number>>());
+  /** Send one of this tab's writes on `version`, recording what it produced. */
+  const mine = useCallback(async (draftId: string, version: number, call: Promise<DraftView>) => {
+    const d = await call;
+    const chain = acked.current.get(draftId) ?? new Map<number, number>();
+    chain.set(version, d.version);
+    acked.current.set(draftId, chain);
+    return d;
+  }, []);
+  /** `version`, moved forward across this tab's own acknowledged writes to the draft. */
+  const ownVersion = useCallback((draftId: string, version: number) => {
+    const chain = acked.current.get(draftId);
+    let v = version;
+    for (let next = chain?.get(v); next !== undefined && next > v; next = chain?.get(v)) v = next;
+    return v;
+  }, []);
   const know = useCallback((d: DraftView) => {
     const had = stored.current.get(d.draftId);
     if (!had || had.version <= d.version) stored.current.set(d.draftId, d);
@@ -175,16 +196,23 @@ export function DraftsProvider({
   const change = useCallback(async (run: () => Promise<DraftView>) => (await attempt(run)) === null, [attempt]);
 
   /**
-   * Queue a text save for one named draft. `run` gets that draft's newest stored state and
-   * returns null when nothing changed.
+   * Queue a text save for one named draft. `run` gets that draft's newest stored state, to skip
+   * a save that changes nothing (null), and the version to send it on.
    */
   const save = useCallback(
-    (draftId: string, field: string, run: (d: DraftView) => Promise<DraftView> | null): Promise<void> => {
+    (
+      draftId: string,
+      field: string,
+      run: (d: DraftView, version: number) => Promise<DraftView> | null,
+    ): Promise<void> => {
+      // The version the edit was made on: what this tab knew when the field was left.
+      const basis = stored.current.get(draftId)?.version;
       const link = saves.current.then(async () => {
         const d = stored.current.get(draftId);
-        if (!d) return; // discarded meanwhile
-        const call = run(d);
-        const failed = call ? await attempt(() => call, false) : null;
+        if (!d || basis === undefined) return; // discarded meanwhile
+        const version = ownVersion(draftId, basis);
+        const call = run(d, version);
+        const failed = call ? await attempt(() => mine(draftId, version, call), false) : null;
         const key = `${draftId}:${field}`;
         if (failed) unsaved.current.set(key, failed);
         else {
@@ -196,7 +224,7 @@ export function DraftsProvider({
       saves.current = link;
       return link;
     },
-    [attempt],
+    [attempt, mine, ownVersion],
   );
 
   const value = useMemo<DraftsApi>(
@@ -219,21 +247,22 @@ export function DraftsProvider({
         }
         return change(async () => {
           const d = active ?? (await api.drafts.create());
-          return api.drafts.stage(d.draftId, d.version, edit);
+          return mine(d.draftId, d.version, api.drafts.stage(d.draftId, d.version, edit));
         });
       },
       unstage: async (key) => {
-        if (active) await change(() => api.drafts.unstage(active.draftId, active.version, key));
+        if (active)
+          await change(() =>
+            mine(active.draftId, active.version, api.drafts.unstage(active.draftId, active.version, key)),
+          );
       },
       setRationale: (draftId, text) =>
-        save(draftId, "rationale", (d) =>
-          text === d.rationale ? null : api.drafts.rationale(d.draftId, d.version, text),
+        save(draftId, "rationale", (d, version) =>
+          text === d.rationale ? null : api.drafts.rationale(draftId, version, text),
         ),
       setRequest: (draftId, request) =>
-        save(draftId, "request", (d) =>
-          JSON.stringify(request) === JSON.stringify(d.request)
-            ? null
-            : api.drafts.request(d.draftId, d.version, request),
+        save(draftId, "request", (d, version) =>
+          JSON.stringify(request) === JSON.stringify(d.request) ? null : api.drafts.request(draftId, version, request),
         ),
       settled: async (draftId) => {
         // A save queued while waiting extends the chain; wait until the tail stops moving.
@@ -257,7 +286,7 @@ export function DraftsProvider({
       },
       staged: (objectId, field) => active?.steps.find((s) => s.objectId === objectId && s.field === field),
     }),
-    [list, active, activeId, notice, change, save, refresh],
+    [list, active, activeId, notice, change, save, mine, refresh],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

@@ -173,7 +173,9 @@ The handoff is built only from what the host has stored. The rationale and the r
 saved on blur, one save after another. Each save is bound to the draft it was typed in and runs
 on that draft's newest stored version, so switching drafts while a save waits cannot redirect
 it, and a save's answer never changes which draft is open. An answer to an older save from the
-same form does not reset edits made since. **Hand off to agent** first
+same form does not reset edits made since. A save is sent on the version its edit was made on,
+moved forward only across this tab's own acknowledged writes: if another tab saved meanwhile,
+the queued edit gets `409 DRAFT_CONFLICT` and the other tab's text stays. **Hand off to agent** first
 ends the edit in progress, and the dialog waits until every save so far has finished before it
 asks for the export. If a save was not stored (a version conflict, a host error), the dialog
 says why and builds no handoff, until that field's next save goes through.
@@ -424,7 +426,7 @@ The browser is not a trust boundary, and neither is this host for anything beyon
 - `apps/ui/e2e/editing.e2e.ts`: in Chromium, the golden path from inspector edits across two
   modules to the handoff (10), an error and a warning (11), a handoff right after an edit with a
   delayed and then a refused save (11b), queued saves across two drafts and rapid edits with delayed saves
-  (11c), reload, host restart and a second
+  (11c), an edit queued behind a save that conflicts with another tab (11d), reload, host restart and a second
   tab (12), a stale draft (13), and an unreadable draft file (14).
 - `apps/ui/test/proposals.test.ts`: the inbox over HTTP with the real CLI and a test-only
   reviewer key: an agent's proposal with the CLI's digest and operations; no write route

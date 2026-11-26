@@ -403,6 +403,72 @@ test("11c: queued saves stay with the draft they were made in; older answers kee
   assert.deepEqual(errors, []);
 });
 
+test("11d: an edit queued behind a conflicting save gets a conflict, not another tab's version", async () => {
+  const repo = courseDesk();
+  const h = await host(repo, tempDir("vcv-ui-state-"));
+  const { page: a, errors } = await tab(h);
+  await selectModule(a, "Enrollment");
+  await stage(a, "Name", "Enrollments", 1);
+  const field = (page: Page, label: string) =>
+    tray(page)
+      .getByTestId("request")
+      .getByRole("textbox", { name: new RegExp(`^${label}`) });
+  const openRequest = async (page: Page) => {
+    const request = tray(page).getByTestId("request");
+    if ((await request.getAttribute("open")) === null) await request.locator("summary").click();
+  };
+  await openRequest(a);
+  let saved = a.waitForResponse("**/api/drafts/*/request");
+  await field(a, "Behavior").fill("Original behavior");
+  await field(a, "Behavior").blur();
+  await saved;
+
+  const { page: b } = await tab(h);
+  await tray(b).getByTestId("steps").waitFor();
+
+  // Tab A: its rationale save is held before it reaches the host; a Scope edit queues behind it.
+  const held = await holdRoute(a, "**/api/drafts/*/rationale");
+  const why = tray(a).getByRole("textbox", { name: /Why/ });
+  await why.fill("A why");
+  await why.blur();
+  await held.arrival(0);
+  await field(a, "Scope").fill("src/enrollment/**");
+  await field(a, "Scope").blur();
+
+  // Tab B saves a different Behavior meanwhile.
+  await openRequest(b);
+  saved = b.waitForResponse("**/api/drafts/*/request");
+  await field(b, "Behavior").fill("B behavior");
+  await field(b, "Behavior").blur();
+  assert.equal((await saved).status(), 200);
+
+  // A's held save conflicts, and so does the Scope edit queued behind it.
+  const rationale = a.waitForResponse("**/api/drafts/*/rationale");
+  const queued = a.waitForResponse("**/api/drafts/*/request");
+  held.release();
+  assert.equal((await rationale).status(), 409);
+  assert.equal((await queued).status(), 409, "the queued edit is sent on the version it was made on");
+  await a.unroute("**/api/drafts/*/rationale");
+
+  const draft = (await storedDrafts(a)).drafts[0];
+  assert.equal(draft?.request.behavior, "B behavior", "tab B's saved Behavior survives");
+  assert.deepEqual(draft?.request.scope, []);
+  assert.equal(draft?.rationale, "");
+  await tray(a)
+    .getByTestId("draft-notice")
+    .getByText(/changed in another tab/)
+    .waitFor();
+  assert.equal(await field(a, "Behavior").inputValue(), "B behavior", "tab A reloads B's text");
+  // A handoff from A says the edit was not saved.
+  await a.getByTestId("export-draft").click();
+  await a
+    .getByTestId("export-error")
+    .getByText(/not saved/)
+    .waitFor();
+  assert.equal(await a.getByTestId("export-change").count(), 0);
+  assert.deepEqual(errors, []);
+});
+
 test("12: a draft survives reload and host restart; a second tab gets an explicit conflict, not an overwrite", async () => {
   const repo = courseDesk();
   const stateDir = tempDir("vcv-ui-state-");
