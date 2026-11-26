@@ -103,7 +103,11 @@ export function DraftPanel({ graph }: { graph: GraphView }) {
               type="button"
               className="btn btn-primary"
               disabled={active.steps.length === 0}
-              onClick={() => setExporting(true)}
+              onClick={() => {
+                // Finish the field being edited first: its blur starts the save the handoff waits for.
+                if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+                setExporting(true);
+              }}
               data-testid="export-draft"
             >
               <Icon name="send" small /> Hand off to agent

@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { DraftExport } from "../../src/types.ts";
 import { api } from "../api.ts";
+import { useDrafts } from "../drafts/DraftsProvider.tsx";
 import { Icon } from "../icons.tsx";
 import { Command } from "./DraftCheck.tsx";
 
@@ -18,8 +19,28 @@ const LABEL: Record<DraftExport["metadata"]["check"], { tone: string; title: str
 export function ExportDialog({ draftId, onClose }: { draftId: string; onClose(): void }) {
   const [out, setOut] = useState<DraftExport | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { settled } = useDrafts();
+  // Build the handoff only from what the host has stored: wait for the save the last edit started
+  // (a blur just before this opened), and refuse when it, or an earlier one, was not stored.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: built once per draft; `settled` reads refs
   useEffect(() => {
-    api.drafts.export(draftId).then(setOut, (e: Error) => setError(e.message));
+    let live = true;
+    settled(draftId).then(async (unsaved) => {
+      if (!live) return;
+      if (unsaved) {
+        setError(`Your last edit is not saved, so no handoff was built: ${unsaved}`);
+        return;
+      }
+      try {
+        const next = await api.drafts.export(draftId);
+        if (live) setOut(next);
+      } catch (e) {
+        if (live) setError((e as Error).message);
+      }
+    });
+    return () => {
+      live = false;
+    };
   }, [draftId]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -57,12 +78,12 @@ export function ExportDialog({ draftId, onClose }: { draftId: string; onClose():
           </button>
         </header>
         {error && (
-          <div className="notice n-danger">
+          <div className="notice n-danger" data-testid="export-error">
             <Icon name="alert" />
             <div className="notice-body">{error}</div>
           </div>
         )}
-        {!out && !error && <div className="skel" style={{ height: 160 }} />}
+        {!out && !error && <div className="skel" style={{ height: 160 }} data-testid="export-pending" />}
         {out && label && (
           <div className="dialog-body">
             <div className={`notice ${label.tone}`} data-testid="export-check" data-check={out.metadata.check}>

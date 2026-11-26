@@ -26,6 +26,11 @@ export type DraftsApi = {
   unstage(key: string): Promise<void>;
   setRationale(text: string): Promise<void>;
   setRequest(request: DraftRequest): Promise<void>;
+  /**
+   * Wait for every rationale and request save started so far. Resolves to null when the draft's
+   * texts are all stored, or to why one is not, so a handoff never goes out with an older text.
+   */
+  settled(draftId: string): Promise<string | null>;
   discard(draftId: string, version: number | null): Promise<void>;
   staged(objectId: string, field: EditableFieldName): DraftStepView | undefined;
 };
@@ -73,6 +78,12 @@ export function DraftsProvider({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const seq = useRef(0);
+  // Text saves (rationale, request) run one after another on the newest stored version, so a
+  // second blur does not race the first. `saves` is the tail of that chain. `unsaved` holds, per
+  // field, why its last save was not stored; the field's next stored (or unchanged) save clears it.
+  const saves = useRef<Promise<void>>(Promise.resolve());
+  const unsaved = useRef(new Map<string, string>());
+  const latest = useRef<DraftView | null>(null);
 
   const refresh = useCallback(async () => {
     if (!projectId) return setList(null);
@@ -109,32 +120,55 @@ export function DraftsProvider({
   }, [projectId, activeId]);
 
   const active = list?.drafts.find((d) => d.draftId === activeId) ?? null;
+  latest.current = active;
 
   /** Put one draft's new state into the list. */
   const put = useCallback((d: DraftView) => {
+    if (latest.current?.draftId === d.draftId) latest.current = d;
     setList((l) => (l ? { ...l, drafts: [d, ...l.drafts.filter((x) => x.draftId !== d.draftId)] } : l));
     setActiveId(d.draftId);
   }, []);
 
   /** Run a change; on a version conflict, reload and say that the change was not applied. */
-  const change = useCallback(
-    async (run: () => Promise<DraftView>) => {
+  const attempt = useCallback(
+    async (run: () => Promise<DraftView>): Promise<string | null> => {
       try {
         put(await run());
         setNotice(null);
-        return true;
+        return null;
       } catch (e) {
         if (e instanceof HostError && e.code === "DRAFT_CONFLICT") {
-          setNotice({
-            tone: "warn",
-            text: "This draft was changed in another tab or window. It has been reloaded; your last change was not applied, so make it again if you still want it.",
-          });
+          const text =
+            "This draft was changed in another tab or window. It has been reloaded; your last change was not applied, so make it again if you still want it.";
+          setNotice({ tone: "warn", text });
           await refresh();
-        } else setNotice({ tone: "danger", text: message(e) });
-        return false;
+          return text;
+        }
+        const text = message(e);
+        setNotice({ tone: "danger", text });
+        return text;
       }
     },
     [put, refresh],
+  );
+  const change = useCallback(async (run: () => Promise<DraftView>) => (await attempt(run)) === null, [attempt]);
+
+  /** Queue a text save. `run` gets the newest stored draft and returns null when nothing changed. */
+  const save = useCallback(
+    (field: string, run: (d: DraftView) => Promise<DraftView> | null): Promise<void> => {
+      const link = saves.current.then(async () => {
+        const d = latest.current;
+        if (!d) return;
+        const call = run(d);
+        const failed = call ? await attempt(() => call) : null;
+        const key = `${d.draftId}:${field}`;
+        if (failed) unsaved.current.set(key, failed);
+        else unsaved.current.delete(key);
+      });
+      saves.current = link;
+      return link;
+    },
+    [attempt],
   );
 
   const value = useMemo<DraftsApi>(
@@ -163,13 +197,23 @@ export function DraftsProvider({
       unstage: async (key) => {
         if (active) await change(() => api.drafts.unstage(active.draftId, active.version, key));
       },
-      setRationale: async (text) => {
-        if (active && text !== active.rationale)
-          await change(() => api.drafts.rationale(active.draftId, active.version, text));
-      },
-      setRequest: async (request) => {
-        if (active && JSON.stringify(request) !== JSON.stringify(active.request))
-          await change(() => api.drafts.request(active.draftId, active.version, request));
+      setRationale: (text) =>
+        save("rationale", (d) => (text === d.rationale ? null : api.drafts.rationale(d.draftId, d.version, text))),
+      setRequest: (request) =>
+        save("request", (d) =>
+          JSON.stringify(request) === JSON.stringify(d.request)
+            ? null
+            : api.drafts.request(d.draftId, d.version, request),
+        ),
+      settled: async (draftId) => {
+        // A save queued while waiting extends the chain; wait until the tail stops moving.
+        let tail: Promise<void>;
+        do {
+          tail = saves.current;
+          await tail;
+        } while (tail !== saves.current);
+        for (const [key, why] of unsaved.current) if (key.startsWith(`${draftId}:`)) return why;
+        return null;
       },
       discard: async (id, version) => {
         try {
@@ -183,7 +227,7 @@ export function DraftsProvider({
       },
       staged: (objectId, field) => active?.steps.find((s) => s.objectId === objectId && s.field === field),
     }),
-    [list, active, activeId, notice, change, refresh],
+    [list, active, activeId, notice, change, save, refresh],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

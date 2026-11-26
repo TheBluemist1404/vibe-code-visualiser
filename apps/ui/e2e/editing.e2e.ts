@@ -195,6 +195,78 @@ test("11: an invalid operation and a warning are reported; the handoff says it n
   assert.deepEqual(errors, []);
 });
 
+test("11b: handing off right after editing waits for the save; a save that fails stops the handoff", async () => {
+  const repo = courseDesk();
+  const before = tree(repo);
+  const { page, errors } = await tab(await host(repo, tempDir("vcv-ui-state-")));
+  await selectModule(page, "Enrollment");
+  await stage(page, "Name", "Enrollments", 1);
+  const request = tray(page).getByTestId("request");
+  await request.locator("summary").click();
+  const behavior = request.getByRole("textbox", { name: /^Behavior/ });
+  const criteria = request.getByRole("textbox", { name: /^Acceptance criteria/ });
+  await behavior.fill("Enrollment reads Enrollments everywhere.");
+  const saved = page.waitForResponse("**/api/drafts/*/request");
+  await behavior.blur();
+  await saved;
+
+  // A slow host: the save started by clicking Hand off lands well after the dialog opens.
+  let release!: () => void;
+  const held = new Promise<void>((r) => {
+    release = r;
+  });
+  await page.route("**/api/drafts/*/request", async (route) => {
+    await held;
+    await route.continue();
+  });
+  // Edit the last field and click Hand off straight away, with no blur of its own.
+  await criteria.fill("The API path reads /enrollments");
+  await page.getByTestId("export-draft").click();
+  const dialog = page.getByTestId("export-dialog");
+  await dialog.getByTestId("export-pending").waitFor();
+  await page.waitForTimeout(300);
+  assert.equal(await dialog.getByTestId("export-change").count(), 0, "no handoff before the save is stored");
+  release();
+  await dialog.getByTestId("export-change").waitFor();
+  const change = JSON.parse((await dialog.getByTestId("export-change").textContent()) ?? "");
+  assert.deepEqual(change.implementation, {
+    behavior: "Enrollment reads Enrollments everywhere.",
+    acceptanceCriteria: ["The API path reads /enrollments"],
+  });
+  await dialog.getByRole("button", { name: "Close" }).click();
+  await page.unroute("**/api/drafts/*/request");
+
+  // A host that refuses the save: the dialog says so and builds no handoff.
+  await page.route("**/api/drafts/*/request", (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "INTERNAL", message: "disk full" } }),
+    }),
+  );
+  await criteria.fill("The API path reads /enrollments\nOld links redirect");
+  await page.getByTestId("export-draft").click();
+  await dialog
+    .getByTestId("export-error")
+    .getByText(/not saved.*disk full/)
+    .waitFor();
+  assert.equal(await dialog.getByTestId("export-change").count(), 0);
+  await dialog.getByRole("button", { name: "Close" }).click();
+
+  // Once the save goes through, the handoff carries the newest text.
+  await page.unroute("**/api/drafts/*/request");
+  await criteria.focus();
+  await page.getByTestId("export-draft").click();
+  await dialog.getByTestId("export-change").waitFor();
+  const retried = JSON.parse((await dialog.getByTestId("export-change").textContent()) ?? "");
+  assert.deepEqual(retried.implementation.acceptanceCriteria, [
+    "The API path reads /enrollments",
+    "Old links redirect",
+  ]);
+  assert.deepEqual(tree(repo), before);
+  assert.deepEqual(errors, []);
+});
+
 test("12: a draft survives reload and host restart; a second tab gets an explicit conflict, not an overwrite", async () => {
   const repo = courseDesk();
   const stateDir = tempDir("vcv-ui-state-");

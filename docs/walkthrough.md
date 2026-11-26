@@ -29,6 +29,8 @@ VCV_HOME=~/projects/vibe-code-visualiser
 TOUR=~/vcv-tour
 REPO=$TOUR/course-desk
 KEY=$TOUR/keys/reviewer.pem
+# The explorer keeps this tour's drafts and layouts here, apart from any other explorer you run
+export VCV_UI_STATE_DIR=$TOUR/ui-state
 DOWNLOADS="/mnt/c/Users/Helios Neo 16/Downloads"
 # The VCV command line
 vcv() { node --experimental-strip-types --no-warnings "$VCV_HOME/apps/cli/src/main.ts" "$@"; }
@@ -392,8 +394,12 @@ commands), and GitHub enforcing the gate on a real pull request. See
 
 ## Reset or clean up
 
+In terminal **A**, stop the tour's explorer (Ctrl+C). Then remove the tour's own files: the
+workspace (which holds its drafts and layouts in `ui-state/`) and the helper file.
+
 ```bash
-pkill -f apps/ui/src/main.ts; rm -rf ~/vcv-tour ~/.local/state/vcv/ui ~/vcv-tour-env.sh
+rm -rf ~/vcv-tour ~/vcv-tour-env.sh
 ```
 
-To run the tour again, start at step 0.
+Nothing else is touched: other explorer sessions keep running, and their drafts and layouts in
+the default state directory stay where they are. To run the tour again, start at step 0.

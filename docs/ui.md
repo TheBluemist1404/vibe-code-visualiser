@@ -169,6 +169,12 @@ empty name) comes back as a `SCHEMA` error on that operation; it stays in the dr
 The dialog shows both, with Copy and Download and the CLI command to check the file. It is
 rendered into `<body>`, so it stays inside the window however short the window is.
 
+The handoff is built only from what the host has stored. The rationale and the request are
+saved on blur, one save after another on the newest stored version; **Hand off to agent** first
+ends the edit in progress, and the dialog waits until every save so far has finished before it
+asks for the export. If a save was not stored (a version conflict, a host error), the dialog
+says why and builds no handoff, until that field's next save goes through.
+
 ## The proposal inbox
 
 `#/proposals` (the **Proposals** tab, with the pending count) lists what `listProposals` finds in
@@ -413,7 +419,8 @@ The browser is not a trust boundary, and neither is this host for anything beyon
   version conflicts; corrupt, oversized and foreign files; refused input and the absence of any
   submit or approve route.
 - `apps/ui/e2e/editing.e2e.ts`: in Chromium, the golden path from inspector edits across two
-  modules to the handoff (10), an error and a warning (11), reload, host restart and a second
+  modules to the handoff (10), an error and a warning (11), a handoff right after an edit with a
+  delayed and then a refused save (11b), reload, host restart and a second
   tab (12), a stale draft (13), and an unreadable draft file (14).
 - `apps/ui/test/proposals.test.ts`: the inbox over HTTP with the real CLI and a test-only
   reviewer key: an agent's proposal with the CLI's digest and operations; no write route
