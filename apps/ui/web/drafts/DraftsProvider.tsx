@@ -2,7 +2,14 @@
 // checkout; this only remembers which draft this tab is working on and mirrors the host's answers.
 // Every change sends the version it was made on, so a second tab gets an explicit conflict.
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import type { DraftList, DraftStepView, DraftView, EditableFieldName, StagedEdit } from "../../src/types.ts";
+import type {
+  DraftList,
+  DraftRequest,
+  DraftStepView,
+  DraftView,
+  EditableFieldName,
+  StagedEdit,
+} from "../../src/types.ts";
 import { api, HostError } from "../api.ts";
 
 export type Notice = { tone: "warn" | "danger"; text: string };
@@ -18,6 +25,7 @@ export type DraftsApi = {
   stage(edit: StagedEdit): Promise<boolean>;
   unstage(key: string): Promise<void>;
   setRationale(text: string): Promise<void>;
+  setRequest(request: DraftRequest): Promise<void>;
   discard(draftId: string, version: number | null): Promise<void>;
   staged(objectId: string, field: EditableFieldName): DraftStepView | undefined;
 };
@@ -158,6 +166,10 @@ export function DraftsProvider({
       setRationale: async (text) => {
         if (active && text !== active.rationale)
           await change(() => api.drafts.rationale(active.draftId, active.version, text));
+      },
+      setRequest: async (request) => {
+        if (active && JSON.stringify(request) !== JSON.stringify(active.request))
+          await change(() => api.drafts.request(active.draftId, active.version, request));
       },
       discard: async (id, version) => {
         try {

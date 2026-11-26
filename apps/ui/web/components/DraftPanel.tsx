@@ -1,8 +1,8 @@
-// The draft panel: this tab's local draft (staged typed operations, rationale), the engine's
+// The draft panel: this tab's local draft (staged typed operations, rationale, implementation request), the engine's
 // dry run of it, the handoff for a coding agent, and every other draft or unreadable draft file
 // for this checkout. It never submits or approves; a stale draft is shown as stale, not retargeted.
 import { useEffect, useRef, useState } from "react";
-import type { DraftView, GraphView } from "../../src/types.ts";
+import type { DraftRequest, DraftView, GraphView } from "../../src/types.ts";
 import { api } from "../api.ts";
 import { useDrafts } from "../drafts/DraftsProvider.tsx";
 import { Icon } from "../icons.tsx";
@@ -186,6 +186,7 @@ export function DraftPanel({ graph }: { graph: GraphView }) {
                   </ol>
                 )}
                 <Rationale draft={active} onSave={d.setRationale} />
+                <Request draft={active} onSave={d.setRequest} />
               </div>
               <div className="tray-col">
                 <h3 className="tray-sub">Engine check</h3>
@@ -256,5 +257,77 @@ function Rationale({ draft, onSave }: { draft: DraftView; onSave(text: string): 
         }}
       />
     </>
+  );
+}
+
+type RequestText = { behavior: string; acceptanceCriteria: string; suggestedTests: string; scope: string };
+
+const asText = (r: DraftRequest): RequestText => ({
+  behavior: r.behavior,
+  acceptanceCriteria: r.acceptanceCriteria.join("\n"),
+  suggestedTests: r.suggestedTests.join("\n"),
+  scope: r.scope.join("\n"),
+});
+const lines = (s: string) =>
+  s
+    .split("\n")
+    .map((x) => x.trim())
+    .filter(Boolean);
+const asRequest = (t: RequestText): DraftRequest => ({
+  behavior: t.behavior,
+  acceptanceCriteria: lines(t.acceptanceCriteria),
+  suggestedTests: lines(t.suggestedTests),
+  scope: lines(t.scope),
+});
+
+const REQUEST_FIELDS: { key: keyof RequestText; label: string; hint: string; rows: number }[] = [
+  { key: "behavior", label: "Behavior", hint: "What the code should do afterwards, in plain words", rows: 2 },
+  { key: "acceptanceCriteria", label: "Acceptance criteria", hint: "One checkable statement per line", rows: 3 },
+  { key: "suggestedTests", label: "Suggested tests", hint: "Optional, one per line", rows: 2 },
+  { key: "scope", label: "Scope", hint: "Optional: paths or globs the agent may change, one per line", rows: 2 },
+];
+
+/**
+ * What the coding agent is asked to build once the change is approved. It travels in the
+ * handoff as the proposal's implementation request, so the reviewer approves it together with
+ * the model edits and the digest covers it. Optional: a wording change may need none.
+ */
+function Request({ draft, onSave }: { draft: DraftView; onSave(r: DraftRequest): Promise<void> }) {
+  const [text, setText] = useState(() => asText(draft.request));
+  const shown = useRef(JSON.stringify(draft.request));
+  useEffect(() => {
+    const stored = JSON.stringify(draft.request);
+    if (stored !== shown.current) {
+      shown.current = stored;
+      setText(asText(draft.request));
+    }
+  }, [draft.request]);
+  const filled = Object.values(text).some((v) => v.trim());
+  return (
+    <details className="request" open={filled} data-testid="request">
+      <summary className="tray-sub">
+        Implementation request <span className="muted small">(optional; the agent builds this after approval)</span>
+      </summary>
+      {REQUEST_FIELDS.map((f) => (
+        <div key={f.key} className="request-field">
+          <label className="small" htmlFor={`request-${f.key}`}>
+            {f.label} <span className="muted">· {f.hint}</span>
+          </label>
+          <textarea
+            id={`request-${f.key}`}
+            className="input"
+            rows={f.rows}
+            value={text[f.key]}
+            disabled={draft.stale}
+            onChange={(e) => setText((t) => ({ ...t, [f.key]: e.target.value }))}
+            onBlur={() => {
+              const next = asRequest(text);
+              shown.current = JSON.stringify(next);
+              onSave(next);
+            }}
+          />
+        </div>
+      ))}
+    </details>
   );
 }

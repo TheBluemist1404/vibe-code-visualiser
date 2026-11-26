@@ -74,8 +74,24 @@ test("an agent's CLI proposal shows up as pending with the same digest and opera
   assert.match(approveCmd, new RegExp(`--digest ${cli.proposal.proposalDigest}`));
   assert.match(approveCmd, /--key <your reviewer key file>/, "no key path is filled in or known here");
   assert.equal(r.agent, null);
+  assert.equal(r.implementation, undefined, "no request was proposed");
   assert.equal(projectStatus(repo).model!.revision, "rev-1");
   assert.deepEqual(tree(repo), before, "reading the inbox changes nothing in the checkout");
+});
+
+test("a pending proposal shows the implementation request the digest covers", async () => {
+  const { repo } = setup();
+  const implementation = {
+    behavior: "The web module describes pages for students and staff.",
+    acceptanceCriteria: ["The landing page names both audiences"],
+    scope: ["web/**"],
+  };
+  const s = submit(repo, "chg-web", describeWeb("Pages for students and staff."), undefined, { implementation });
+  assert.equal(s.status, 0, s.stderr);
+  const r = await (await open(repo)).review("chg-web");
+  assert.equal(r.lifecycle, "pending");
+  assert.deepEqual(r.implementation, implementation);
+  assert.equal(r.proposalDigest, cliPreview(repo, "chg-web").proposal.proposalDigest);
 });
 
 test("there is no write route: POST/PUT/DELETE on proposals is refused, and approve is not a route", async () => {

@@ -262,6 +262,10 @@ button { font: inherit; color: inherit; }
 .tray.is-done .tray-body { padding-top: var(--space-3); }
 .tray-cols { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-4); }
 .tray-col { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.request { display: flex; flex-direction: column; gap: var(--space-2); }
+.request > summary { cursor: pointer; }
+.request[open] > summary { margin-bottom: var(--space-2); }
+.request-field { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--space-2); }
 .tray-sub { font: 600 13px/18px var(--font-sans); margin: 0; color: var(--ink); }
 .staged { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 .staged-item { display: flex; align-items: flex-start; gap: var(--space-2); padding: var(--space-2) var(--space-3); background: var(--surface-raised); border: 1px solid var(--line); border-left: 3px solid var(--accent); border-radius: var(--radius-sm); animation: slide-in 240ms var(--ease-out) both; }

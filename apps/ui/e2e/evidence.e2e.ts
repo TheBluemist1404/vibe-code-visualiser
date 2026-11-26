@@ -182,8 +182,28 @@ test("before merging: without a base commit the page names what is missing and r
   assert.match((await rec.textContent()) ?? "", /caller-asserted/);
   assert.match((await rec.textContent()) ?? "", new RegExp(w.base.slice(0, 12)));
   assert.equal(await page.getByTestId("gate-missing").count(), 0);
+  // A failing test is a real block, not missing proof.
+  assert.equal(await decision.getAttribute("data-proof"), null);
+  assert.equal(await page.getByTestId("gate-unproven").count(), 0);
   await shot(page, "35-gate-decision");
   await assertReadOnly(page);
+  assert.deepEqual(errors, []);
+});
+
+test("before merging: passing results handed to the page still block, labelled as not proven yet rather than failing", async () => {
+  const { page, errors } = await open(w.repo, "#/gate", {
+    baseCommit: w.base,
+    runs: [claimedRun(w.repo)],
+    sources: { runs: ["agent-run.json"], policy: null },
+  });
+  // The engine's decision is unchanged; only the wording says what is missing.
+  const decision = page.locator('[data-testid="gate-decision"][data-decision="block"][data-proof="missing"]');
+  await decision.waitFor();
+  assert.match((await decision.textContent()) ?? "", /not proven yet/i);
+  const note = page.getByTestId("gate-unproven");
+  assert.match((await note.textContent()) ?? "", /Nothing is failing: \d+\/\d+ required criteria passed/);
+  assert.match((await note.textContent()) ?? "", /vcv gate --junit/);
+  await shot(page, "35b-gate-unproven");
   assert.deepEqual(errors, []);
 });
 

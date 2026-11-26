@@ -117,6 +117,18 @@ test("10: a multi-module draft is checked by the engine and handed off as a chan
   await stage(page, "Statement", "Listing notifications needs a recipientId.", 2);
   await tray(page).getByRole("textbox", { name: /Why/ }).fill("Clearer names");
   await tray(page).getByRole("textbox", { name: /Why/ }).blur();
+  // The implementation request: closed while empty, saved field by field on blur.
+  const request = tray(page).getByTestId("request");
+  await request.locator("summary").click();
+  for (const [label, text] of [
+    ["Behavior", "Enrollment reads Enrollments everywhere."],
+    ["Acceptance criteria", "The API path reads /enrollments\n\nOld links redirect"],
+    ["Scope", "src/enrollment/**"],
+  ] as const) {
+    const box = request.getByRole("textbox", { name: new RegExp(`^${label}`) });
+    await box.fill(text);
+    await box.blur();
+  }
 
   const steps = tray(page).getByTestId("steps");
   assert.match(
@@ -136,14 +148,23 @@ test("10: a multi-module draft is checked by the engine and handed off as a chan
   assert.match((await page.locator('[data-module="mod-enrollment"] .node-name').textContent()) ?? "", /^Enrollment/);
   await shot(page, "11-draft");
 
+  // A short window: the dialog sits in the window, not inside the (animated) tray it opens from.
+  await page.setViewportSize({ width: 1280, height: 640 });
   await page.getByTestId("export-draft").click();
   const dialog = page.getByTestId("export-dialog");
   await dialog.getByTestId("export-change").waitFor();
+  const box = await dialog.boundingBox();
+  assert.ok(box && box.y >= 0 && box.y + box.height <= 640, `dialog within the window: ${JSON.stringify(box)}`);
   assert.equal(await dialog.getByTestId("export-check").getAttribute("data-check"), "valid");
   const change = JSON.parse((await dialog.getByTestId("export-change").textContent()) ?? "");
   assert.equal(proposedChangeSchema.safeParse(change).success, true);
   assert.equal(change.expectedRevision, revision);
   assert.equal(change.rationale, "Clearer names");
+  assert.deepEqual(change.implementation, {
+    behavior: "Enrollment reads Enrollments everywhere.",
+    acceptanceCriteria: ["The API path reads /enrollments", "Old links redirect"],
+    scope: ["src/enrollment/**"],
+  });
   const direct = previewProposal(repo, { change });
   assert.ok(direct.ok && direct.data.validation.appliesToCurrent);
   await shot(page, "12-handoff");

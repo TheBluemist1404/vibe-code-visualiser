@@ -31,7 +31,7 @@ browser (React, @xyflow/react)  ──HTTP JSON──▶  host (Node, apps/ui/sr
 | `src/edits.ts` | Which fields are editable, the typed operation each becomes, and why the rest is read-only |
 | `src/drafts/format.ts` | The draft file format (`vcv-ui-draft-1`), limits, and the checks every file passes on load |
 | `src/drafts/store.ts` | Draft files outside the checkout: scoped directories, version-checked atomic writes, discard |
-| `src/drafts/service.ts` | The draft workflow: create, stage, unstage, rationale, discard, dry run, export |
+| `src/drafts/service.ts` | The draft workflow: create, stage, unstage, rationale, implementation request, discard, dry run, export |
 | `src/drafts/preview.ts` | The dry-run adapter over `@vcv/repo` `previewProposal` |
 | `src/drafts/handoff.ts` | The export: a strict proposed change plus separate metadata |
 | `src/drafts/routes.ts` | The `/api/drafts` routes |
@@ -121,7 +121,8 @@ the client has no rules of its own; the engine decides whether the result is val
 layout, never under the checkout or `.vcv/`). `<key>` hashes the checkout root and project ID,
 so another checkout or project never sees the draft. A file holds the format
 (`vcv-ui-draft-1`), the draft ID, a version, the checkout root and project ID, the **base**
-model (revision, full `modelKey`, branch, commit), the ordered steps and the rationale. Each
+model (revision, full `modelKey`, branch, commit), the ordered steps, the rationale and the
+optional implementation request (behavior, acceptance criteria, suggested tests, scope). Each
 step stores the typed operation built **when it was staged**, against the base model, plus
 display context (object, field, before and after).
 
@@ -134,8 +135,9 @@ display context (object, field, before and after).
 - **Reads** check size (256 KiB), format, scope and shape. A corrupt, oversized, foreign or
   unknown-format file is reported (`DRAFT_CORRUPT`, `DRAFT_TOO_LARGE`, `DRAFT_FOREIGN`,
   `DRAFT_UNSUPPORTED_FORMAT`), left as it is, and deleted only when someone discards it.
-- **Limits:** 50 steps, 4000-character rationale and text values, 20 drafts per project, 64 KiB
-  request bodies.
+- **Limits:** 50 steps, 4000-character rationale, behavior and text values, 30 acceptance
+  criteria and 30 suggested tests and 50 scope lines of up to 500 characters, 20 drafts per
+  project, 64 KiB request bodies. A malformed request body is `400 INVALID_REQUEST`.
 - **Correcting** a field replaces its step in place; staging the model's own value removes it.
 
 **Staleness is information.** A draft whose base `modelKey` differs from the checkout's (a new
@@ -154,14 +156,18 @@ empty name) comes back as a `SCHEMA` error on that operation; it stays in the dr
 **Handoff.** `GET /api/drafts/:id/export` returns:
 
 - `change`: a strict `ProposedModelChange` (`changeId`, `projectId`, `expectedRevision` = the
-  base, `rationale`, `operations`), which `vcv proposal preview --file` and `vcv proposal submit`
-  read as is. The change ID is `ui-<draft>-v<version>`, so a later version is a new change. No
+  base, `rationale`, `operations`, and `implementation` when the request has any text), which
+  `vcv proposal preview --file` and `vcv proposal submit` read as is. The implementation request
+  is part of the proposal, so the digest the reviewer approves covers it. Blank lines are dropped;
+  an incomplete request (no behavior, or no acceptance criterion) is exported as typed and the dry
+  run reports it as a `SCHEMA` error on `implementation`. An empty request sends none. The change ID is `ui-<draft>-v<version>`, so a later version is a new change. No
   proposer, approver, status or signature.
 - `metadata`, kept apart: draft ID and version, checkout root, base and current model identity,
   and the dry run's verdict (`valid`, `warnings`, `invalid` or `stale`) with `needsAgent`. An
   invalid or stale export is labelled as needing repair or integration, never as valid.
 
-The dialog shows both, with Copy and Download and the CLI command to check the file.
+The dialog shows both, with Copy and Download and the CLI command to check the file. It is
+rendered into `<body>`, so it stays inside the window however short the window is.
 
 ## The proposal inbox
 
@@ -185,6 +191,9 @@ The dialog shows both, with Copy and Download and the CLI command to check the f
      against the protected branch is the authority.
   4. *Model applied*: the resulting revision is in this checkout's history. Shown as done only on that positive evidence, taken from the record's own summary in the same read as the preview (`previewProposal`'s `record`), never from the capped list. A record that names no resulting revision, or one this history lacks, is unknown.
   5. *Implementation*: always unknown here (reconciliation is M4's `vcv reconcile`).
+- **Implementation request** (pending, stale and rejected proposals): the behavior, acceptance
+  criteria, suggested tests and scope the proposer asked for, which the digest covers, or a note
+  that there is none. Applied proposals show it under *Implementation* instead.
 - The engine's check and delta, as for drafts. An applied change is shown against its base and
   not rechecked (a recheck would always say `STALE_REVISION`).
 - Binding claims on changed or impacted objects, and what the integrity check cannot establish.
@@ -302,6 +311,11 @@ checked just now, with the limits of that check).
   - The decision, headline, reasons (with severity, basis and rule), criteria and runs are the
     gate's own. Reconciliation findings are listed as facts with their category and basis, and
     are not coloured as a verdict.
+  - When the gate blocks only because results are unproven (every blocking reason is
+    `RESULT_CLAIMED`, `CRITERION_UNVERIFIED` or `EVIDENCE_REQUIRED`, and no criterion failed), the
+    chip reads *Blocked: not proven yet* and a note says nothing is failing and that the merge
+    decision comes from a run the gate captures itself. The decision itself is unchanged
+    (`data-decision="block"`, `data-proof="missing"`).
   - Integrity says *caller-asserted*: CI's gate against the protected branch is the authority.
   - A policy file can be given with `--policy`. Test-run and policy files are read once at
     start; the host never re-reads or writes them.

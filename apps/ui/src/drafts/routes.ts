@@ -34,6 +34,8 @@ export async function draftRoute(
       return ok(desk.unstage(id, b));
     case "rationale":
       return ok(desk.annotate(id, b));
+    case "request":
+      return ok(desk.request(id, b));
     case "discard":
       return ok(desk.discard(id, b));
     case "preview":

@@ -2,6 +2,7 @@
 // and `vcv proposal submit` read) and, separately, the context it came from. Labelled with what
 // the engine's dry run found; it never claims a submission, an approval or an implementation.
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import type { DraftExport } from "../../src/types.ts";
 import { api } from "../api.ts";
 import { Icon } from "../icons.tsx";
@@ -38,7 +39,9 @@ export function ExportDialog({ draftId, onClose }: { draftId: string; onClose():
   };
   const label = out ? LABEL[out.metadata.check] : null;
 
-  return (
+  // Rendered into <body>: the draft tray it opens from keeps a transform from its entry
+  // animation, and a transformed ancestor would pin this fixed backdrop to the tray, not the window.
+  return createPortal(
     <div className="dialog-backdrop">
       <div
         className="dialog"
@@ -99,7 +102,8 @@ export function ExportDialog({ draftId, onClose }: { draftId: string; onClose():
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 

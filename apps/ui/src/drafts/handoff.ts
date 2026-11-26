@@ -2,8 +2,8 @@
 // shape `vcv proposal preview --file` and `vcv proposal submit` read, on the draft's original
 // base revision. Context that the change schema does not allow (draft ID, branch, model
 // identity) travels as separate metadata. Nothing here claims a proposer, an approver or a status.
-import type { DraftExport, DraftPreview, ModelIdentity } from "../types.ts";
-import type { DraftFile } from "./format.ts";
+import type { DraftExport, DraftPreview, ImplementationRequestView, ModelIdentity } from "../types.ts";
+import type { DraftFile, RequestDraft } from "./format.ts";
 
 export type HandoffChange = DraftExport["change"];
 
@@ -12,6 +12,7 @@ export const changeIdFor = (draft: DraftFile) => `ui-${draft.draftId.slice(2)}-v
 
 export function handoffChange(draft: DraftFile): HandoffChange {
   const rationale = draft.rationale.trim();
+  const implementation = draft.request ? requestOf(draft.request) : null;
   return {
     changeId: changeIdFor(draft),
     projectId: draft.projectId,
@@ -20,6 +21,27 @@ export function handoffChange(draft: DraftFile): HandoffChange {
     expectedRevision: draft.base.revision,
     ...(rationale ? { rationale } : {}),
     operations: draft.steps.map((s) => s.operation),
+    ...(implementation ? { implementation } : {}),
+  };
+}
+
+/**
+ * The implementation request as the engine reads it, or null when nothing was filled in. Blank
+ * lines are dropped; a request that is still incomplete (criteria without a behavior, say) is kept
+ * as it is, so the engine's dry run names what is missing instead of the browser hiding it.
+ */
+function requestOf(r: RequestDraft): ImplementationRequestView | null {
+  const clean = (xs: string[]) => xs.map((x) => x.trim()).filter(Boolean);
+  const behavior = r.behavior.trim();
+  const acceptanceCriteria = clean(r.acceptanceCriteria);
+  const suggestedTests = clean(r.suggestedTests);
+  const scope = clean(r.scope);
+  if (!behavior && !acceptanceCriteria.length && !suggestedTests.length && !scope.length) return null;
+  return {
+    behavior,
+    acceptanceCriteria,
+    ...(suggestedTests.length ? { suggestedTests } : {}),
+    ...(scope.length ? { scope } : {}),
   };
 }
 

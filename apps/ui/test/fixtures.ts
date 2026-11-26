@@ -179,7 +179,13 @@ export function setup() {
   return { repo, key, mainSha: git(repo, "rev-parse", "main") };
 }
 
-export function submit(repo: string, changeId: string, operations: unknown[], expectedRevision?: string) {
+export function submit(
+  repo: string,
+  changeId: string,
+  operations: unknown[],
+  expectedRevision?: string,
+  extra: Record<string, unknown> = {},
+) {
   const file = join(tempDir("vcv-ui-change-"), `${changeId}.json`);
   const rev = expectedRevision ?? projectStatus(repo).model!.revision;
   writeFileSync(
@@ -190,6 +196,7 @@ export function submit(repo: string, changeId: string, operations: unknown[], ex
       expectedRevision: rev,
       rationale: `test ${changeId}`,
       operations,
+      ...extra,
     }),
   );
   return vcv(agentEnv(), "proposal", "submit", repo, file, "--json");

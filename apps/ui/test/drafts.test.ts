@@ -155,6 +155,78 @@ test("(e) the export is a strict ProposedModelChange the existing CLI previews; 
   assert.deepEqual(tree(repo), before, "the CLI preview writes nothing either");
 });
 
+test("an implementation request is stored with the draft and travels in the export, digest-covered", async () => {
+  const repo = courseDesk();
+  const o = await open(repo);
+  let d = await multiModule(o);
+  assert.deepEqual(d.request, { behavior: "", acceptanceCriteria: [], suggestedTests: [], scope: [] });
+  // An empty request sends none: the export keeps its earlier shape.
+  let e = (await o.call<DraftExport>(`/api/drafts/${d.draftId}/export`)).body;
+  assert.equal("implementation" in e.change, false);
+
+  const request = {
+    behavior: "  Enrollment is called Enrollments everywhere.  ",
+    acceptanceCriteria: ["The API path reads /enrollments", " ", "Old links redirect"],
+    suggestedTests: [],
+    scope: ["src/enrollment/**"],
+  };
+  const r = await o.call<DraftView>(`/api/drafts/${d.draftId}/request`, { version: d.version, request });
+  assert.equal(r.status, 200);
+  d = r.body;
+  assert.deepEqual(d.request, request, "stored as typed; trimming happens in the handoff");
+  e = (await o.call<DraftExport>(`/api/drafts/${d.draftId}/export`)).body;
+  assert.deepEqual(e.change.implementation, {
+    behavior: "Enrollment is called Enrollments everywhere.",
+    acceptanceCriteria: ["The API path reads /enrollments", "Old links redirect"],
+    scope: ["src/enrollment/**"],
+  });
+  assert.equal(proposedChangeSchema.safeParse(e.change).success, true);
+  const p = (await o.call<DraftPreview>(`/api/drafts/${d.draftId}/preview`, {})).body;
+  assert.deepEqual(p.validation.errors, []);
+
+  // Survives a host restart.
+  const again = await open(repo, o.stateDir);
+  const list = (await again.call<DraftList>("/api/drafts")).body;
+  assert.deepEqual(list.drafts.find((x) => x.draftId === d.draftId)?.request, request);
+});
+
+test("an incomplete implementation request is exported as is and reported by the engine dry run", async () => {
+  const o = await open(courseDesk());
+  let d = await multiModule(o);
+  const request = { behavior: "", acceptanceCriteria: ["Old links redirect"], suggestedTests: [], scope: [] };
+  d = (await o.call<DraftView>(`/api/drafts/${d.draftId}/request`, { version: d.version, request })).body;
+  const p = (await o.call<DraftPreview>(`/api/drafts/${d.draftId}/preview`, {})).body;
+  assert.equal(p.validation.appliesToCurrent, false);
+  const err = p.validation.errors.find((x) => x.path?.startsWith("implementation"));
+  assert.equal(err?.code, "SCHEMA");
+  assert.match(err?.hint ?? "", /implementation request is incomplete/);
+});
+
+test("a malformed implementation request is refused and nothing is written", async () => {
+  const o = await open(courseDesk());
+  const d = await o.create();
+  const bad = [
+    undefined,
+    { behavior: "x", acceptanceCriteria: [], suggestedTests: [] },
+    { behavior: "x", acceptanceCriteria: [1], suggestedTests: [], scope: [] },
+    { behavior: "x".repeat(DRAFT_LIMITS.behavior + 1), acceptanceCriteria: [], suggestedTests: [], scope: [] },
+    { behavior: "x", acceptanceCriteria: [], suggestedTests: [], scope: [], extra: true },
+    {
+      behavior: "x",
+      acceptanceCriteria: Array(DRAFT_LIMITS.acceptanceCriteria + 1).fill("a"),
+      suggestedTests: [],
+      scope: [],
+    },
+  ];
+  for (const request of bad) {
+    const r = await o.call<DraftView>(`/api/drafts/${d.draftId}/request`, { version: d.version, request });
+    assert.equal(r.status, 400, JSON.stringify(request)?.slice(0, 80));
+    assert.equal(r.body.error?.code, "INVALID_REQUEST");
+  }
+  const now = (await o.call<DraftList>("/api/drafts")).body.drafts.find((x) => x.draftId === d.draftId);
+  assert.equal(now?.version, d.version);
+});
+
 test("an invalid operation is kept, reported by the engine and exported only as needing repair", async () => {
   const o = await open(courseDesk());
   let d = await o.create();
