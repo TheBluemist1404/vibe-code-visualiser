@@ -1,0 +1,17 @@
+{
+  "phase": "draft",
+  "checkout": "<repo>",
+  "base": "0a8c77f2ec88ea6b74f9ebdadd62ec59c6bace71",
+  "keyIsolation": {
+    "user": "vcv-acc-workspace",
+    "uid": 30033,
+    "hostUids": "30033\t30033\t30033\t30033",
+    "openKey": "EACCES"
+  },
+  "dryRun": "Valid on rev-4-d704dd46aee2",
+  "steps": "setRuleStatement Only a confirmed decision is notified statementEach enrollment decision is recorded; a confirmed decision results in exactly one notification to the student, a rejected one in none.  Each enrollment decision is recorded. A confirmed decision results in exactly one enrollment-confirmed notification, and a rejection because the course is full (COURSE_FULL) in exactly one enrollment-rejected notification; a repeat request (ALREADY_ENROLLED) results in none.renameObject Only a confirmed decision is notified nameOnly a confirmed decision is notified  Confirmations and full-course rejections are notifiedreviseCriterion A rejected enrollment is not announced statementA request for a full course is recorded as rejected with COURSE_FULL, and the student receives no notification for it.  A request for a full course is recorded as rejected with COURSE_FULL, and the student receives exactly one enrollment-rejected notification for that enrollment.",
+  "draftPath": "<work>/ws/state/drafts/226e4272b7b0cd478f037726/d-20261124-164442-4829.json",
+  "draftVersion": 5,
+  "checkoutUnchanged": true,
+  "pageErrors": []
+}

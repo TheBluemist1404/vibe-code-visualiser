@@ -1,0 +1,2 @@
+ .vcv/changes/chg-full-course-notice.json | 70 ++++++++++++++++++++++++++++++++
+ 1 file changed, 70 insertions(+)

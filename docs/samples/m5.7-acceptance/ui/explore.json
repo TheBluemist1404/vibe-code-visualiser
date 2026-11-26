@@ -1,0 +1,27 @@
+{
+  "phase": "explore",
+  "checkout": "<repo>",
+  "base": "0a8c77f2ec88ea6b74f9ebdadd62ec59c6bace71",
+  "keyIsolation": {
+    "user": "vcv-acc-workspace",
+    "uid": 30033,
+    "hostUids": "30033\t30033\t30033\t30033",
+    "openKey": "EACCES"
+  },
+  "revision": "rev-4-d704dd46aee2",
+  "branch": "test-base",
+  "edges": [
+    "dependsOn:mod-enrollment->mod-notifications",
+    "dependsOn:mod-web->mod-enrollment",
+    "dependsOn:mod-web->mod-notifications"
+  ],
+  "returnTrip": {
+    "before": "translate(396px, 97px) scale(0.993921)",
+    "after": "translate(396px, 84.079px) scale(0.993921)",
+    "selected": "mod-enrollment",
+    "zoomKept": true
+  },
+  "webPinnedAt": "translate(69px, 27px)",
+  "checkoutUnchanged": true,
+  "pageErrors": []
+}

@@ -1,0 +1,62 @@
+{
+  "changeId": "chg-full-course-notice",
+  "projectId": "prj-course-desk",
+  "expectedRevision": "rev-4-d704dd46aee2",
+  "rationale": "Students turned away from a full course should hear about it (they may pick another course); a repeat request stays quiet because the student already holds the seat. Integrated by agent:coder from the owner's UI handoff and its own draft; labels aligned so no name or description still says a full-course rejection is not announced.",
+  "operations": [
+    {
+      "type": "setRuleStatement",
+      "ruleId": "rul-announce-every-decision",
+      "statement": "Each enrollment decision is recorded. A confirmed decision results in exactly one enrollment-confirmed notification, and a rejection because the course is full (COURSE_FULL) in exactly one enrollment-rejected notification; a repeat request (ALREADY_ENROLLED) results in none."
+    },
+    {
+      "type": "renameObject",
+      "objectId": "rul-announce-every-decision",
+      "name": "Confirmations and full-course rejections are notified"
+    },
+    {
+      "type": "reviseCriterion",
+      "criterionId": "crt-rejection-notified",
+      "statement": "A request for a full course is recorded as rejected with COURSE_FULL, and the student receives exactly one enrollment-rejected notification for that enrollment."
+    },
+    {
+      "type": "renameObject",
+      "objectId": "crt-rejection-notified",
+      "name": "A full-course rejection is announced"
+    },
+    {
+      "type": "reviseCriterion",
+      "criterionId": "crt-repeat-rejected",
+      "statement": "A student already enrolled in a course is rejected with ALREADY_ENROLLED, no second seat is taken, and the student receives no notification for the repeat request."
+    },
+    {
+      "type": "setDescription",
+      "objectId": "dat-notification",
+      "description": "notification.types.ts, in-memory outbox; ids ntf-N. kind is enrollment-confirmed (a confirmed enrollment) or enrollment-rejected (a rejection because the course is full). enrollmentId points at an Enrollment in another module, so it is typed id rather than reference."
+    },
+    {
+      "type": "setDescription",
+      "objectId": "prj-course-desk",
+      "description": "Draft bootstrapped from the repository at commit adb423c; not reviewed. Students enroll in courses; every enrollment decision is recorded, and a confirmation or a rejection because the course is full is announced as a notification. NestJS API (server/, in-memory storage) plus a React page (web/). Based on README.md and the sources."
+    }
+  ],
+  "implementation": {
+    "behavior": "enroll() keeps recording every decision. A confirmed enrollment still sends one enrollment-confirmed notification. A rejection because the course is full now also sends exactly one enrollment-rejected notification to that student, with the message '<course> is full; your enrollment was not accepted.'. A repeat request (ALREADY_ENROLLED) sends none. The HTTP API and the web page are unchanged; the page already lists whatever notifications the API returns.",
+    "acceptanceCriteria": [
+      "A COURSE_FULL rejection produces exactly one enrollment-rejected notification for that enrollment",
+      "A confirmed enrollment still produces exactly one enrollment-confirmed notification",
+      "An ALREADY_ENROLLED rejection produces no notification and takes no seat",
+      "GET /api/notifications returns the rejected student's enrollment-rejected entry"
+    ],
+    "suggestedTests": [
+      "server/src/enrollment/enrollment.service.spec.ts: full-course and repeat-request cases",
+      "server/test/app.e2e-spec.ts: the confirm-then-full flow over HTTP"
+    ],
+    "scope": [
+      "server/src/enrollment/**",
+      "server/test/**",
+      "README.md",
+      "scripts/smoke.mjs"
+    ]
+  }
+}

@@ -1,0 +1,2 @@
+✗ INPUT: vcv review approve takes no --as/--perm and refuses to run under VCV_HOST_PRINCIPAL/VCV_HOST_PERMISSIONS (an agent host); the reviewer's identity comes from --key and the trust list
+exit 2

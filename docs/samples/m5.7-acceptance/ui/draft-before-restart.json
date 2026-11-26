@@ -1,0 +1,60 @@
+{
+  "format": "vcv-ui-draft-1",
+  "draftId": "d-20261124-164442-4829",
+  "version": 5,
+  "checkoutRoot": "<repo>",
+  "projectId": "prj-course-desk",
+  "base": {
+    "revision": "rev-4-d704dd46aee2",
+    "modelKey": "rev-4-d704dd46aee2@360e1e8e8344e030c783f0ad6ea25bd3d472092f2fa7873b3934d1d8cb639cda",
+    "branch": "test-base",
+    "commit": "0a8c77f2ec88ea6b74f9ebdadd62ec59c6bace71"
+  },
+  "steps": [
+    {
+      "operation": {
+        "type": "setRuleStatement",
+        "ruleId": "rul-announce-every-decision",
+        "statement": "Each enrollment decision is recorded. A confirmed decision results in exactly one enrollment-confirmed notification, and a rejection because the course is full (COURSE_FULL) in exactly one enrollment-rejected notification; a repeat request (ALREADY_ENROLLED) results in none."
+      },
+      "objectId": "rul-announce-every-decision",
+      "objectName": "Only a confirmed decision is notified",
+      "objectKind": "rule",
+      "field": "statement",
+      "label": "Statement",
+      "before": "Each enrollment decision is recorded; a confirmed decision results in exactly one notification to the student, a rejected one in none.",
+      "after": "Each enrollment decision is recorded. A confirmed decision results in exactly one enrollment-confirmed notification, and a rejection because the course is full (COURSE_FULL) in exactly one enrollment-rejected notification; a repeat request (ALREADY_ENROLLED) results in none."
+    },
+    {
+      "operation": {
+        "type": "renameObject",
+        "objectId": "rul-announce-every-decision",
+        "name": "Confirmations and full-course rejections are notified"
+      },
+      "objectId": "rul-announce-every-decision",
+      "objectName": "Only a confirmed decision is notified",
+      "objectKind": "rule",
+      "field": "name",
+      "label": "Name",
+      "before": "Only a confirmed decision is notified",
+      "after": "Confirmations and full-course rejections are notified"
+    },
+    {
+      "operation": {
+        "type": "reviseCriterion",
+        "criterionId": "crt-rejection-notified",
+        "statement": "A request for a full course is recorded as rejected with COURSE_FULL, and the student receives exactly one enrollment-rejected notification for that enrollment."
+      },
+      "objectId": "crt-rejection-notified",
+      "objectName": "A rejected enrollment is not announced",
+      "objectKind": "criterion",
+      "field": "statement",
+      "label": "Statement",
+      "before": "A request for a full course is recorded as rejected with COURSE_FULL, and the student receives no notification for it.",
+      "after": "A request for a full course is recorded as rejected with COURSE_FULL, and the student receives exactly one enrollment-rejected notification for that enrollment."
+    }
+  ],
+  "rationale": "Students turned away from a full course should hear about it (they may pick another course); a repeat request stays quiet because the student already holds the seat.",
+  "createdAt": "2026-11-24T16:44:42.309Z",
+  "updatedAt": "2026-11-24T16:44:49.586Z"
+}

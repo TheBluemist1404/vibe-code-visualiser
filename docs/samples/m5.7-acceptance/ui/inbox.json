@@ -1,0 +1,22 @@
+{
+  "phase": "inbox",
+  "checkout": "<repo>",
+  "base": "0a8c77f2ec88ea6b74f9ebdadd62ec59c6bace71",
+  "keyIsolation": {
+    "user": "vcv-acc-workspace",
+    "uid": 30033,
+    "hostUids": "30033\t30033\t30033\t30033",
+    "openKey": "EACCES"
+  },
+  "digest": "ad613a3d7d4ad75319860d468020efae807892d23cffe5fd2ea925313e6ef12b",
+  "steps": [
+    "Submitted : yesRecorded in .vcv/changes/ by agent:coder (as written in the record).",
+    "Reviewer signature : not yetNot signed. Only a reviewer with a trusted key can sign, with the CLI below.",
+    "Integrity under protected base : not yetNot applied.",
+    "Model applied : not yet.vcv/HEAD is unchanged until a reviewer approves.",
+    "Implementation : unknownNot verified. Approving intent says nothing about code; see vcv reconcile and the pre-merge gate."
+  ],
+  "reviewerHandoff": "Approve in your own terminalApproval is signed with your reviewer key, which this page never sees. Run these yourself, outside any agent session. They are pinned to digest ad613a3d7d4a…1. Preview it yourself (same digest, same checks)vcv proposal preview <repo> chg-full-course-notice2. Approve as the reviewer, in your own terminalvcv review approve <repo> chg-full-course-notice --digest ad613a3d7d4ad75319860d468020efae807892d23cffe5fd2ea925313e6ef12b --key <your reviewer key file> --trust-commit <full commit ID of the protected base, from the hosting service>This window cannot approve. Approval needs your private reviewer key, which never enters this host, the browser or an agent's shell.The digest pins exactly the content above. If the proposal or the model changes before you sign, `vcv review approve` refuses (DIGEST_MISMATCH or STALE_REVISION) and nothing is applied.Copy the protected base's commit ID from the hosting service, not from this checkout: a local ref can be moved by anyone with a shell here.After you approve, this page refreshes on its own and shows the signed result; CI then checks it with `vcv integrity` against the protected branch.",
+  "checkoutUnchanged": true,
+  "pageErrors": []
+}

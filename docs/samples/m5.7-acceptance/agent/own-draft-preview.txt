@@ -1,0 +1,29 @@
+proposal agent-draft-notification-docs (not submitted: dry run)
+  digest:   1c5773065b52248b62c146b58b7f436005817003f2cb387e39e31acc9f2cab65
+  base:     rev-4-d704dd46aee2; this checkout is at rev-4-d704dd46aee2 (applies)
+  why:      The agent's own working draft, started before the owner's handoff: say in the model which decisions produce which notification kinds. Never submitted on its own.
+  states:   change unsubmitted; approval none; snapshot approved; implementation not-recorded
+operations:
+  1. change the description of dat-notification
+  2. change its statement of criterion crt-repeat-rejected
+model delta (against current rev-4-d704dd46aee2; 2 object(s)):
+  ~ criterion crt-repeat-rejected [mod-enrollment]
+      statement: A student already enrolled in a course is rejected with ALREADY_ENROLLED and no second seat is taken.
+        → A student already enrolled in a course is rejected with ALREADY_ENROLLED, no second seat is taken, and the student receives no notification for the repeat request.
+  ~ data dat-notification [mod-notifications]
+      description: notification.types.ts, in-memory outbox; ids ntf-N. kind is enrollment-confirmed|enrollment-rejected. enrollmentId points at an Enrollment in another module, so it is typed id rather than reference.
+        → notification.types.ts, in-memory outbox; ids ntf-N. kind is enrollment-confirmed (sent for a confirmed enrollment) or enrollment-rejected (declared, not sent at rev-4). enrollmentId points at an Enrollment in another module, so it is typed id rather than reference.
+impact (structural candidates only): CROSS-MODULE:
+  modules:   mod-enrollment (changed), mod-notifications (changed)
+  contracts: (none)
+  · module mod-enrollment: module mod-enrollment owns criterion crt-repeat-rejected
+  · module mod-notifications: module mod-notifications owns data dat-notification
+binding claims to revisit (2):
+  persist.dat-notification: dat-notification persists server/src/notifications/notification.types.ts#symbol:Notification (changed)
+  test.repeat.unit: crt-repeat-rejected tests server/src/enrollment/enrollment.service.spec.ts#test:EnrollmentService > rejects a repeat enrollment without taking a second seat (changed)
+not verified by anyone yet:
+  - The impact list is structural: it follows declared model references only. It is not a code, test or runtime impact analysis, and an empty list does not mean nothing else is affected.
+  - Whether the operations express the requested behavior is the proposer's interpretation; VCV checks types, references and invariants, not meaning.
+  - The current source code has not been compared with this proposal. Approval approves model intent; the implementation comes afterwards and is checked separately.
+  - The proposal states no implementation request (behavior, acceptance criteria, scope): the implementation handoff will have none to give the coding agent.
+  - The change reaches more than one module: check each module's contracts and binding claims, not only the module that was asked about.

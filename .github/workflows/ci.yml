@@ -88,3 +88,31 @@ jobs:
           name: ui-screenshots
           path: ${{ runner.temp }}/ui-shots
           if-no-files-found: ignore
+
+  # M5.7: the acceptance walkthrough on the real Course Desk repository (Issue #46): the explorer in a
+  # real browser, the agent in its own clone, a TEST-ONLY fixture reviewer and the gate at each step.
+  # The scripts run as root only to start each context as its own OS user: the workspace user (explorer,
+  # agent, gate) cannot open the fixture key, which only the reviewer user can.
+  acceptance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PLAYWRIGHT_BROWSERS_PATH: /tmp/pw-browsers # readable by the workspace user, unlike ~/.cache
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      # The two users must reach this checkout (read-only) and the work directory.
+      - run: chmod o+x "$HOME" "$HOME/work"
+      - run: sudo env PATH="$PATH" PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" examples/reference-app/acceptance/setup.sh /tmp/acceptance
+      - run: sudo env PATH="$PATH" PLAYWRIGHT_BROWSERS_PATH="$PLAYWRIGHT_BROWSERS_PATH" examples/reference-app/acceptance/run.sh /tmp/acceptance /tmp/acceptance-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: m5.7-acceptance
+          path: /tmp/acceptance-out
+          if-no-files-found: ignore

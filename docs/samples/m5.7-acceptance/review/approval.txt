@@ -1,0 +1,7 @@
+TEST-ONLY REHEARSAL: user:fixture-reviewer (OS user vcv-acc-reviewer) signs chg-full-course-notice. This is not the owner's approval.
+reviewer: user:fixture-reviewer (key 1378c849fcd50663, trusted per .vcv/reviewers.json at 0a8c77f2ec88ea6b74f9ebdadd62ec59c6bace71 (0a8c77f2ec88))
+  trust anchor: commit 0a8c77f2ec88 pinned by the caller: an immutability pin, not proof of origin; that it is the protected branch is caller-asserted and unverified
+  ! authorization not established by this command: the trust anchor is caller-asserted, and a shell in this checkout can supply its own. The authorization gate is `vcv integrity --base <protected base> --trust-ref <protected base> --require-attestation` run by the host (CI) on the hosting service's protected branch
+chg-full-course-notice: applied → rev-5-6a1f0d8df2df (proposed by agent:coder, approved by user:fixture-reviewer; record is applied)
+  attestation: .vcv/approvals/chg-full-course-notice.json (commit it with the change record and the new revision)
+approval commit: b9444716450503f2e9d5d6d92cb2d73cb59e4df6

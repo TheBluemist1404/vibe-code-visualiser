@@ -210,7 +210,8 @@ them holds its own copy of the model or its own rules.
 
 - **Guides for agents and people**: [bootstrapping a first model](docs/agent-bootstrap.md),
   [maintaining it after code changes](docs/agent-maintenance.md),
-  [the model-first golden path](docs/golden-path.md), [the MCP server](apps/mcp/README.md)
+  [the model-first golden path](docs/golden-path.md),
+  [the end-to-end acceptance walkthrough](docs/acceptance.md), [the MCP server](apps/mcp/README.md)
 - **How each part works**: [binding claims](docs/bindings.md) and
   [source evidence](docs/evidence.md) (where the code for a model object is) ·
   [proposals](docs/proposals.md) · [trusted approval and integrity](docs/approvals.md) ·

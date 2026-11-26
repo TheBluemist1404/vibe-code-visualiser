@@ -1,0 +1,4 @@
+# Git config for the M5.7 acceptance scripts (common.sh): the owner, agent and reviewer are
+# different OS users that fetch from each other's checkouts.
+[safe]
+	directory = *

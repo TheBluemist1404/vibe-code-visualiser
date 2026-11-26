@@ -1,0 +1,5 @@
+.vcv/implementations/chg-full-course-notice.json (digest 29fe31990f418d33a769ec8b5568582cc815293d1f5acedb980198df171c7f66): change chg-full-course-notice at rev-5-6a1f0d8df2df; not reconciled
+  observed now: 5 source file(s) changed, 0 out of scope; DIFFERENT from the recorded report
+  ! GAP: The web page was not changed: it already lists whatever notifications the API returns. Not checked in a browser.
+  ! GAP: No consumer of the old behaviour (no notification on a rejection) was searched for outside this repository.
+  ! CLAIMS_UNVERIFIED: tests, outcomes and acceptance are the agent's claims: VCV ran nothing and verified none of them

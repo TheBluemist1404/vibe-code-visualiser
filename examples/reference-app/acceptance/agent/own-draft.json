@@ -1,0 +1,18 @@
+{
+  "changeId": "agent-draft-notification-docs",
+  "projectId": "prj-course-desk",
+  "expectedRevision": "rev-4-d704dd46aee2",
+  "rationale": "The agent's own working draft, started before the owner's handoff: say in the model which decisions produce which notification kinds. Never submitted on its own.",
+  "operations": [
+    {
+      "type": "setDescription",
+      "objectId": "dat-notification",
+      "description": "notification.types.ts, in-memory outbox; ids ntf-N. kind is enrollment-confirmed (sent for a confirmed enrollment) or enrollment-rejected (declared, not sent at rev-4). enrollmentId points at an Enrollment in another module, so it is typed id rather than reference."
+    },
+    {
+      "type": "reviseCriterion",
+      "criterionId": "crt-repeat-rejected",
+      "statement": "A student already enrolled in a course is rejected with ALREADY_ENROLLED, no second seat is taken, and the student receives no notification for the repeat request."
+    }
+  ]
+}
