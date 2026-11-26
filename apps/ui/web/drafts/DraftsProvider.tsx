@@ -24,8 +24,9 @@ export type DraftsApi = {
   /** Stage one edit on the active draft, starting a draft when there is none. */
   stage(edit: StagedEdit): Promise<boolean>;
   unstage(key: string): Promise<void>;
-  setRationale(text: string): Promise<void>;
-  setRequest(request: DraftRequest): Promise<void>;
+  /** Save a draft's rationale. The draft is named by the caller, so a later switch cannot redirect it. */
+  setRationale(draftId: string, text: string): Promise<void>;
+  setRequest(draftId: string, request: DraftRequest): Promise<void>;
   /**
    * Wait for every rationale and request save started so far. Resolves to null when the draft's
    * texts are all stored, or to why one is not, so a handoff never goes out with an older text.
@@ -78,12 +79,18 @@ export function DraftsProvider({
   const [activeId, setActiveId] = useState<string | null>(null);
   const [notice, setNotice] = useState<Notice | null>(null);
   const seq = useRef(0);
-  // Text saves (rationale, request) run one after another on the newest stored version, so a
-  // second blur does not race the first. `saves` is the tail of that chain. `unsaved` holds, per
-  // field, why its last save was not stored; the field's next stored (or unchanged) save clears it.
+  // Text saves (rationale, request) run one after another, each on the newest stored version of
+  // the draft it was made in, so a second blur does not race the first. `saves` is the tail of
+  // that chain. `unsaved` holds, per draft and field, why its last save was not stored; the
+  // field's next stored (or unchanged) save clears it. `stored` is the newest known state of
+  // every draft, by ID, updated as soon as a host answer arrives (before React renders it).
   const saves = useRef<Promise<void>>(Promise.resolve());
   const unsaved = useRef(new Map<string, string>());
-  const latest = useRef<DraftView | null>(null);
+  const stored = useRef(new Map<string, DraftView>());
+  const know = useCallback((d: DraftView) => {
+    const had = stored.current.get(d.draftId);
+    if (!had || had.version <= d.version) stored.current.set(d.draftId, d);
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!projectId) return setList(null);
@@ -91,6 +98,8 @@ export function DraftsProvider({
     try {
       const next = await api.drafts.list();
       if (mine !== seq.current) return;
+      // A reload is the host's word: it replaces what is known, older versions included.
+      stored.current = new Map(next.drafts.map((d) => [d.draftId, d]));
       setList(next);
       setActiveId((id) => {
         const wanted = id ?? remember.get(projectId);
@@ -120,21 +129,33 @@ export function DraftsProvider({
   }, [projectId, activeId]);
 
   const active = list?.drafts.find((d) => d.draftId === activeId) ?? null;
-  latest.current = active;
 
-  /** Put one draft's new state into the list. */
-  const put = useCallback((d: DraftView) => {
-    if (latest.current?.draftId === d.draftId) latest.current = d;
-    setList((l) => (l ? { ...l, drafts: [d, ...l.drafts.filter((x) => x.draftId !== d.draftId)] } : l));
-    setActiveId(d.draftId);
-  }, []);
+  /** Put one draft's new state into the list; `select` also makes it this tab's draft. */
+  const put = useCallback(
+    (d: DraftView, select: boolean) => {
+      know(d);
+      setList((l) => {
+        if (!l) return l;
+        const now = l.drafts.find((x) => x.draftId === d.draftId);
+        // An older answer arriving late never replaces a newer state.
+        if (now && now.version > d.version) return l;
+        return { ...l, drafts: [d, ...l.drafts.filter((x) => x.draftId !== d.draftId)] };
+      });
+      if (select) setActiveId(d.draftId);
+    },
+    [know],
+  );
 
-  /** Run a change; on a version conflict, reload and say that the change was not applied. */
+  /**
+   * Run a change; on a version conflict, reload and say that the change was not applied.
+   * A text save does not select its draft (the user may have moved to another one meanwhile) and
+   * leaves clearing the message to the save queue.
+   */
   const attempt = useCallback(
-    async (run: () => Promise<DraftView>): Promise<string | null> => {
+    async (run: () => Promise<DraftView>, select = true): Promise<string | null> => {
       try {
-        put(await run());
-        setNotice(null);
+        put(await run(), select);
+        if (select) setNotice(null);
         return null;
       } catch (e) {
         if (e instanceof HostError && e.code === "DRAFT_CONFLICT") {
@@ -153,17 +174,24 @@ export function DraftsProvider({
   );
   const change = useCallback(async (run: () => Promise<DraftView>) => (await attempt(run)) === null, [attempt]);
 
-  /** Queue a text save. `run` gets the newest stored draft and returns null when nothing changed. */
+  /**
+   * Queue a text save for one named draft. `run` gets that draft's newest stored state and
+   * returns null when nothing changed.
+   */
   const save = useCallback(
-    (field: string, run: (d: DraftView) => Promise<DraftView> | null): Promise<void> => {
+    (draftId: string, field: string, run: (d: DraftView) => Promise<DraftView> | null): Promise<void> => {
       const link = saves.current.then(async () => {
-        const d = latest.current;
-        if (!d) return;
+        const d = stored.current.get(draftId);
+        if (!d) return; // discarded meanwhile
         const call = run(d);
-        const failed = call ? await attempt(() => call) : null;
-        const key = `${d.draftId}:${field}`;
+        const failed = call ? await attempt(() => call, false) : null;
+        const key = `${draftId}:${field}`;
         if (failed) unsaved.current.set(key, failed);
-        else unsaved.current.delete(key);
+        else {
+          unsaved.current.delete(key);
+          // Clear the message only once no text save is left unstored.
+          if (unsaved.current.size === 0) setNotice(null);
+        }
       });
       saves.current = link;
       return link;
@@ -197,10 +225,12 @@ export function DraftsProvider({
       unstage: async (key) => {
         if (active) await change(() => api.drafts.unstage(active.draftId, active.version, key));
       },
-      setRationale: (text) =>
-        save("rationale", (d) => (text === d.rationale ? null : api.drafts.rationale(d.draftId, d.version, text))),
-      setRequest: (request) =>
-        save("request", (d) =>
+      setRationale: (draftId, text) =>
+        save(draftId, "rationale", (d) =>
+          text === d.rationale ? null : api.drafts.rationale(d.draftId, d.version, text),
+        ),
+      setRequest: (draftId, request) =>
+        save(draftId, "request", (d) =>
           JSON.stringify(request) === JSON.stringify(d.request)
             ? null
             : api.drafts.request(d.draftId, d.version, request),

@@ -11,6 +11,7 @@ import { previewProposal, projectStatus } from "@vcv/repo";
 import { chromium } from "playwright";
 import type { Browser, Page } from "playwright";
 import { DraftFileStore } from "../src/drafts/store.ts";
+import type { DraftView } from "../src/types.ts";
 import { LayoutFileStore } from "../src/layout-store.ts";
 import { startHost } from "../src/server.ts";
 import type { Host } from "../src/server.ts";
@@ -264,6 +265,141 @@ test("11b: handing off right after editing waits for the save; a save that fails
     "Old links redirect",
   ]);
   assert.deepEqual(tree(repo), before);
+  assert.deepEqual(errors, []);
+});
+
+/** Hold each matching request until released, in arrival order. */
+async function holdRoute(page: Page, pattern: string) {
+  const waiting: (() => void)[] = [];
+  const arrived: Promise<void>[] = [];
+  let signal!: () => void;
+  const next = () => {
+    arrived.push(new Promise<void>((r) => (signal = r)));
+  };
+  next();
+  await page.route(pattern, async (route) => {
+    const go = new Promise<void>((r) => waiting.push(r));
+    signal();
+    next();
+    await go;
+    await route.fallback(); // to an earlier handler (a refusal), else the host
+  });
+  return {
+    /** Resolves once the n-th (0-based) call has arrived and is held. */
+    arrival: (n: number) => arrived[n],
+    release: () => waiting.shift()?.(),
+  };
+}
+
+const storedDrafts = (page: Page) =>
+  page.evaluate(async () => (await (await fetch("/api/drafts")).json()) as { drafts: DraftView[] });
+
+test("11c: queued saves stay with the draft they were made in; older answers keep newer edits", async () => {
+  const repo = courseDesk();
+  const { page, errors } = await tab(await host(repo, tempDir("vcv-ui-state-")));
+  await selectModule(page, "Enrollment");
+  await stage(page, "Name", "Enrollments", 1);
+  const a = (await storedDrafts(page)).drafts[0]?.draftId ?? "";
+  const behaviorBox = () =>
+    tray(page)
+      .getByTestId("request")
+      .getByRole("textbox", { name: /^Behavior/ });
+  const openRequest = async () => {
+    const request = tray(page).getByTestId("request");
+    if ((await request.getAttribute("open")) === null) await request.locator("summary").click();
+  };
+
+  // Draft B, with a request of its own.
+  await page.getByTestId("new-draft").click();
+  await page.waitForFunction(async (a) => {
+    const l = await (await fetch("/api/drafts")).json();
+    return l.drafts.length === 2 && l.drafts.some((d: { draftId: string }) => d.draftId !== a);
+  }, a);
+  const b = (await storedDrafts(page)).drafts.find((d) => d.draftId !== a)?.draftId ?? "";
+  await page.getByTestId("draft-select").selectOption(b);
+  await openRequest();
+  let saved = page.waitForResponse("**/api/drafts/*/request");
+  await behaviorBox().fill("B behavior");
+  await behaviorBox().blur();
+  await saved;
+
+  // Back on A: hold its rationale save, queue a request save behind it, then move to B and let
+  // the held save fail.
+  await page.getByTestId("draft-select").selectOption(a);
+  await tray(page).getByTestId("steps").waitFor();
+  await page.route("**/api/drafts/*/rationale", (route) =>
+    route.fulfill({
+      status: 500,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "INTERNAL", message: "disk full" } }),
+    }),
+  );
+  const rationaleHeld = await holdRoute(page, "**/api/drafts/*/rationale");
+  const why = tray(page).getByRole("textbox", { name: /Why/ });
+  await why.fill("A why");
+  await why.blur();
+  await rationaleHeld.arrival(0);
+  await openRequest();
+  await behaviorBox().fill("A behavior");
+  await behaviorBox().blur();
+  await page.getByTestId("draft-select").selectOption(b);
+  saved = page.waitForResponse("**/api/drafts/*/request");
+  rationaleHeld.release();
+  await saved;
+  await page.unroute("**/api/drafts/*/rationale");
+
+  const after = (await storedDrafts(page)).drafts;
+  const byId = new Map(after.map((d) => [d.draftId, d]));
+  assert.equal(byId.get(a)?.request.behavior, "A behavior", "A's queued request saved to A");
+  assert.equal(byId.get(a)?.rationale, "", "A's failed rationale not stored");
+  assert.equal(byId.get(b)?.request.behavior, "B behavior", "B untouched");
+  assert.equal(await page.getByTestId("draft-select").inputValue(), b, "a save does not change the selection");
+  assert.equal(await behaviorBox().inputValue(), "B behavior");
+  await tray(page)
+    .getByTestId("draft-notice")
+    .getByText(/disk full/)
+    .waitFor();
+  await tray(page).getByTestId("draft-notice").getByRole("button", { name: "Dismiss" }).click();
+
+  // Rapid edits across fields with delayed saves: an older answer never resets newer text.
+  await page.getByTestId("draft-select").selectOption(a);
+  await tray(page).getByTestId("steps").waitFor();
+  await openRequest();
+  const field = (label: string) =>
+    tray(page)
+      .getByTestId("request")
+      .getByRole("textbox", { name: new RegExp(`^${label}`) });
+  const held = await holdRoute(page, "**/api/drafts/*/request");
+  await field("Behavior").fill("A behavior, revised");
+  await field("Behavior").blur();
+  await held.arrival(0);
+  await field("Acceptance criteria").fill("Criterion one");
+  await field("Acceptance criteria").blur();
+  const first = page.waitForResponse("**/api/drafts/*/request");
+  held.release();
+  await first;
+  await held.arrival(1); // the criteria save, sent after the first answer
+  await page.waitForTimeout(200);
+  assert.equal(await field("Acceptance criteria").inputValue(), "Criterion one", "kept through the older answer");
+  await field("Scope").fill("src/enrollment/**");
+  await field("Scope").blur();
+  const second = page.waitForResponse("**/api/drafts/*/request");
+  held.release();
+  await second;
+  await held.arrival(2);
+  const third = page.waitForResponse("**/api/drafts/*/request");
+  held.release();
+  await third;
+  await page.unroute("**/api/drafts/*/request");
+  const final = (await storedDrafts(page)).drafts.find((d) => d.draftId === a);
+  assert.deepEqual(final?.request, {
+    behavior: "A behavior, revised",
+    acceptanceCriteria: ["Criterion one"],
+    suggestedTests: [],
+    scope: ["src/enrollment/**"],
+  });
+  assert.equal(await field("Acceptance criteria").inputValue(), "Criterion one");
+  assert.equal(await field("Scope").inputValue(), "src/enrollment/**");
   assert.deepEqual(errors, []);
 });
 

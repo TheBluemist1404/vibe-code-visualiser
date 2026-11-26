@@ -189,8 +189,8 @@ export function DraftPanel({ graph }: { graph: GraphView }) {
                     ))}
                   </ol>
                 )}
-                <Rationale draft={active} onSave={d.setRationale} />
-                <Request draft={active} onSave={d.setRequest} />
+                <Rationale key={`r-${active.draftId}`} draft={active} onSave={d.setRationale} />
+                <Request key={`q-${active.draftId}`} draft={active} onSave={d.setRequest} />
               </div>
               <div className="tray-col">
                 <h3 className="tray-sub">Engine check</h3>
@@ -231,16 +231,44 @@ function StaleNotice({ draft }: { draft: DraftView }) {
   );
 }
 
-function Rationale({ draft, onSave }: { draft: DraftView; onSave(text: string): Promise<void> }) {
-  const [text, setText] = useState(draft.rationale);
-  const shown = useRef(draft.rationale);
-  // Take the stored text when the draft changes underneath (another tab, another draft).
+/**
+ * Form state for a stored value that is saved on blur. The stored value replaces the form only
+ * when it did not come from this form: an acknowledgment of an older save from here (a newer one
+ * still pending) keeps the newer local edits; a change from elsewhere (another tab, a reload
+ * after a conflict) is taken. Mounted per draft, so one draft's text never reaches another.
+ */
+function useSavedForm<S, F>(stored: S, keyOf: (s: S) => string, toForm: (s: S) => F) {
+  const key = keyOf(stored);
+  const [form, setForm] = useState(() => toForm(stored));
+  const shown = useRef(key); // what this form last sent or took
+  const sent = useRef<string[]>([]); // sent from here and not yet seen stored, oldest first
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `key` stands for `stored`
   useEffect(() => {
-    if (draft.rationale !== shown.current) {
-      shown.current = draft.rationale;
-      setText(draft.rationale);
+    const i = sent.current.indexOf(key);
+    if (i >= 0) {
+      sent.current = sent.current.slice(i + 1);
+      return;
     }
-  }, [draft.rationale]);
+    if (key === shown.current) return;
+    sent.current = [];
+    shown.current = key;
+    setForm(toForm(stored));
+  }, [key]);
+  /** Record a value about to be sent; false when it is what this form already sent or took. */
+  const submit = (value: S) => {
+    const k = keyOf(value);
+    if (k === shown.current) return false;
+    shown.current = k;
+    sent.current.push(k);
+    return true;
+  };
+  return { form, setForm, submit };
+}
+
+const same = <T,>(v: T) => v;
+
+function Rationale({ draft, onSave }: { draft: DraftView; onSave(draftId: string, text: string): Promise<void> }) {
+  const { form: text, setForm: setText, submit } = useSavedForm(draft.rationale, same, same);
   return (
     <>
       <label className="tray-sub" htmlFor="rationale">
@@ -256,8 +284,8 @@ function Rationale({ draft, onSave }: { draft: DraftView; onSave(text: string): 
         placeholder="What should the agent and the reviewer know?"
         onChange={(e) => setText(e.target.value)}
         onBlur={() => {
-          shown.current = text;
-          onSave(text);
+          submit(text);
+          onSave(draft.draftId, text);
         }}
       />
     </>
@@ -296,16 +324,8 @@ const REQUEST_FIELDS: { key: keyof RequestText; label: string; hint: string; row
  * handoff as the proposal's implementation request, so the reviewer approves it together with
  * the model edits and the digest covers it. Optional: a wording change may need none.
  */
-function Request({ draft, onSave }: { draft: DraftView; onSave(r: DraftRequest): Promise<void> }) {
-  const [text, setText] = useState(() => asText(draft.request));
-  const shown = useRef(JSON.stringify(draft.request));
-  useEffect(() => {
-    const stored = JSON.stringify(draft.request);
-    if (stored !== shown.current) {
-      shown.current = stored;
-      setText(asText(draft.request));
-    }
-  }, [draft.request]);
+function Request({ draft, onSave }: { draft: DraftView; onSave(draftId: string, r: DraftRequest): Promise<void> }) {
+  const { form: text, setForm: setText, submit } = useSavedForm(draft.request, JSON.stringify, asText);
   const filled = Object.values(text).some((v) => v.trim());
   return (
     <details className="request" open={filled} data-testid="request">
@@ -326,8 +346,8 @@ function Request({ draft, onSave }: { draft: DraftView; onSave(r: DraftRequest):
             onChange={(e) => setText((t) => ({ ...t, [f.key]: e.target.value }))}
             onBlur={() => {
               const next = asRequest(text);
-              shown.current = JSON.stringify(next);
-              onSave(next);
+              submit(next);
+              onSave(draft.draftId, next);
             }}
           />
         </div>
