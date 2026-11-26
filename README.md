@@ -31,9 +31,14 @@ approved intent to match the code, or the other way round.
 
 [Open the editable Excalidraw source](docs/assets/vcv-architecture.excalidraw) · [Architecture decision records](docs/adr/)
 
-The diagram shows the implemented M0–M4 engine, agent interfaces, repository-backed model,
-and model-first development loop. The M5 visual canvas is **planned**, not implemented.
-The IR is approved intent; source code and verification evidence remain distinct.
+The diagram shows the VCV-enabled development system: implemented M0–M4 operations, the
+current M5 local explorer (including drafts, proposal inbox and evidence views), the Git-backed
+model, and the independently trusted pre-merge gate. Dashed orange interactions are proposed
+external automation, not built-in VCV features. The model approver is a separate authorized
+human; implementation review may be performed by a human or agent. Local reconciliation is
+advisory; the configured required CI check supplies the authoritative gate. VCV validates
+structure, lineage, bindings and evidence, not arbitrary code semantics. The IR is approved
+intent; source code and verification evidence remain distinct.
 
 ## Status
 
